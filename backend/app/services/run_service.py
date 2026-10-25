@@ -43,6 +43,7 @@ class RunService:
         workflow_factory: Callable[[Any], Any] | None = None,
         artifact_root=ARTIFACT_ROOT,
         skills_root=settings.SKILLS_ROOT,
+        queue=None,
     ):
         self.database = database
         self.runs = RunRepository(database)
@@ -52,6 +53,9 @@ class RunService:
         self.artifact_store = ArtifactStore(artifact_root)
         self._external_factory = workflow_factory
         self._router = None if workflow_factory else create_default_router()
+        # 队列模式（外部 worker）：schedule 只投递唤醒信号，执行在 worker 进程；
+        # None 时保持旧的进程内 asyncio 调度（单机 MVP 与测试路径）
+        self.queue = queue
         self._tasks: dict[str, asyncio.Task] = {}
         memory_repository = MemoryRepository(database)
         memory_service = MemoryService(
@@ -127,6 +131,10 @@ class RunService:
         )
 
     def schedule(self, run_id: str) -> asyncio.Task:
+        if self.queue is not None:
+            # 队列模式：仅投递唤醒信号；执行由 worker 进程消费（runs 表是事实源）
+            task = asyncio.create_task(self.queue.enqueue(run_id), name=f"enqueue:{run_id}")
+            return task
         existing = self._tasks.get(run_id)
         if existing is not None and not existing.done():
             return existing
@@ -135,6 +143,10 @@ class RunService:
         self._tasks[run_id] = task
         task.add_done_callback(lambda _task: self._tasks.pop(run_id, None))
         return task
+
+    async def execute_now(self, run_id: str) -> Any:
+        """worker 进程入口：直接执行一个 Run（与 API 进程内调度共用同一执行体）。"""
+        return await self._execute(run_id)
 
     async def _execute(self, run_id: str):
         agents: list[Any] = []

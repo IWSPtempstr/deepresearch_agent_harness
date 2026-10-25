@@ -33,7 +33,9 @@ services:
       APP_HOST: "0.0.0.0"
       APP_PORT: "8000"
       FASTAPI_WORKERS: "1"
-      APP_DATABASE_URL: "sqlite+aiosqlite:////app/data/app.db"
+      # P0 平台模式：PG 主存 + Redis 队列；Run 执行由 worker 服务消费
+      APP_DATABASE_URL: "postgresql+asyncpg://dra:${POSTGRES_PASSWORD}@postgres:5432/dra"
+      REDIS_URL: "redis://redis:6379/0"
       ARTIFACT_ROOT: "/app/data/artifacts"
       SKILLS_ROOT: "/app/skills"
       NEO4J_URI: "bolt://neo4j:7687"
@@ -47,6 +49,10 @@ services:
       - ./cache:/app/cache
     depends_on:
       neo4j:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5)"]
@@ -86,6 +92,34 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+
+  worker:
+    # P0-2：Run 执行进程；scale 方式扩容：docker compose up --scale worker=2
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_DATABASE_URL: "postgresql+asyncpg://dra:${POSTGRES_PASSWORD}@postgres:5432/dra"
+      REDIS_URL: "redis://redis:6379/0"
+      ARTIFACT_ROOT: "/app/data/artifacts"
+      SKILLS_ROOT: "/app/skills"
+      NEO4J_URI: "bolt://neo4j:7687"
+    # schema 迁移带重试：与 api 并发启动时 alembic 可能撞车，重试后为幂等空操作
+    command: ["sh", "-c", "until alembic upgrade head; do echo 'waiting for schema'; sleep 2; done && python -m deepresearch_agent.worker"]
+    volumes:
+      - ./data:/app/data
+      - ./skills:/app/skills
+      - ./files:/app/files
+      - ./cache:/app/cache
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   frontend:
     build:

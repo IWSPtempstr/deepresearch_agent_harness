@@ -87,6 +87,10 @@ FRONTEND_ORIGINS = tuple(
 APP_DATABASE_URL = os.getenv(
     "APP_DATABASE_URL", "sqlite+aiosqlite:///./data/app.db"
 ).strip()
+# 平台模式（P0-2）：非空时 Run 执行经 Redis 队列交给独立 worker 进程
+REDIS_URL = (os.getenv("REDIS_URL") or "").strip()
+# worker 进程同时在跑的 Run 数上限（API 进程内模式不设此限）
+WORKER_CONCURRENCY = _get_env_int("WORKER_CONCURRENCY", 4) or 4
 ARTIFACT_ROOT = Path(os.getenv("ARTIFACT_ROOT", PROJECT_ROOT / "data" / "artifacts")).expanduser()
 SKILLS_ROOT = Path(os.getenv("SKILLS_ROOT", PROJECT_ROOT / "skills")).expanduser()
 AUTO_RESUME_RUNS = _get_env_bool("AUTO_RESUME_RUNS", True)

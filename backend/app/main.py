@@ -16,6 +16,7 @@ from backend.app.services import ChatService, EventStreamService, RunService
 from deepresearch_agent.config import settings
 from deepresearch_agent.harness.errors import AppError, ErrorCode
 from deepresearch_agent.persistence import Database
+from deepresearch_agent.queueing import create_run_queue
 from deepresearch_agent.persistence.repositories import MessageRepository, RunRepository, SessionRepository
 from deepresearch_agent.memory import MemoryService
 from deepresearch_agent.persistence.repositories import AuditRepository, MemoryRepository
@@ -35,10 +36,16 @@ def create_app(
     artifact_root: str | Path | None = None, skills_root: str | Path | None = None,
     auto_resume: bool | None = None,
 ) -> FastAPI:
-    if not settings.LOCAL_MVP_SINGLE_WORKER:
-        raise RuntimeError("本地 MVP 必须设置 FASTAPI_WORKERS=1")
+    if not settings.LOCAL_MVP_SINGLE_WORKER and not settings.REDIS_URL:
+        raise RuntimeError("单机模式必须设置 FASTAPI_WORKERS=1；多实例部署请配置 REDIS_URL 切换平台模式（Run 执行由独立 worker 消费）")
     database = Database(database_url or settings.APP_DATABASE_URL)
-    run_service = RunService(database, workflow_factory=workflow_factory, artifact_root=artifact_root or settings.ARTIFACT_ROOT, skills_root=skills_root or settings.SKILLS_ROOT)
+    run_service = RunService(
+        database, workflow_factory=workflow_factory,
+        artifact_root=artifact_root or settings.ARTIFACT_ROOT,
+        skills_root=skills_root or settings.SKILLS_ROOT,
+        # 平台模式：API 只投递唤醒信号，执行在 worker 进程（P0-2）
+        queue=create_run_queue(settings.REDIS_URL) if settings.REDIS_URL else None,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

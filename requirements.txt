@@ -69,3 +69,4 @@ textract==1.6.3
 # triton==3.1.0
 # regex==2024.11.6
 # tenacity==9.0.0
+redis>=5,<6  # P0-2/P0-4：Run 队列（Redis Streams）与 SSE 跨实例扇出
