@@ -8,7 +8,12 @@ from deepresearch_agent.config.settings import APP_DATABASE_URL
 from deepresearch_agent.persistence.models import Base
 
 config = context.config
-migration_url = APP_DATABASE_URL.replace("+aiosqlite", "").replace("+asyncpg", "")
+# Alembic 走同步引擎：SQLite 去驱动后缀，PG 显式切 psycopg2（postgresql:// 裸串
+# 在 SQLAlchemy 2.1+ 会默认找 psycopg3，与锁定的 psycopg2-binary 不一致）
+if APP_DATABASE_URL.startswith("postgresql+asyncpg://"):
+    migration_url = APP_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+else:
+    migration_url = APP_DATABASE_URL.replace("+aiosqlite", "")
 if migration_url.startswith("sqlite:///") and not migration_url.endswith(":memory:"):
     database_path = Path(migration_url[len("sqlite:///"):])
     if not database_path.is_absolute():

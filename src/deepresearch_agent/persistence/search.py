@@ -60,17 +60,28 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+# 与 FTS_STATEMENTS 对应的 PostgreSQL 检索基础设施；迁移脚本与运行期共用同一份 SQL
+PG_TRGM_STATEMENTS = (
+    "CREATE EXTENSION IF NOT EXISTS pg_trgm",
+    "CREATE INDEX IF NOT EXISTS ix_messages_content_trgm ON messages USING gin (content gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS ix_sessions_title_trgm ON sessions USING gin (title gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS ix_sessions_summary_trgm ON sessions USING gin (summary_json gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS ix_memories_content_trgm ON memories USING gin (content gin_trgm_ops)",
+)
+
+PG_TRGM_DROP_STATEMENTS = (
+    "DROP INDEX IF EXISTS ix_memories_content_trgm",
+    "DROP INDEX IF EXISTS ix_sessions_summary_trgm",
+    "DROP INDEX IF EXISTS ix_sessions_title_trgm",
+    "DROP INDEX IF EXISTS ix_messages_content_trgm",
+)
+
+
 class PostgresTrgmSearch(SearchBackend):
     """pg_trgm GIN 索引 + ILIKE 子串匹配，语义对齐 SQLite 的 trigram 行为。"""
 
     async def install(self, connection: Any) -> None:
-        await connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-        for statement in (
-            "CREATE INDEX IF NOT EXISTS ix_messages_content_trgm ON messages USING gin (content gin_trgm_ops)",
-            "CREATE INDEX IF NOT EXISTS ix_sessions_title_trgm ON sessions USING gin (title gin_trgm_ops)",
-            "CREATE INDEX IF NOT EXISTS ix_sessions_summary_trgm ON sessions USING gin (summary_json gin_trgm_ops)",
-            "CREATE INDEX IF NOT EXISTS ix_memories_content_trgm ON memories USING gin (content gin_trgm_ops)",
-        ):
+        for statement in PG_TRGM_STATEMENTS:
             await connection.execute(text(statement))
 
     async def search_message_ids(self, session: Any, query: str, *, session_id: Optional[str] = None, limit: int = 20) -> list[str]:

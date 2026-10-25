@@ -54,6 +54,39 @@ services:
       timeout: 8s
       retries: 10
 
+  postgres:
+    # 平台模式主存储；pgvector 镜像为后续缓存层向量迁移预留
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dra
+      POSTGRES_PASSWORD: \"${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}\"
+      POSTGRES_DB: dra
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dra -d dra"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    # P0-2/P0-3/P0-4 使用：Run 队列、SSE 扇出（本地单机模式可不依赖）
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
   frontend:
     build:
       context: ./frontend
@@ -71,3 +104,5 @@ volumes:
   neo4j_data:
   neo4j_logs:
   neo4j_backups:
+  postgres_data:
+  redis_data:
