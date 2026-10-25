@@ -36,10 +36,13 @@ def run_migrations_online() -> None:
     is_sqlite = config.get_main_option("sqlalchemy.url").startswith("sqlite")
     with connectable.connect() as connection:
         if is_sqlite:
-            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
             connection.exec_driver_sql("PRAGMA busy_timeout=5000")
             connection.exec_driver_sql("PRAGMA synchronous=NORMAL")
             connection.exec_driver_sql("PRAGMA journal_mode=WAL")
+            # SQLite batch 模式（重建表以改约束）要求 foreign_keys=OFF：PRAGMA 不能在
+            # 事务内切换，必须在迁移事务开始前设置。迁移自身的表结构变更按脚本
+            # 审查保证一致性，运行期外键强制由 database.py 的连接钩子负责。
+            connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
             # PRAGMA statements autobegin on SQLAlchemy 2. Commit before Alembic's
             # migration transaction so the version-row insert is not rolled back.
             connection.commit()
