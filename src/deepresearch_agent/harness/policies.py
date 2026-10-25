@@ -13,6 +13,7 @@ class SourcePolicy:
     ALLOWED_TOOLSETS = {
         SourceMode.GRAPHRAG: {"local_search", "global_search", "hybrid_search", "naive_search", "chain_exploration"},
         SourceMode.WEB: {"tavily_search", "web_search"},
+        SourceMode.SCHOLAR: {"scholar_search"},
     }
     WEB_ALLOWED_ARGUMENTS = {
         "query", "top_k", "search_depth", "include_domains", "exclude_domains",

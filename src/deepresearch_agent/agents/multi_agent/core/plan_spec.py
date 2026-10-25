@@ -81,7 +81,7 @@ class TaskNode(BaseModel):
     # 任务类型
     task_type: TaskTypeLiteral = Field(description="任务类型")
 
-    source_mode: Literal["graphrag", "web"] = Field(
+    source_mode: Literal["graphrag", "web", "scholar"] = Field(
         default="graphrag",
         description="任务冻结的信息源",
     )
@@ -315,7 +315,7 @@ class PlanSpec(BaseModel):
     # 版本号
     version: int = Field(default=1, description="计划版本号")
 
-    source_mode: Literal["graphrag", "web"] = Field(
+    source_mode: Literal["graphrag", "web", "scholar"] = Field(
         default="graphrag",
         description="Run 冻结的信息源",
     )
@@ -431,7 +431,7 @@ class PlanExecutionSignal(BaseModel):
     """
     plan_id: str = Field(description="计划唯一标识")
     version: int = Field(description="计划版本号")
-    source_mode: Literal["graphrag", "web"] = Field(default="graphrag", description="冻结的信息源")
+    source_mode: Literal["graphrag", "web", "scholar"] = Field(default="graphrag", description="冻结的信息源")
     execution_mode: Literal["sequential", "parallel", "adaptive"] = Field(description="建议执行模式")
     tasks: List[Dict[str, Any]] = Field(description="任务节点详细信息列表")
     execution_sequence: List[str] = Field(description="拓扑排序后的任务执行顺序")

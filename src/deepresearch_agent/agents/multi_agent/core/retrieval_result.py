@@ -22,6 +22,11 @@ RETRIEVAL_SOURCE_CHOICES: Tuple[str, ...] = (
     "hybrid",
     "custom",
     "tavily_search",
+    # P2-11 学术检索源
+    "scholar",
+    "scholar_search",
+    "openalex",
+    "arxiv",
 )
 
 RetrievalSourceLiteral = Literal[
@@ -36,6 +41,11 @@ RetrievalSourceLiteral = Literal[
     "hybrid",
     "custom",
     "tavily_search",
+    # P2-11 学术检索源
+    "scholar",
+    "scholar_search",
+    "openalex",
+    "arxiv",
 ]
 
 
@@ -141,7 +151,7 @@ class RetrievalResult(BaseModel):
     # 检索来源
     source: RetrievalSourceLiteral = Field(description="检索来源工具")
 
-    source_mode: Literal["graphrag", "web"] = Field(
+    source_mode: Literal["graphrag", "web", "scholar"] = Field(
         default="graphrag",
         description="产生本证据的冻结 Run 信息源",
     )

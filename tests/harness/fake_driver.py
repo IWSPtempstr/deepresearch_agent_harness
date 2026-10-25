@@ -7,6 +7,8 @@ from deepresearch_agent.agents.multi_agent.core.retrieval_result import Retrieva
 class CompletedFakeDriver:
     def __init__(self, context, events=None):
         self.context = context
+        self.mode = context.source_mode.value
+        self.tool_name = "tavily_search" if self.mode == "web" else ("scholar_search" if self.mode == "scholar" else "local_search")
         restored = context.workflow_state
         self.executed = bool(restored.get("executed"))
         self.results = [
@@ -16,7 +18,7 @@ class CompletedFakeDriver:
                     source_id=f"doc-{index}", source_type="chunk",
                     title=f"source-{index}", content_hash=character * 64,
                 ),
-                source="local_search", source_mode="graphrag", score=0.9,
+                source=self.tool_name, source_mode=self.mode, score=0.9,
             )
             for index, (item_id, character) in enumerate((("raw-1", "a"), ("raw-2", "b")), start=1)
         ]
@@ -39,15 +41,15 @@ class CompletedFakeDriver:
         return {"executed": self.executed, "report": self._report, "result_ids": [item.result_id for item in self.results]}
 
     def execution_records(self):
-        call = ToolCall(tool_name="local_search", tool_call_id=f"call-{self.context.run_id}-0", source_mode="graphrag", args={"query": "safe"}, result={"ok": True})
+        call = ToolCall(tool_name=self.tool_name, tool_call_id=f"call-{self.context.run_id}-0", source_mode=self.mode, args={"query": "safe"}, result={"ok": True})
         return [ExecutionRecord(task_id=f"task-{self.context.run_id}", session_id=self.context.session_id, worker_type="fake", tool_calls=[call], evidence=self.results, metadata=ExecutionMetadata(worker_type="fake", tool_calls_count=1, evidence_count=len(self.results)))]
 
     def evidence_results(self):
-        return [(f"task-{self.context.run_id}", f"call-{self.context.run_id}-0", "local_search", item) for item in self.results]
+        return [(f"task-{self.context.run_id}", f"call-{self.context.run_id}-0", self.tool_name, item) for item in self.results]
 
     def report_consistency(self):
         return True
 
     def plan_record(self):
-        tasks = [{"task_id": f"task-{self.context.run_id}", "task_type": "deep_research", "source_mode": "graphrag", "status": "pending", "description": "research-0"}]
+        tasks = [{"task_id": f"task-{self.context.run_id}", "task_type": "deep_research", "source_mode": self.mode, "status": "pending", "description": "research-0"}]
         return ({"plan_id": f"plan-{self.context.run_id}", "status": "executing", "tasks": tasks}, tasks)

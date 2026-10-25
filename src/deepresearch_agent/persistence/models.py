@@ -88,7 +88,7 @@ class RunModel(Base):
     completed_at: Mapped[str | None] = mapped_column(String(40))
     updated_at: Mapped[str] = mapped_column(String(40), nullable=False)
     __table_args__ = (
-        CheckConstraint("source_mode IN ('graphrag','web')", name="ck_runs_source_mode"),
+        CheckConstraint("source_mode IN ('graphrag','web','scholar')", name="ck_runs_source_mode"),
         CheckConstraint("workflow_mode IN ('deep_research','plan_execute_report')", name="ck_runs_workflow_mode"),
         Index("ix_runs_session_created", "session_id", "created_at"),
         Index("ix_runs_status_lease", "status", "lease_expires_at"),
@@ -143,7 +143,7 @@ class TaskModel(Base):
     task_json: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(String(40), nullable=False)
     updated_at: Mapped[str] = mapped_column(String(40), nullable=False)
-    __table_args__ = (Index("ix_tasks_run_status", "run_id", "status"), CheckConstraint("source_mode IN ('graphrag','web')", name="ck_tasks_source_mode"))
+    __table_args__ = (Index("ix_tasks_run_status", "run_id", "status"), CheckConstraint("source_mode IN ('graphrag','web','scholar')", name="ck_tasks_source_mode"))
 
 
 class ToolCallModel(Base):
@@ -159,7 +159,7 @@ class ToolCallModel(Base):
     error_code: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[str] = mapped_column(String(40), nullable=False)
     completed_at: Mapped[str | None] = mapped_column(String(40))
-    __table_args__ = (Index("ix_tool_calls_run_task", "run_id", "task_id"), CheckConstraint("source_mode IN ('graphrag','web')", name="ck_tool_calls_source_mode"))
+    __table_args__ = (Index("ix_tool_calls_run_task", "run_id", "task_id"), CheckConstraint("source_mode IN ('graphrag','web','scholar')", name="ck_tool_calls_source_mode"))
 
 
 class EvidenceModel(Base):
@@ -180,7 +180,7 @@ class EvidenceModel(Base):
     score: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
     invalidated_at: Mapped[str | None] = mapped_column(String(40))
     created_at: Mapped[str] = mapped_column(String(40), nullable=False)
-    __table_args__ = (Index("ix_evidence_run_source", "run_id", "source_mode"), Index("ix_evidence_content_hash", "content_hash"), CheckConstraint("source_mode IN ('graphrag','web')", name="ck_evidence_source_mode"))
+    __table_args__ = (Index("ix_evidence_run_source", "run_id", "source_mode"), Index("ix_evidence_content_hash", "content_hash"), CheckConstraint("source_mode IN ('graphrag','web','scholar')", name="ck_evidence_source_mode"))
 
 
 class ContractCheckModel(Base):

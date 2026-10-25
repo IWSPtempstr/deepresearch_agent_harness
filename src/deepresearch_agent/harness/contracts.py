@@ -16,6 +16,7 @@ def utc_now() -> datetime:
 class SourceMode(str, Enum):
     GRAPHRAG = "graphrag"
     WEB = "web"
+    SCHOLAR = "scholar"  # P2-11：学术科研情报（OpenAlex 主源 + arXiv 副源）
 
 
 class WorkflowMode(str, Enum):

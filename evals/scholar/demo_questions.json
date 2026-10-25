@@ -1,0 +1,41 @@
+{
+  "snapshot_date": "2026-10-25",
+  "source": "OpenAlex (https://api.openalex.org)",
+  "note": "演示研究问题（P2-11）。报告的每条结论必须可回溯到论文 DOI/OpenAlex ID；gold 集答案基于 OpenAlex 快照固化，避免 CI 回归门因上游数据漂移误报。",
+  "cases": [
+    {
+      "id": "scholar-transformer-landscape",
+      "workflow": "deep_research",
+      "source_mode": "scholar",
+      "query": "Transformer 注意力机制近三年的演进路线与尚未解决的缺口",
+      "expected": {
+        "non_empty_answer": true,
+        "min_evidence": 3,
+        "citation_required": true,
+        "gold_openalex_ids": ["https://openalex.org/W2741809807"]
+      }
+    },
+    {
+      "id": "scholar-graphrag-lineage",
+      "workflow": "plan_execute_report",
+      "source_mode": "scholar",
+      "query": "检索增强生成（RAG）与知识图谱结合的代表工作及各自局限",
+      "expected": {
+        "plan": true,
+        "report": true,
+        "citation_required": true
+      }
+    },
+    {
+      "id": "scholar-scaling-laws",
+      "workflow": "deep_research",
+      "source_mode": "scholar",
+      "query": "大语言模型 scaling law 的主要结论与对训练资源规划的启示",
+      "expected": {
+        "non_empty_answer": true,
+        "min_evidence": 2,
+        "citation_required": true
+      }
+    }
+  ]
+}

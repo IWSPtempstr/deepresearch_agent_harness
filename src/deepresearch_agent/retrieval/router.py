@@ -96,6 +96,17 @@ def create_default_router() -> RetrievalRouter:
             provider_name="tavily",
             factory=build_tavily,
         )
+
+    # P2-11：学术科研情报（OpenAlex 主源 + arXiv 兜底），免 key 常开
+    def build_scholar() -> RetrievalProvider:
+        from deepresearch_agent.retrieval.scholar_provider import ChainedScholarProvider
+        return ChainedScholarProvider()
+
+    providers[SourceMode.SCHOLAR] = _LazyProvider(
+        mode=SourceMode.SCHOLAR,
+        provider_name="scholar",
+        factory=build_scholar,
+    )
     return RetrievalRouter(providers)
 
 

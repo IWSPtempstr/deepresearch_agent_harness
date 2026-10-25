@@ -195,7 +195,7 @@ class PlanExecuteState(BaseModel):
     )
 
     run_id: str = Field(default_factory=lambda: f"run_{uuid.uuid4().hex}", description="当前研究 Run ID")
-    source_mode: Literal["graphrag", "web"] = Field(default="graphrag", description="冻结的信息源")
+    source_mode: Literal["graphrag", "web", "scholar"] = Field(default="graphrag", description="冻结的信息源")
     workflow_mode: Literal["deep_research", "plan_execute_report"] = Field(
         default="plan_execute_report", description="研究工作流",
     )
