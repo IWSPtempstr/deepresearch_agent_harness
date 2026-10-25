@@ -1,7 +1,6 @@
 import numpy as np
 from abc import ABC, abstractmethod
 from typing import List, Union
-from sentence_transformers import SentenceTransformer
 import threading
 from pathlib import Path
 
@@ -105,7 +104,8 @@ class SentenceTransformerEmbedding(EmbeddingProvider):
         cache_path = Path(cache_dir)
         cache_path.mkdir(parents=True, exist_ok=True)
 
-        # 加载模型，指定缓存目录
+        # 加载模型，指定缓存目录；惰性导入避免平台进程（api/worker）被迫依赖 torch
+        from sentence_transformers import SentenceTransformer
         self.model = SentenceTransformer(model_name, cache_folder=str(cache_path))
         self._dimension = None
         self._initialized = True
