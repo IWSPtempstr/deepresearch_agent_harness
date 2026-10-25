@@ -206,6 +206,14 @@ flowchart TB
         EXEC[HarnessRuntime 执行]
     end
 
+    subgraph PLATFORM["平台设施（P1/P2）"]
+        direction LR
+        GATEWAY[LLM 网关<br/>failover/限流/计量]
+        OBS[Prometheus + OTel + Grafana]
+        TENANT[多租户<br/>tenants/api_keys/tenant_id]
+        SCHOLAR[学术检索源<br/>OpenAlex + arXiv]
+    end
+
     subgraph HARNESS["Agent Harness Runtime"]
         direction TB
         CORE[State Machine · Lease · Budget]
@@ -328,6 +336,9 @@ cp .env.example .env
 | APP_DATABASE_URL | SQLite（默认）或 `postgresql+asyncpg://...`（平台模式） |
 | REDIS_URL | 平台模式队列/SSE 扇出；为空走进程内实现（单机兼容） |
 | RUN_LEASE_SECONDS / RECOVERY_SCAN_SECONDS | 租约 TTL 与接管扫描间隔（默认 30/15s，接管窗口上界 45s） |
+| LLM_FALLBACK_BASE_URL / LLM_FALLBACK_API_KEY | 备用 provider；配置后自动启用 LLM 网关 failover |
+| TENANT_AUTH_REQUIRED | 多租户强制认证（有 api_keys 时自动启用） |
+| OPENALEX_MAILTO | 学术检索 polite pool 标识（source_mode=scholar，免 key） |
 | RUN_MAX_LLM_TOKENS / RUN_WALL_TIME_SECONDS | Harness 预算 |
 | FRONTEND_PORT | 前端端口，默认 5173 |
 
