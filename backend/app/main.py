@@ -55,9 +55,13 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await database.create_schema()
+        from deepresearch_agent.llm_gateway import start_metering, stop_metering
+
+        start_metering(database)
         await run_service.startup_recovery(auto_resume=settings.AUTO_RESUME_RUNS if auto_resume is None else auto_resume)
         yield
         await run_service.shutdown()
+        await stop_metering()
         await database.close()
 
     app = FastAPI(title="DeepResearch HybridRAG Local MVP", version="0.4.0", lifespan=lifespan)

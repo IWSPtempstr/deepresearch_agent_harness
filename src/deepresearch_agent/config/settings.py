@@ -95,6 +95,15 @@ WORKER_CONCURRENCY = _get_env_int("WORKER_CONCURRENCY", 4) or 4
 RUN_LEASE_SECONDS = _get_env_int("RUN_LEASE_SECONDS", 30) or 30
 # 过期租约扫描间隔（秒），worker 进程内运行
 RECOVERY_SCAN_SECONDS = _get_env_float("RECOVERY_SCAN_SECONDS", 15.0) or 15.0
+# LLM 网关（P1-5）：备用 provider（OpenAI 协议兼容），主失败按健康度退避切换
+LLM_FALLBACK_BASE_URL = (os.getenv("LLM_FALLBACK_BASE_URL") or "").strip()
+LLM_FALLBACK_API_KEY = (os.getenv("LLM_FALLBACK_API_KEY") or "").strip()
+LLM_FALLBACK_MODEL = (os.getenv("LLM_FALLBACK_MODEL") or "").strip()
+# 网关并发槽与排队超时（超时抛 LLM_RATE_LIMITED，对上为 429 语义）
+LLM_MAX_CONCURRENT_CALLS = _get_env_int("LLM_MAX_CONCURRENT_CALLS", 8) or 8
+LLM_QUEUE_TIMEOUT_SECONDS = _get_env_float("LLM_QUEUE_TIMEOUT_SECONDS", 30.0) or 30.0
+# provider 连续失败的冷却基数（指数退避，上限 300s）
+LLM_PROVIDER_COOLDOWN_SECONDS = _get_env_float("LLM_PROVIDER_COOLDOWN_SECONDS", 30.0) or 30.0
 ARTIFACT_ROOT = Path(os.getenv("ARTIFACT_ROOT", PROJECT_ROOT / "data" / "artifacts")).expanduser()
 SKILLS_ROOT = Path(os.getenv("SKILLS_ROOT", PROJECT_ROOT / "skills")).expanduser()
 AUTO_RESUME_RUNS = _get_env_bool("AUTO_RESUME_RUNS", True)

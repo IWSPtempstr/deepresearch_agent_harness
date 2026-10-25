@@ -297,3 +297,26 @@ class AuditEventModel(Base):
     payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[str] = mapped_column(String(40), nullable=False)
     __table_args__ = (Index("ix_audit_entity", "entity_type", "entity_id"),)
+
+
+class LlmCallModel(Base):
+    """LLM 网关计量（P1-5）：每次出站调用一条，预算对账与限流观测的数据源。"""
+
+    __tablename__ = "llm_calls"
+    call_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, default="default")
+    run_id: Mapped[str | None] = mapped_column(String(64))
+    provider: Mapped[str] = mapped_column(String(160), nullable=False)
+    model: Mapped[str] = mapped_column(String(160), nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    __table_args__ = (
+        Index("ix_llm_calls_provider_created", "provider", "created_at"),
+        Index("ix_llm_calls_tenant_created", "tenant_id", "created_at"),
+        Index("ix_llm_calls_run", "run_id"),
+    )

@@ -78,6 +78,8 @@ class PrefixAwareChatOpenAI(ChatOpenAI):
 
 
 def get_llm_model(*, model=None, temperature=None, max_tokens=None):
+    from deepresearch_agent.config import settings
+
     config = {k: v for k, v in OPENAI_LLM_CONFIG.items() if v is not None and v != ""}
     if model:
         config["model"] = model
@@ -85,6 +87,28 @@ def get_llm_model(*, model=None, temperature=None, max_tokens=None):
         config["temperature"] = temperature
     if max_tokens is not None:
         config["max_tokens"] = max_tokens
+    # P1-5：配置了备用 provider 时走网关（failover/限流/计量在传输层）；
+    # 未配置则保持原有直连路径，行为零变化
+    if settings.LLM_FALLBACK_BASE_URL and settings.LLM_FALLBACK_API_KEY:
+        from deepresearch_agent.config.settings import LLM_PROVIDER_COOLDOWN_SECONDS
+        from deepresearch_agent.llm_gateway import build_failover_llm, default_limiter, get_recorder
+        from deepresearch_agent.llm_gateway.gateway import ProviderHealth
+
+        fallback_config = {
+            "base_url": settings.LLM_FALLBACK_BASE_URL,
+            "api_key": settings.LLM_FALLBACK_API_KEY,
+            "model": settings.LLM_FALLBACK_MODEL or config.get("model"),
+        }
+        if config.get("temperature") is not None:
+            fallback_config["temperature"] = config["temperature"]
+        if config.get("max_tokens") is not None:
+            fallback_config["max_tokens"] = config["max_tokens"]
+        return build_failover_llm(
+            config, [fallback_config],
+            limiter=default_limiter(),
+            health=ProviderHealth(base_cooldown_seconds=LLM_PROVIDER_COOLDOWN_SECONDS),
+            recorder=get_recorder(),
+        )
     return PrefixAwareChatOpenAI(**config)
 
 def get_stream_llm_model():

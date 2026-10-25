@@ -41,6 +41,9 @@ async def _consume(worker_name: str | None = None) -> None:
         raise SystemExit("worker 进程需要设置 REDIS_URL（平台模式）")
     database = Database(settings.APP_DATABASE_URL)
     await database.create_schema()
+    from deepresearch_agent.llm_gateway import start_metering, stop_metering
+
+    start_metering(database)
     queue = RedisStreamRunQueue.from_url(
         settings.REDIS_URL,
         consumer_name=worker_name or os.environ.get("WORKER_NAME") or f"worker-{socket.gethostname()}",
@@ -84,6 +87,7 @@ async def _consume(worker_name: str | None = None) -> None:
         scanner.cancel()
         await asyncio.gather(scanner, return_exceptions=True)
         await service.shutdown()
+        await stop_metering()
         await queue.close()
         await database.close()
 
