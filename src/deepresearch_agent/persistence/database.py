@@ -1,4 +1,4 @@
-"""Async SQLite engine with the required reliability pragmas."""
+"""Async engine factory for SQLite (local MVP) and PostgreSQL (platform mode)."""
 
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -8,13 +8,17 @@ from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from deepresearch_agent.config.settings import APP_DATABASE_URL
+from deepresearch_agent.persistence.search import PostgresTrgmSearch, SearchBackend, SqliteFtsSearch
+
+
+SQLITE_PREFIX = "sqlite+aiosqlite:///"
+POSTGRES_PREFIX = "postgresql+asyncpg://"
 
 
 def _ensure_sqlite_parent(database_url: str) -> None:
-    prefix = "sqlite+aiosqlite:///"
-    if not database_url.startswith(prefix) or database_url.endswith(":memory:"):
+    if not database_url.startswith(SQLITE_PREFIX) or database_url.endswith(":memory:"):
         return
-    raw_path = database_url[len(prefix):]
+    raw_path = database_url[len(SQLITE_PREFIX):]
     path = Path(raw_path)
     if not path.is_absolute():
         path = Path.cwd() / path
@@ -23,15 +27,24 @@ def _ensure_sqlite_parent(database_url: str) -> None:
 
 class Database:
     def __init__(self, url: str = APP_DATABASE_URL, *, echo: bool = False):
-        if not url.startswith("sqlite+aiosqlite:///"):
-            raise ValueError("本地 MVP 仅支持 sqlite+aiosqlite 数据库 URL")
-        _ensure_sqlite_parent(url)
+        if url.startswith(SQLITE_PREFIX):
+            self.dialect = "sqlite"
+        elif url.startswith(POSTGRES_PREFIX):
+            self.dialect = "postgresql"
+        else:
+            raise ValueError("仅支持 sqlite+aiosqlite 或 postgresql+asyncpg 数据库 URL")
         self.url = url
-        self.engine: AsyncEngine = create_async_engine(url, echo=echo)
+        if self.dialect == "sqlite":
+            _ensure_sqlite_parent(url)
+            self.engine: AsyncEngine = create_async_engine(url, echo=echo)
+            self._install_sqlite_pragmas()
+        else:
+            # 平台模式：连接可能跨越容器重启，pre_ping 避免拿到死连接
+            self.engine = create_async_engine(url, echo=echo, pool_pre_ping=True, pool_size=10, max_overflow=20)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
-        self._install_pragmas()
+        self.search: SearchBackend = SqliteFtsSearch() if self.dialect == "sqlite" else PostgresTrgmSearch()
 
-    def _install_pragmas(self) -> None:
+    def _install_sqlite_pragmas(self) -> None:
         @event.listens_for(self.engine.sync_engine, "connect")
         def configure_sqlite(dbapi_connection, _connection_record) -> None:
             cursor = dbapi_connection.cursor()
@@ -50,15 +63,16 @@ class Database:
     async def create_schema(self) -> None:
         """Create schema for tests/dev; deployed environments use Alembic."""
         from .models import Base
-        from .fts import install_fts
 
         async with self.engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
-            # create_all is used by local/dev startup and does not alter old
-            # SQLite tables. Keep additive compatibility with the Alembic 0002
-            # migration so an existing local database can still start safely.
-            await connection.run_sync(self._ensure_additive_columns)
-            await install_fts(connection)
+            if self.dialect == "sqlite":
+                # create_all is used by local/dev startup and does not alter old
+                # SQLite tables. Keep additive compatibility with the Alembic 0002
+                # migration so an existing local database can still start safely.
+                await connection.run_sync(self._ensure_additive_columns)
+            # 搜索后端的安装按方言分派：FTS5 虚拟表/触发器 或 pg_trgm 扩展/索引
+            await self.search.install(connection)
 
     @staticmethod
     def _ensure_additive_columns(connection) -> None:
@@ -82,9 +96,12 @@ class Database:
         connection.exec_driver_sql("UPDATE memories SET status = 'archived' WHERE status = 'expired'")
 
     async def foreign_key_violations(self) -> list[tuple]:
-        async with self.engine.connect() as connection:
-            result = await connection.execute(text("PRAGMA foreign_key_check"))
-            return [tuple(row) for row in result.fetchall()]
+        if self.dialect == "sqlite":
+            async with self.engine.connect() as connection:
+                result = await connection.execute(text("PRAGMA foreign_key_check"))
+                return [tuple(row) for row in result.fetchall()]
+        # PostgreSQL 原生强制外键约束，运行期无需自查；这里恒返回空以保持调用方契约
+        return []
 
     async def close(self) -> None:
         await self.engine.dispose()

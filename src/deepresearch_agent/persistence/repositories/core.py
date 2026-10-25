@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from sqlalchemy import and_, func, or_, select, text, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from backend.app.schemas import MessageCreate, RunCreate, RunEventCreate, SessionCreate
@@ -101,7 +101,7 @@ class SessionRepository:
 
     async def search(self, query: str, *, limit: int = 20) -> list[SessionModel]:
         async with self.database.sessions() as session:
-            ids = (await session.execute(text("SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH :query LIMIT :limit"), {"query": query, "limit": limit})).scalars().all()
+            ids = await self.database.search.search_session_ids(session, query, limit=limit)
             if not ids:
                 return []
             return list((await session.execute(select(SessionModel).where(SessionModel.session_id.in_(ids), SessionModel.deleted_at.is_(None)))).scalars())
@@ -151,13 +151,8 @@ class MessageRepository:
             )).scalar_one_or_none()
 
     async def search(self, query: str, *, session_id: Optional[str] = None, limit: int = 20) -> list[MessageModel]:
-        clause = "messages_fts MATCH :query"
-        params: dict[str, Any] = {"query": query, "limit": limit}
-        if session_id:
-            clause += " AND session_id = :session_id"
-            params["session_id"] = session_id
         async with self.database.sessions() as session:
-            ids = (await session.execute(text(f"SELECT message_id FROM messages_fts WHERE {clause} LIMIT :limit"), params)).scalars().all()
+            ids = await self.database.search.search_message_ids(session, query, session_id=session_id, limit=limit)
             if not ids:
                 return []
             rows = list((await session.execute(select(MessageModel).where(MessageModel.message_id.in_(ids)))).scalars())

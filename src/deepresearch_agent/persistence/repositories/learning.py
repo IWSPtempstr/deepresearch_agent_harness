@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, select, update
 
 from deepresearch_agent.persistence.database import Database
 from deepresearch_agent.persistence.models import (
@@ -30,7 +30,7 @@ class MemoryRepository:
 
     async def search(self, query: str, *, status: Optional[str] = None, limit: int = 20) -> list[MemoryModel]:
         async with self.database.sessions() as session:
-            ids = (await session.execute(text("SELECT memory_id FROM memories_fts WHERE memories_fts MATCH :query LIMIT :limit"), {"query": query, "limit": limit})).scalars().all()
+            ids = await self.database.search.search_memory_ids(session, query, limit=limit)
             if not ids:
                 return []
             statement = select(MemoryModel).where(MemoryModel.memory_id.in_(ids), MemoryModel.deleted_at.is_(None))

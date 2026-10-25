@@ -38,7 +38,7 @@ class MessageModel(Base):
         CheckConstraint("role IN ('user','assistant','system')", name="ck_messages_role"),
         UniqueConstraint("session_id", "client_message_id", name="uq_messages_client_id"),
         Index("ix_messages_session_created", "session_id", "created_at"),
-        Index("uq_messages_assistant_run", "run_id", unique=True, sqlite_where=text("role = 'assistant' AND run_id IS NOT NULL")),
+        Index("uq_messages_assistant_run", "run_id", unique=True, sqlite_where=text("role = 'assistant' AND run_id IS NOT NULL"), postgresql_where=text("role = 'assistant' AND run_id IS NOT NULL")),
     )
 
 
