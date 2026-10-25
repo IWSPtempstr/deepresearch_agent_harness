@@ -95,6 +95,26 @@ async def test_event_bus_publishes_durable_first_then_fanout(database):
     assert fanned["payload"]["schema_version"] == persisted[-1].schema_version or isinstance(fanned["payload"].get("schema_version"), int)
 
 
+class ExplodingFanout(FakeFanout):
+    async def publish(self, run_id: str, event: dict) -> None:
+        raise RuntimeError("redis down")
+
+
+async def test_event_bus_survives_fanout_failure(database):
+    """评审 H2：Redis 故障不得传播进状态机——事件已 durable 落库，扇出失败被吞并计数。"""
+    from deepresearch_agent.observability import EVENT_FANOUT_FAILURES
+
+    run = await _create_active_run(database)
+    bus = EventBus(EventRepository(database), fanout=ExplodingFanout())
+    notified: list = []
+    bus.subscribe(run.run_id, lambda event: notified.append(event))
+    before = EVENT_FANOUT_FAILURES._value.get()
+    event = await bus.publish(run.run_id, "run.started", stage="context_building", payload={"status": "context_building"})
+    assert event.event_id > 0, "事件必须已落库"
+    assert notified, "扇出失败不影响进程内订阅者通知"
+    assert EVENT_FANOUT_FAILURES._value.get() == before + 1, "扇出失败必须计数"
+
+
 async def test_stream_replays_then_serves_cross_instance_events(database):
     fanout = FakeFanout()
     run = await _create_active_run(database)
