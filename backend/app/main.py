@@ -17,6 +17,7 @@ from deepresearch_agent.config import settings
 from deepresearch_agent.harness.errors import AppError, ErrorCode
 from deepresearch_agent.persistence import Database
 from deepresearch_agent.queueing import create_run_queue
+from deepresearch_agent.events_fanout import RedisEventFanout
 from deepresearch_agent.persistence.repositories import MessageRepository, RunRepository, SessionRepository
 from deepresearch_agent.memory import MemoryService
 from deepresearch_agent.persistence.repositories import AuditRepository, MemoryRepository
@@ -39,12 +40,16 @@ def create_app(
     if not settings.LOCAL_MVP_SINGLE_WORKER and not settings.REDIS_URL:
         raise RuntimeError("单机模式必须设置 FASTAPI_WORKERS=1；多实例部署请配置 REDIS_URL 切换平台模式（Run 执行由独立 worker 消费）")
     database = Database(database_url or settings.APP_DATABASE_URL)
+    # 平台模式共享一个 Redis 扇出：API 侧发布的控制事件与 worker 侧发布的
+    # Run 事件都经它推给任意实例的 SSE 订阅者
+    event_fanout = RedisEventFanout.from_url(settings.REDIS_URL) if settings.REDIS_URL else None
     run_service = RunService(
         database, workflow_factory=workflow_factory,
         artifact_root=artifact_root or settings.ARTIFACT_ROOT,
         skills_root=skills_root or settings.SKILLS_ROOT,
         # 平台模式：API 只投递唤醒信号，执行在 worker 进程（P0-2）
         queue=create_run_queue(settings.REDIS_URL) if settings.REDIS_URL else None,
+        event_fanout=event_fanout,
     )
 
     @asynccontextmanager
@@ -61,7 +66,7 @@ def create_app(
     app.state.chat_service = ChatService(
         SessionRepository(database), RunRepository(database), MessageRepository(database), run_service,
     )
-    app.state.event_stream = EventStreamService(run_service.events, run_service.runs, run_service.event_bus)
+    app.state.event_stream = EventStreamService(run_service.events, run_service.runs, run_service.event_bus, fanout=event_fanout)
     app.state.memory_service = MemoryService(
         MemoryRepository(database), AuditRepository(database),
         user_max_tokens=settings.MEMORY_USER_MAX_TOKENS,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from collections import defaultdict
 from typing import Any, Awaitable, Callable, DefaultDict
 
@@ -13,8 +14,11 @@ Subscriber = Callable[[Any], Awaitable[None] | None]
 
 
 class EventBus:
-    def __init__(self, repository: EventRepository):
+    def __init__(self, repository: EventRepository, fanout=None):
         self.repository = repository
+        # 跨实例扇出（P0-4）：worker/API 侧发布后推 Redis，任意 API 实例可订阅；
+        # None 时仅进程内通知（单机兼容模式）
+        self.fanout = fanout
         self._subscribers: DefaultDict[str, list[Subscriber]] = defaultdict(list)
 
     def subscribe(self, run_id: str, callback: Subscriber) -> Callable[[], None]:
@@ -23,6 +27,15 @@ class EventBus:
 
     async def publish(self, run_id: str, event_type: str, *, stage: str | None = None, payload: dict[str, Any] | None = None):
         event = await self.repository.append(RunEventCreate(run_id=run_id, event_type=event_type, stage=stage, payload=payload or {}))
+        if self.fanout is not None:
+            await self.fanout.publish(run_id, {
+                "event_id": event.event_id,
+                "run_id": event.run_id,
+                "event_type": event.event_type,
+                "stage": event.stage,
+                "created_at": event.created_at,
+                "payload": json.loads(event.payload_json or "{}"),
+            })
         for callback in tuple(self._subscribers.get(run_id, ())):
             outcome = callback(event)
             if inspect.isawaitable(outcome):

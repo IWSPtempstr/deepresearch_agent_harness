@@ -1,4 +1,8 @@
-"""Durable replay plus live notification for SSE clients."""
+"""Durable replay plus live notification for SSE clients.
+
+P0-4：配置 EventFanout（Redis pub/sub）时，实时事件来自跨实例订阅而非进程内
+EventBus——任何 API 实例都能看到任意 Run 的事件流；断线重放始终以数据库为准。
+"""
 
 import asyncio
 import json
@@ -12,16 +16,23 @@ TERMINAL_STATUSES = {"completed", "failed", "budget_exhausted", "cancelled", "pa
 
 
 class EventStreamService:
-    def __init__(self, events: EventRepository, runs: RunRepository, event_bus: EventBus):
+    def __init__(self, events: EventRepository, runs: RunRepository, event_bus: EventBus, fanout=None):
         self.events = events
         self.runs = runs
         self.event_bus = event_bus
+        self.fanout = fanout
 
     @staticmethod
     def serialize(event) -> dict[str, str]:
         payload = json.loads(event.payload_json or "{}")
         payload.update({"event_id": event.event_id, "run_id": event.run_id, "event_type": event.event_type, "stage": event.stage, "created_at": event.created_at})
         return {"id": str(event.event_id), "event": event.event_type, "data": json.dumps(payload, ensure_ascii=False)}
+
+    @staticmethod
+    def serialize_fanout(event: dict) -> dict[str, str]:
+        payload = dict(event.get("payload") or {})
+        payload.update({key: event.get(key) for key in ("event_id", "run_id", "event_type", "stage", "created_at")})
+        return {"id": str(event.get("event_id")), "event": str(event.get("event_type")), "data": json.dumps(payload, ensure_ascii=False)}
 
     async def stream(self, run_id: str, *, after_event_id: int = 0) -> AsyncIterator[dict[str, str]]:
         cursor = max(0, after_event_id)
@@ -31,6 +42,52 @@ class EventStreamService:
         run = await self.runs.get(run_id)
         if run is None or run.status in TERMINAL_STATUSES:
             return
+        if self.fanout is not None:
+            async for item in self._stream_via_fanout(run_id, cursor):
+                yield item
+            return
+        async for item in self._stream_in_process(run_id, cursor):
+            yield item
+
+    async def _stream_via_fanout(self, run_id: str, cursor: int) -> AsyncIterator[dict[str, str]]:
+        # await subscribe 完成 Redis SUBSCRIBE 后再做一次 DB 补读，
+        # 覆盖「首次重放结束 → 订阅生效」之间落库的事件；重复由 cursor 去重
+        live = await self.fanout.subscribe(run_id)
+        queue: asyncio.Queue = asyncio.Queue(maxsize=200)
+
+        async def pump() -> None:
+            try:
+                async for event in live:
+                    try:
+                        queue.put_nowait(event)
+                    except asyncio.QueueFull:
+                        pass
+            except asyncio.CancelledError:
+                raise
+
+        pump_task = asyncio.create_task(pump())
+        try:
+            for event in await self.events.list_after(run_id, after_event_id=cursor):
+                cursor = event.event_id
+                yield self.serialize(event)
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=20)
+                except asyncio.TimeoutError:
+                    yield {"event": "heartbeat", "data": json.dumps({"run_id": run_id, "after_event_id": cursor})}
+                    continue
+                if int(event.get("event_id") or 0) <= cursor:
+                    continue
+                cursor = int(event["event_id"])
+                yield self.serialize_fanout(event)
+                refreshed = await self.runs.get(run_id)
+                if refreshed is None or refreshed.status in TERMINAL_STATUSES:
+                    return
+        finally:
+            pump_task.cancel()
+            await asyncio.gather(pump_task, return_exceptions=True)
+
+    async def _stream_in_process(self, run_id: str, cursor: int) -> AsyncIterator[dict[str, str]]:
         queue: asyncio.Queue = asyncio.Queue(maxsize=100)
 
         def on_event(event):

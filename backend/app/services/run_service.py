@@ -44,12 +44,13 @@ class RunService:
         artifact_root=ARTIFACT_ROOT,
         skills_root=settings.SKILLS_ROOT,
         queue=None,
+        event_fanout=None,
     ):
         self.database = database
         self.runs = RunRepository(database)
         self.messages = MessageRepository(database)
         self.events = EventRepository(database)
-        self.event_bus = EventBus(self.events)
+        self.event_bus = EventBus(self.events, fanout=event_fanout)
         self.artifact_store = ArtifactStore(artifact_root)
         self._external_factory = workflow_factory
         self._router = None if workflow_factory else create_default_router()

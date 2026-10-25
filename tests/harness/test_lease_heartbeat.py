@@ -121,14 +121,15 @@ async def test_lease_renewal_keeps_lease_alive_during_long_stage(database, tmp_p
     driver_holder = {}
 
     def factory(context, events=None):
-        driver = SlowFakeDriver(context, execute_sleep=3.4)
+        driver = SlowFakeDriver(context, execute_sleep=4.4)
         driver_holder["driver"] = driver
         return driver
 
-    runtime = build_runtime(database, tmp_path, factory, lease_seconds=2)
+    # TTL=3s、续约间隔 1s：若续约失效，3.6s 时租约必已过期；负载导致心跳
+    # 循环被饿 2s 以上才会引入抖动（TTL 越大越稳，检测窗口保持有效）
+    runtime = build_runtime(database, tmp_path, factory, lease_seconds=3)
     task = asyncio.create_task(runtime.execute_run(run.run_id))
-    # 2.6s > TTL(2s)：若没有续约，此刻租约已过期可被抢走
-    await asyncio.sleep(2.6)
+    await asyncio.sleep(3.6)
     stolen = await RunRepository(database).acquire_lease(run.run_id, "rival-runtime", ttl_seconds=30)
     assert not stolen, "长阶段执行中租约被抢走：心跳续约未生效"
     context = await task

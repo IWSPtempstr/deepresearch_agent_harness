@@ -18,6 +18,7 @@ import socket
 
 from backend.app.services import RunService
 from deepresearch_agent.config import settings
+from deepresearch_agent.events_fanout import RedisEventFanout
 from deepresearch_agent.persistence import Database
 from deepresearch_agent.queueing import RedisStreamRunQueue
 
@@ -44,7 +45,7 @@ async def _consume(worker_name: str | None = None) -> None:
         settings.REDIS_URL,
         consumer_name=worker_name or os.environ.get("WORKER_NAME") or f"worker-{socket.gethostname()}",
     )
-    service = RunService(database)
+    service = RunService(database, event_fanout=RedisEventFanout.from_url(settings.REDIS_URL))
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
