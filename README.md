@@ -178,6 +178,8 @@ Completion Contract 对每个报告执行 8 项强制检查：
 
 ## 系统架构
 
+单机模式（默认，SQLite + 进程内调度）与平台模式（P0，PostgreSQL + Redis + 独立 worker）共用同一套 Harness 语义：
+
 ~~~mermaid
 flowchart TB
     subgraph UI["Experience Layer · React Console"]
@@ -189,12 +191,19 @@ flowchart TB
         SKILLUI[Skills]
     end
 
-    subgraph API["Control Plane · FastAPI"]
+    subgraph API["Control Plane · FastAPI ×N"]
         direction LR
         SESSION[Session API]
-        SCHED[Run Scheduler]
-        EVENT[Event Stream]
+        SCHED[Run Scheduler<br/>唤醒信号投递]
+        EVENT[Event Stream<br/>Redis 订阅 + DB 重放]
         EVALAPI[Evaluation API]
+    end
+
+    subgraph WORKERS["Worker 进程 ×N（P0）"]
+        direction LR
+        QUEUE[Redis Streams 消费]
+        SCAN[过期租约扫描<br/>崩溃自动接管]
+        EXEC[HarnessRuntime 执行]
     end
 
     subgraph HARNESS["Agent Harness Runtime"]
@@ -316,7 +325,9 @@ cp .env.example .env
 | OPENAI_EMBEDDINGS_MODEL | 向量模型 |
 | TAVILY_API_KEY | Web 联网模式密钥 |
 | NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD | 私域 GraphRAG |
-| APP_DATABASE_URL | SQLite 数据库地址 |
+| APP_DATABASE_URL | SQLite（默认）或 `postgresql+asyncpg://...`（平台模式） |
+| REDIS_URL | 平台模式队列/SSE 扇出；为空走进程内实现（单机兼容） |
+| RUN_LEASE_SECONDS / RECOVERY_SCAN_SECONDS | 租约 TTL 与接管扫描间隔（默认 30/15s，接管窗口上界 45s） |
 | RUN_MAX_LLM_TOKENS / RUN_WALL_TIME_SECONDS | Harness 预算 |
 | FRONTEND_PORT | 前端端口，默认 5173 |
 
@@ -333,6 +344,15 @@ docker compose up -d --build
 - 前端：http://127.0.0.1:5173
 - API：http://127.0.0.1:8000
 - Neo4j Browser：http://127.0.0.1:7474
+
+compose 默认即平台模式拓扑（postgres + redis + backend + worker + neo4j + frontend）：Run 执行在 worker 进程，事件经 Redis 扇出，任何 API 实例都能服务任意 Run 的 SSE。多实例扩容与崩溃接管演示：
+
+~~~bash
+# 国内网络建议：PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+docker compose up -d --build --scale backend=2 --scale worker=2
+docker compose kill worker        # 杀掉一个 worker：进行中的 Run 在 ≤60s 内被接管完成
+curl -N http://127.0.0.1:8000/api/v1/runs/{run_id}/events   # 8000/8001 两个实例看到同一事件流
+~~~
 
 若前端端口冲突：
 

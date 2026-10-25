@@ -27,6 +27,8 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -41,7 +43,7 @@ services:
       NEO4J_URI: "bolt://neo4j:7687"
       FRONTEND_ORIGINS: "http://127.0.0.1:${FRONTEND_PORT:-5173},http://localhost:${FRONTEND_PORT:-5173}"
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8000-8001:8000"
     volumes:
       - ./data:/app/data
       - ./skills:/app/skills
@@ -98,6 +100,8 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     restart: unless-stopped
     env_file: .env
     environment:
