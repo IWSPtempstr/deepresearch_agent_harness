@@ -38,3 +38,7 @@ class AppError(RuntimeError):
 
 class RunCancelled(RuntimeError):
     """Internal cooperative-cancellation signal; never exposed as a failure."""
+
+
+class RunLeaseLost(RuntimeError):
+    """本地租约已被其他 Runtime 抢占；本实例必须立即停止写入，由接管者驱动状态机。"""

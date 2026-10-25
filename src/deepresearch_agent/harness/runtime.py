@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import time
 import uuid
 from typing import Any, Callable
 
@@ -13,7 +14,7 @@ from deepresearch_agent.harness.checkpoints import CheckpointManager
 from deepresearch_agent.harness.contracts import ContractEvaluator, RunStatus, SourceMode, WorkflowMode
 from deepresearch_agent.harness.evidence import EvidenceLedger
 from deepresearch_agent.harness.event_bus import EventBus
-from deepresearch_agent.harness.errors import RunCancelled
+from deepresearch_agent.harness.errors import RunCancelled, RunLeaseLost
 from deepresearch_agent.harness.recovery import classify_exception, classify_verification_failures
 from deepresearch_agent.harness.run_context import RunContext
 from deepresearch_agent.harness.state_machine import StateMachine
@@ -49,7 +50,7 @@ class HarnessRuntime:
         memory_extractor: Any | None = None,
         skill_distiller: Any | None = None,
         prefix_tracker: Any | None = None,
-        lease_seconds: int = 90,
+        lease_seconds: int = 30,
     ):
         self.runs = run_repository
         self.messages = message_repository
@@ -68,6 +69,8 @@ class HarnessRuntime:
         self.prefix_tracker = prefix_tracker
         self.state_machine = StateMachine()
         self.lease_seconds = lease_seconds
+        # 续约间隔取 TTL 的 1/3：租约到期被抢占后，本地最多再写这么久就会让位
+        self.lease_renew_seconds = max(1.0, lease_seconds / 3)
 
     def _attach_prefix_usage(self, context: RunContext) -> None:
         """把当前 Run 的前缀缓存用量回填到 budget usage（幂等，可重复调用）。"""
@@ -158,7 +161,7 @@ class HarnessRuntime:
 
                 if context.status in {RunStatus.PLANNING, RunStatus.REPLANNING}:
                     failures = list(context.workflow_state.get("verification_failures", []))
-                    await self._run_with_heartbeat(context, budget, driver.plan(failures or None))
+                    await self._run_with_heartbeat(context, budget, driver.plan(failures or None), owner=owner)
                     context.plan_version += 1
                     context.workflow_state = driver.snapshot()
                     plan_extra: dict[str, Any] = {}
@@ -182,7 +185,7 @@ class HarnessRuntime:
                 elif context.status in {RunStatus.EXECUTING, RunStatus.RETRYING}:
                     await self._assert_not_cancelled(context)
                     try:
-                        await self._run_with_heartbeat(context, budget, driver.execute())
+                        await self._run_with_heartbeat(context, budget, driver.execute(), owner=owner)
                     except Exception as exc:
                         decision = classify_exception(exc)
                         if decision.action == "retry_same":
@@ -285,7 +288,7 @@ class HarnessRuntime:
 
                 elif context.status is RunStatus.REPORTING:
                     await self._assert_not_cancelled(context)
-                    generated_report = await self._run_with_heartbeat(context, budget, driver.report())
+                    generated_report = await self._run_with_heartbeat(context, budget, driver.report(), owner=owner)
                     context.report = sanitize_report(self._apply_artifact_edit(context, generated_report))
                     await self._assert_not_cancelled(context)
                     context.workflow_state = driver.snapshot()
@@ -431,6 +434,11 @@ class HarnessRuntime:
             await self._transition(context, RunStatus.BUDGET_EXHAUSTED, event_type="run.budget_exhausted", error_code="BUDGET_EXHAUSTED", error_message=str(exc))
             await self.checkpoints.save(context, "budget_exhausted")
             return context
+        except RunLeaseLost:
+            # 租约被抢占：Run 的状态机由接管者驱动，本地不做任何状态转换或
+            # checkpoint 写入，否则会与接管者双写互相覆盖
+            assert context is not None
+            return context
         except Exception as exc:
             if context is not None and not self.state_machine.is_terminal(context.status):
                 if str(exc) == "needs_user_input":
@@ -537,9 +545,10 @@ class HarnessRuntime:
             context.cancellation_requested = True
             raise RunCancelled("Run 已请求取消")
 
-    async def _run_with_heartbeat(self, context: RunContext, budget: BudgetManager, operation):
+    async def _run_with_heartbeat(self, context: RunContext, budget: BudgetManager, operation, *, owner: str | None = None):
         """Run one long stage while persisting usage and enforcing cancel/budget limits."""
         task = asyncio.create_task(operation)
+        last_renewal = time.monotonic()
         try:
             while not task.done():
                 await asyncio.wait({task}, timeout=1.0)
@@ -548,6 +557,12 @@ class HarnessRuntime:
                 budget.assert_available()
                 await self.runs.update_usage(context.run_id, budget.snapshot())
                 if not task.done():
+                    if owner is not None and time.monotonic() - last_renewal >= self.lease_renew_seconds:
+                        # 以同 owner 条件续约；失败即租约已被其他 Runtime 抢占，
+                        # 本地必须立刻让位，避免接管者与本地双写同一 Run
+                        if not await self.runs.acquire_lease(context.run_id, owner, ttl_seconds=self.lease_seconds):
+                            raise RunLeaseLost(f"Run {context.run_id} 的租约已被其他 Runtime 抢占")
+                        last_renewal = time.monotonic()
                     await self._assert_not_cancelled(context)
             return await task
         finally:
