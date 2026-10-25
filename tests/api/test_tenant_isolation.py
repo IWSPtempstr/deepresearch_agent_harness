@@ -103,6 +103,18 @@ async def _any_tenant(registry: TenantRegistry) -> str:
     return row.tenant_id
 
 
+async def test_ops_paths_exempt_from_tenant_auth(database):
+    """评审 H3：/health 与 /metrics 无 key 必须可达（healthcheck/Prometheus 依赖）。"""
+    registry = TenantRegistry(database)
+    tenant_x = await registry.create_tenant("tenant-x")
+    await registry.create_api_key(tenant_x, "x")  # 有 key 存在 → 全局强制认证
+    with TestClient(_make_app(database)) as client:
+        assert client.get("/api/v1/health").status_code == 200
+        assert client.get("/api/v1/metrics").status_code == 200
+        # 豁免仅限运维路径，业务面仍 401
+        assert client.get("/api/v1/sessions").status_code == 401
+
+
 async def test_default_tenant_fallback_without_api_keys(database):
     """空库（无 api_keys）时不带 key 的旧用法不回归。"""
     with TestClient(_make_app(database)) as client:

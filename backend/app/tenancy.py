@@ -101,7 +101,13 @@ class TenantMiddleware:
     """纯 ASGI 中间件：解析 X-API-Key 并把租户写入 contextvar。
 
     上下文在中间件任务内设置，对同一请求的后续 endpoint/依赖可见。
+
+    运维路径豁免（评审 H3）：/api/v1/health 被 compose healthcheck（无 key）、
+    /api/v1/metrics 被 Prometheus 抓取（无 key）——不豁免则首个 api_key
+    签发后容器被判 unhealthy、指标抓取全 401。这两者均无租户数据面。
     """
+
+    EXEMPT_PREFIXES = ("/api/v1/health", "/api/v1/metrics")
 
     def __init__(self, app, registry: TenantRegistry):
         self.app = app
@@ -109,6 +115,10 @@ class TenantMiddleware:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        if scope["type"] == "http" and any(path == prefix or path.startswith(prefix + "/") for prefix in self.EXEMPT_PREFIXES):
             await self.app(scope, receive, send)
             return
         headers = {key.decode("latin-1").lower(): value.decode("latin-1") for key, value in scope.get("headers", [])}
