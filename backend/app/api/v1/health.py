@@ -73,3 +73,11 @@ async def capabilities():
         "features": {"sse": True, "memory_management": True, "skill_management": True},
         "fastapi_workers": settings.workers,
     }
+
+@router.get("/metrics", include_in_schema=False)
+async def prometheus_metrics():
+    """Prometheus 抓取端点（P1-7）；文本格式，/metrics 为约定路径。"""
+    from fastapi import Response
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

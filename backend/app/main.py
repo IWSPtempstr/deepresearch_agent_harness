@@ -56,7 +56,9 @@ def create_app(
     async def lifespan(app: FastAPI):
         await database.create_schema()
         from deepresearch_agent.llm_gateway import start_metering, stop_metering
+        from deepresearch_agent.observability import setup_tracing
 
+        setup_tracing("deepresearch-api")
         start_metering(database)
         await run_service.startup_recovery(auto_resume=settings.AUTO_RESUME_RUNS if auto_resume is None else auto_resume)
         yield

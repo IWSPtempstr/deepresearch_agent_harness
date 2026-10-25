@@ -12,8 +12,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_compose_packages_three_loopback_services_and_persistent_data():
     compose = yaml.safe_load((ROOT / "docker-compose.yaml").read_text(encoding="utf-8"))
-    # P0 平台化改造：原 backend/frontend/neo4j 之外新增 postgres（主存）、redis（队列/SSE 扇出）与 worker（Run 执行进程）
-    assert set(compose["services"]) == {"neo4j", "backend", "frontend", "postgres", "redis", "worker"}
+    # P0/P1 平台化改造：postgres（主存）、redis（队列/SSE 扇出）、worker（执行进程）、
+    # prometheus/grafana（可观测性）
+    assert set(compose["services"]) == {"neo4j", "backend", "frontend", "postgres", "redis", "worker", "prometheus", "grafana"}
     for service in compose["services"].values():
         for port in service.get("ports", []):
             assert str(port).startswith("127.0.0.1:")

@@ -87,6 +87,29 @@ class HarnessRuntime:
         context.budget_usage.llm_tokens = max(context.budget_usage.llm_tokens, reported_tokens)
 
     async def execute_run(self, run_id: str) -> RunContext:
+        """观测外壳：span + 指标；真正的执行语义在 _execute_run_inner。"""
+        from deepresearch_agent.observability import ACTIVE_RUNS, RUN_DURATION_SECONDS, RUN_TOTAL, get_tracer
+
+        tracer = get_tracer("deepresearch.harness")
+        started_at = time.monotonic()
+        ACTIVE_RUNS.inc()
+        with tracer.start_as_current_span("harness.run", attributes={"run_id": run_id}) as run_span:
+            try:
+                context = await self._execute_run_inner(run_id)
+                run_span.set_attribute("run.status", context.status.value)
+                RUN_TOTAL.labels(status=context.status.value).inc()
+                return context
+            except BaseException as exc:
+                try:
+                    run_span.record_exception(exc)
+                except Exception:
+                    pass
+                raise
+            finally:
+                ACTIVE_RUNS.dec()
+                RUN_DURATION_SECONDS.observe(max(0.0, time.monotonic() - started_at))
+
+    async def _execute_run_inner(self, run_id: str) -> RunContext:
         owner = f"harness-{uuid.uuid4().hex}"
         if not await self.runs.acquire_lease(run_id, owner, ttl_seconds=self.lease_seconds):
             raise RuntimeError(f"Run {run_id} 已由其他 Runtime 执行")
@@ -547,24 +570,31 @@ class HarnessRuntime:
 
     async def _run_with_heartbeat(self, context: RunContext, budget: BudgetManager, operation, *, owner: str | None = None):
         """Run one long stage while persisting usage and enforcing cancel/budget limits."""
+        from deepresearch_agent.observability import get_tracer
+
+        tracer = get_tracer("deepresearch.harness")
         task = asyncio.create_task(operation)
         last_renewal = time.monotonic()
         try:
-            while not task.done():
-                await asyncio.wait({task}, timeout=1.0)
-                self._attach_prefix_usage(context)
-                context.budget_usage = budget.usage
-                budget.assert_available()
-                await self.runs.update_usage(context.run_id, budget.snapshot())
-                if not task.done():
-                    if owner is not None and time.monotonic() - last_renewal >= self.lease_renew_seconds:
-                        # 以同 owner 条件续约；失败即租约已被其他 Runtime 抢占，
-                        # 本地必须立刻让位，避免接管者与本地双写同一 Run
-                        if not await self.runs.acquire_lease(context.run_id, owner, ttl_seconds=self.lease_seconds):
-                            raise RunLeaseLost(f"Run {context.run_id} 的租约已被其他 Runtime 抢占")
-                        last_renewal = time.monotonic()
-                    await self._assert_not_cancelled(context)
-            return await task
+            with tracer.start_as_current_span(
+                "harness.stage", attributes={"run_id": context.run_id, "stage": context.status.value},
+            ) as stage_span:
+                while not task.done():
+                    await asyncio.wait({task}, timeout=1.0)
+                    self._attach_prefix_usage(context)
+                    context.budget_usage = budget.usage
+                    budget.assert_available()
+                    await self.runs.update_usage(context.run_id, budget.snapshot())
+                    if not task.done():
+                        if owner is not None and time.monotonic() - last_renewal >= self.lease_renew_seconds:
+                            # 以同 owner 条件续约；失败即租约已被其他 Runtime 抢占，
+                            # 本地必须立刻让位，避免接管者与本地双写同一 Run
+                            if not await self.runs.acquire_lease(context.run_id, owner, ttl_seconds=self.lease_seconds):
+                                raise RunLeaseLost(f"Run {context.run_id} 的租约已被其他 Runtime 抢占")
+                            last_renewal = time.monotonic()
+                        await self._assert_not_cancelled(context)
+                stage_span.set_attribute("stage.usage_tokens", context.budget_usage.llm_tokens)
+                return await task
         finally:
             if not task.done():
                 task.cancel()

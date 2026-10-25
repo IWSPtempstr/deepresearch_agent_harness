@@ -26,13 +26,21 @@ SHUTDOWN_GRACE_SECONDS = 30.0
 
 
 async def _scan_loop(service: RunService, interval: float) -> None:
-    """P0-3b：周期扫描过期租约并触发接管投递。"""
+    """P0-3b：周期扫描过期租约并触发接管投递；顺带刷新队列深度指标。"""
+    from deepresearch_agent.observability import QUEUE_DEPTH
+
     while True:
         await asyncio.sleep(interval)
         try:
             await service.recover_expired()
         except Exception:
             # 单轮扫描失败（如 DB 抖动）不终止循环；下一轮重试
+            continue
+        try:
+            # Redis Streams 的积压深度（流只承载唤醒信号，该值仅供观测）
+            length = await service.queue._client.xlen("dra:runs:queue") if service.queue is not None else 0
+            QUEUE_DEPTH.set(int(length))
+        except Exception:
             continue
 
 
@@ -42,7 +50,9 @@ async def _consume(worker_name: str | None = None) -> None:
     database = Database(settings.APP_DATABASE_URL)
     await database.create_schema()
     from deepresearch_agent.llm_gateway import start_metering, stop_metering
+    from deepresearch_agent.observability import setup_tracing
 
+    setup_tracing("deepresearch-worker")
     start_metering(database)
     queue = RedisStreamRunQueue.from_url(
         settings.REDIS_URL,

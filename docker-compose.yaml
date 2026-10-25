@@ -125,6 +125,32 @@ services:
       redis:
         condition: service_healthy
 
+  prometheus:
+    # P1-7：抓取 backend:/api/v1/metrics
+    image: prom/prometheus:v2.53.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: \"${GRAFANA_ADMIN_PASSWORD:-admin}\"
+    volumes:
+      - ./observability/grafana-dashboard.json:/var/lib/grafana/dashboards/dra-runtime.json:ro
+      - ./observability/grafana-datasource.yml:/etc/grafana/provisioning/datasources/dra.yml:ro
+      - ./observability/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dra.yml:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
   frontend:
     build:
       context: ./frontend
@@ -144,3 +170,5 @@ volumes:
   neo4j_backups:
   postgres_data:
   redis_data:
+  prometheus_data:
+  grafana_data:

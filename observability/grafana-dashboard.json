@@ -1,0 +1,66 @@
+{
+  "title": "DeepResearch Agent Runtime",
+  "uid": "dra-runtime",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Run 完成率（按终态）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "targets": [{"expr": "sum by (status) (rate(dra_runs_total[5m]))", "legendFormat": "{{status}}"}],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 2,
+      "title": "Run 时延 P50/P99",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+      "targets": [
+        {"expr": "histogram_quantile(0.5, sum(rate(dra_run_duration_seconds_bucket[5m])) by (le))", "legendFormat": "P50"},
+        {"expr": "histogram_quantile(0.99, sum(rate(dra_run_duration_seconds_bucket[5m])) by (le))", "legendFormat": "P99"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 3,
+      "title": "活动 / 排队 / 队列深度",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+      "targets": [
+        {"expr": "dra_active_runs", "legendFormat": "active"},
+        {"expr": "dra_waiting_runs", "legendFormat": "waiting"},
+        {"expr": "dra_queue_depth", "legendFormat": "queue depth"}
+      ]
+    },
+    {
+      "id": 4,
+      "title": "LLM 网关 per-provider 时延 P99",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [{"expr": "histogram_quantile(0.99, sum(rate(dra_llm_latency_seconds_bucket[5m])) by (le, provider))", "legendFormat": "{{provider}}"}],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 5,
+      "title": "LLM 网关错误率与限流命中",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {"expr": "sum by (provider) (rate(dra_llm_calls_total{status=\"error\"}[5m]))", "legendFormat": "errors {{provider}}"},
+        {"expr": "rate(dra_llm_rate_limited_total[5m])", "legendFormat": "rate limited"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 6,
+      "title": "Token 消耗（input/output）",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+      "targets": [{"expr": "sum by (direction) (rate(dra_llm_tokens_total[5m]))", "legendFormat": "{{direction}}"}],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    }
+  ]
+}

@@ -70,6 +70,12 @@ class SlotLimiter:
                 remaining = self.queue_timeout_seconds - (time.monotonic() - started)
                 if remaining <= 0 or not self._condition.wait(timeout=max(0.05, remaining)):
                     if self._counts.get(key, 0) >= self.max_concurrency:
+                        try:
+                            from deepresearch_agent.observability import LLM_RATE_LIMITED_TOTAL
+
+                            LLM_RATE_LIMITED_TOTAL.inc()
+                        except Exception:
+                            pass
                         raise LlmRateLimited(
                             f"LLM 网关排队超时（{key} 并发上限 {self.max_concurrency}）",
                             waited_seconds=time.monotonic() - started,
@@ -181,9 +187,15 @@ class FailoverChatOpenAI(PrefixAwareChatOpenAI):
         return chain
 
     def _meter(self, label: str, result: Any, latency_ms: int, error_code: Optional[str]) -> None:
+        usage = _usage_from_result(result)
+        try:
+            from deepresearch_agent.observability import observe_llm_call
+
+            observe_llm_call(provider=label, status="error" if error_code else "ok", latency_ms=latency_ms, usage=usage)
+        except Exception:
+            pass
         if self.gateway_recorder is None:
             return
-        usage = _usage_from_result(result)
         try:
             self.gateway_recorder.record(
                 provider=label,

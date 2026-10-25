@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: deepresearch-api
+    metrics_path: /api/v1/metrics
+    static_configs:
+      # 多实例时 backend 扩容占用 8000-8001（compose 端口范围），新增实例在此追加
+      - targets: ["backend:8000"]
+  - job_name: deepresearch-worker
+    metrics_path: /api/v1/metrics
+    static_configs:
+      # worker 进程内未运行 HTTP 服务；指标经由本 job 抓不到时，
+      # 演示环境可在 worker 侧启动 metrics-only uvicorn（WORKER_METRICS_PORT）。
+      # 这里先抓 api 聚合视图，worker 侧指标接入留待 P2。
+      - targets: ["backend:8000"]
