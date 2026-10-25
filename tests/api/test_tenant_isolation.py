@@ -122,6 +122,37 @@ async def test_ops_paths_exempt_from_tenant_auth(database):
         assert client.get("/api/v1/sessions").status_code == 401
 
 
+async def test_memories_are_tenant_scoped(database):
+    """评审 M3/M4：记忆按租户隔离——创建可见性、跨租户改删、召回过滤。"""
+    registry = TenantRegistry(database)
+    tenant_a = await registry.create_tenant("tenant-a")
+    tenant_b = await registry.create_tenant("tenant-b")
+    key_a = await registry.create_api_key(tenant_a, "a")
+    key_b = await registry.create_api_key(tenant_b, "b")
+    headers_a = {"X-API-Key": key_a}
+    headers_b = {"X-API-Key": key_b}
+
+    with TestClient(_make_app(database)) as client:
+        created = client.post("/api/v1/members".replace("members", "memories"), json={
+            "target": "user", "content": f"租户A的偏好-{tenant_a}", "kind": "preference",
+            "provenance_refs": [], "activate": True,
+        }, headers=headers_a)
+        assert created.status_code == 201, created.text
+        memory_id = created.json()["memory_id"]
+
+        # B 看不到 A 的记忆
+        listed_b = [item["memory_id"] for item in client.get("/api/v1/memories", headers=headers_b).json()["items"]]
+        assert memory_id not in listed_b
+        listed_a = [item["memory_id"] for item in client.get("/api/v1/memories", headers=headers_a).json()["items"]]
+        assert memory_id in listed_a
+
+        # 评审 M2 同类越权：B 不能改/删 A 的记忆
+        assert client.patch(f"/api/v1/memories/{memory_id}", json={"content": "hijacked"}, headers=headers_b).status_code == 404
+        assert client.delete(f"/api/v1/memories/{memory_id}", headers=headers_b).status_code == 404
+        # A 自己仍可改
+        assert client.patch(f"/api/v1/memories/{memory_id}", json={"content": "租户A更新"}, headers=headers_a).status_code == 200
+
+
 async def test_default_tenant_fallback_without_api_keys(database):
     """空库（无 api_keys）时不带 key 的旧用法不回归。"""
     with TestClient(_make_app(database)) as client:

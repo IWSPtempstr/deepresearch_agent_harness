@@ -166,6 +166,23 @@ async def test_metering_flush_persists_llm_calls(database):
         await recorder.stop()
 
 
+def test_metering_carries_tenant_dimension():
+    """评审 M4：llm_calls 必须记录当前租户。"""
+    from backend.app.tenancy import set_current_tenant
+
+    recorder = LlmCallRecorder()
+    model, primary, fallback = build_model(FakeClient(), FakeClient(), recorder=recorder)
+    token = set_current_tenant("tenant-xyz")
+    try:
+        run_sync(model, primary, fallback)
+    finally:
+        import backend.app.tenancy as tenancy
+
+        tenancy._current_tenant.reset(token)
+    items = [recorder._queue.get_nowait() for _ in range(recorder._queue.qsize())]
+    assert items and all(item["tenant_id"] == "tenant-xyz" for item in items), items
+
+
 def test_usage_extraction_variants():
     assert _usage_from_result(None) == {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     usage = _usage_from_result(FakeChatResult(total_tokens=50))

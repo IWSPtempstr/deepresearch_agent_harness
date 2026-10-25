@@ -212,6 +212,8 @@ class ArtifactModel(Base):
 class MemoryModel(Base):
     __tablename__ = "memories"
     memory_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # 评审 M3：user/project/domain 作用域的记忆跨 session 全局召回，必须按租户隔离
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, default="default", index=True)
     session_id: Mapped[str | None] = mapped_column(ForeignKey("sessions.session_id"))
     target: Mapped[str | None] = mapped_column(String(32))
     scope: Mapped[str] = mapped_column(String(32), nullable=False)

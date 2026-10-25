@@ -16,6 +16,16 @@ from deepresearch_agent.persistence.models import (
 from .utils import json_text, new_id, utc_now_iso
 
 
+def _tenant_scoped(statement):
+    """评审 M3：default 兜底租户不过滤（单机兼容/存量数据），其余租户强制隔离。"""
+    from backend.app.tenancy import DEFAULT_TENANT_ID, current_tenant_id
+
+    tenant_id = current_tenant_id()
+    if tenant_id != DEFAULT_TENANT_ID:
+        statement = statement.where(MemoryModel.tenant_id == tenant_id)
+    return statement
+
+
 class MemoryRepository:
     def __init__(self, database: Database):
         self.database = database
@@ -23,7 +33,9 @@ class MemoryRepository:
     async def create_candidate(self, *, content: str, scope: str, kind: str, provenance_refs: list[str], confidence: float, session_id: Optional[str] = None, created_by: str = "agent", supersedes: Optional[str] = None, expires_at: Optional[str] = None) -> MemoryModel:
         now = utc_now_iso()
         target = scope if scope in {"user", "project"} else None
-        model = MemoryModel(memory_id=new_id("mem"), session_id=session_id, target=target, scope=scope, kind=kind, content=content, provenance_json=json_text(provenance_refs), confidence=confidence, valid_from=now, expires_at=expires_at, supersedes=supersedes, status="candidate", created_by=created_by, created_at=now, updated_at=now)
+        from backend.app.tenancy import current_tenant_id
+
+        model = MemoryModel(memory_id=new_id("mem"), tenant_id=current_tenant_id(), session_id=session_id, target=target, scope=scope, kind=kind, content=content, provenance_json=json_text(provenance_refs), confidence=confidence, valid_from=now, expires_at=expires_at, supersedes=supersedes, status="candidate", created_by=created_by, created_at=now, updated_at=now)
         async with self.database.transaction() as session:
             session.add(model)
         return model
@@ -36,7 +48,7 @@ class MemoryRepository:
             statement = select(MemoryModel).where(MemoryModel.memory_id.in_(ids), MemoryModel.deleted_at.is_(None))
             if status:
                 statement = statement.where(MemoryModel.status == status)
-            return list((await session.execute(statement)).scalars())
+            return list((await session.execute(_tenant_scoped(statement))).scalars())
 
     async def get(self, memory_id: str) -> Optional[MemoryModel]:
         async with self.database.sessions() as session:
@@ -49,7 +61,7 @@ class MemoryRepository:
                 (MemoryModel.expires_at.is_(None) | (MemoryModel.expires_at > now)),
                 ((MemoryModel.scope.in_(("project", "domain", "user"))) | (MemoryModel.session_id == session_id)),
             ).order_by(MemoryModel.confidence.desc(), MemoryModel.updated_at.desc()).limit(limit)
-            return list((await session.execute(statement)).scalars())
+            return list((await session.execute(_tenant_scoped(statement))).scalars())
 
     async def list_curated(self, *, statuses: tuple[str, ...] = ("active",), target: str | None = None, now: str | None = None, limit: int = 200) -> list[MemoryModel]:
         """Return only the bounded user/project store used in prompt snapshots."""
@@ -64,6 +76,7 @@ class MemoryRepository:
                 statement = statement.where(effective_target == target)
             if now is not None:
                 statement = statement.where(MemoryModel.expires_at.is_(None) | (MemoryModel.expires_at > now))
+            statement = _tenant_scoped(statement)
             statement = statement.order_by(effective_target, MemoryModel.updated_at, MemoryModel.memory_id).limit(limit)
             return list((await session.execute(statement)).scalars())
 

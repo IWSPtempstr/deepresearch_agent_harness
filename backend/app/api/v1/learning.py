@@ -273,6 +273,12 @@ async def list_memories(q: str | None = None, status_filter: str | None = None, 
     else:
         async with database.sessions() as session:
             statement = select(MemoryModel).where(MemoryModel.deleted_at.is_(None))
+            # 评审 M3：default 兜底放行，其余租户强制隔离（与仓储层同规则）
+            from backend.app.tenancy import DEFAULT_TENANT_ID, current_tenant_id
+
+            tenant_id = current_tenant_id()
+            if tenant_id != DEFAULT_TENANT_ID:
+                statement = statement.where(MemoryModel.tenant_id == tenant_id)
             if status_filter:
                 statement = statement.where(MemoryModel.status == status_filter)
             if target:
@@ -306,7 +312,12 @@ async def create_memory(payload: MemoryCreate, memory_service=Depends(get_memory
 
 
 @router.patch("/memories/{memory_id}")
-async def patch_memory(memory_id: str, payload: MemoryLifecycleUpdate, memory_service=Depends(get_memory_service)):
+async def patch_memory(memory_id: str, payload: MemoryLifecycleUpdate, memory_service=Depends(get_memory_service), database=Depends(get_database)):
+    from backend.app.tenancy import DEFAULT_TENANT_ID, current_tenant_id
+
+    existing = await MemoryRepository(database).get(memory_id)
+    if existing is not None and current_tenant_id() != DEFAULT_TENANT_ID and existing.tenant_id != current_tenant_id():
+        raise AppError(ErrorCode.NOT_FOUND, "Memory 不存在")
     try:
         item = await memory_service.update(memory_id, content=payload.content, status=payload.status, expires_at=payload.expires_at)
     except MemoryRejected as exc:
@@ -317,7 +328,12 @@ async def patch_memory(memory_id: str, payload: MemoryLifecycleUpdate, memory_se
 
 
 @router.delete("/memories/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_memory(memory_id: str, memory_service=Depends(get_memory_service)):
+async def delete_memory(memory_id: str, memory_service=Depends(get_memory_service), database=Depends(get_database)):
+    from backend.app.tenancy import DEFAULT_TENANT_ID, current_tenant_id
+
+    existing = await MemoryRepository(database).get(memory_id)
+    if existing is not None and current_tenant_id() != DEFAULT_TENANT_ID and existing.tenant_id != current_tenant_id():
+        raise AppError(ErrorCode.NOT_FOUND, "Memory 不存在")
     if not await memory_service.delete(memory_id):
         raise AppError(ErrorCode.NOT_FOUND, "Memory 不存在")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

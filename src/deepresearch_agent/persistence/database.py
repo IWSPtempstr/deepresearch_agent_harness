@@ -88,6 +88,7 @@ class Database:
             "memories": {
                 "target": "VARCHAR(32)",
                 "archived_at": "VARCHAR(40)",
+                "tenant_id": "VARCHAR(64) DEFAULT 'default'",
             },
             # P2-8 多租户：旧库平滑升级（create_all 不改已有表）
             "runs": {"tenant_id": "VARCHAR(64) DEFAULT 'default'"},

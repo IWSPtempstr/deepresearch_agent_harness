@@ -201,6 +201,8 @@ class FailoverChatOpenAI(PrefixAwareChatOpenAI):
                 provider=label,
                 model=str(self.model_name or ""),
                 run_id=get_current_run(),
+                # 评审 M4：计量必须带租户维度，否则 per-tenant token 面板失真
+                tenant_id=self._tenant_key(),
                 usage=usage,
                 latency_ms=latency_ms,
                 status="error" if error_code else "ok",
