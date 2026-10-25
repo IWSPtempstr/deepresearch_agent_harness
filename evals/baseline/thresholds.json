@@ -1,0 +1,6 @@
+{
+  "verified_completion_rate": 0.95,
+  "first_pass_completion_rate": 0.90,
+  "citation_validity": 0.95,
+  "_comment": "确定性 replay gold 集的基线阈值为 1.0，门限取基线 -5%；接入真实 LLM 场景后用 scripts/evaluate_runs.py 实测更新"
+}

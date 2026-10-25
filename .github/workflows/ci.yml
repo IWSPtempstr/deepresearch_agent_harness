@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-dummy' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 全量回归（137+ 用例，离线可复现）
+        run: python -m pytest tests/ -q
+      - name: 评测回归门（gold 集，低于阈值失败）
+        run: python scripts/evaluation_gate.py --output eval-results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results
+          path: eval-results.json
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+  postgres-compat:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: dra
+          POSTGRES_PASSWORD: dra
+          POSTGRES_DB: dra
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dra -d dra"
+          --health-interval 10s --health-timeout 5s --health-retries 20
+    env:
+      OPENAI_API_KEY: sk-dummy
+      TEST_POSTGRES_URL: postgresql+asyncpg://dra:dra@127.0.0.1:5432/dra
+      APP_DATABASE_URL: postgresql+asyncpg://dra:dra@127.0.0.1:5432/dra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 迁移链（空库 upgrade head）
+        run: PYTHONPATH=src:. python -m alembic upgrade head
+      - name: 方言一致性 + 全量回归（PG 后端）
+        run: python -m pytest tests/ -q
