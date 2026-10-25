@@ -67,6 +67,10 @@ def create_app(
         await database.close()
 
     app = FastAPI(title="DeepResearch HybridRAG Local MVP", version="0.4.0", lifespan=lifespan)
+    # P2-8：租户解析（X-API-Key → contextvar）；无 api_keys 时全部落 default 租户
+    from backend.app.tenancy import TenantMiddleware, TenantRegistry
+
+    app.add_middleware(TenantMiddleware, registry=TenantRegistry(database))
     app.state.database = database
     app.state.run_service = run_service
     app.state.chat_service = ChatService(
@@ -108,6 +112,8 @@ def create_app(
             ErrorCode.NOT_FOUND: 404, ErrorCode.CONFLICT: 409, ErrorCode.IDEMPOTENCY_CONFLICT: 409,
             ErrorCode.INVALID_SOURCE_MODE: 422, ErrorCode.TAVILY_API_KEY_MISSING: 503,
             ErrorCode.SOURCE_UNAVAILABLE: 503, ErrorCode.DATABASE_UNAVAILABLE: 503,
+            ErrorCode.TENANT_UNAUTHENTICATED: 401, ErrorCode.TENANT_FORBIDDEN: 403,
+            ErrorCode.LLM_RATE_LIMITED: 429,
         }.get(exc.code, 400)
         return _error(request, status_code=status_code, code=exc.code.value, message=exc.message, retryable=exc.retryable, details=exc.details)
 

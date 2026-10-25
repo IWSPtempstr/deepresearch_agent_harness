@@ -99,7 +99,9 @@ class EvidenceRepository:
             existing = await session.get(EvidenceModel, data.evidence_id)
             if existing:
                 return existing
-            model = EvidenceModel(evidence_id=data.evidence_id, run_id=data.run_id, task_id=data.task_id, tool_call_id=data.tool_call_id, source_mode=data.source_mode.value, provider=data.provider, source_id=data.source_id, title=data.title, summary=data.summary, metadata_json=json_text(metadata or {}), content_hash=data.content_hash, artifact_id=data.artifact_id, score=data.score, created_at=utc_now_iso())
+            from backend.app.tenancy import current_tenant_id
+
+            model = EvidenceModel(evidence_id=data.evidence_id, tenant_id=current_tenant_id(), run_id=data.run_id, task_id=data.task_id, tool_call_id=data.tool_call_id, source_mode=data.source_mode.value, provider=data.provider, source_id=data.source_id, title=data.title, summary=data.summary, metadata_json=json_text(metadata or {}), content_hash=data.content_hash, artifact_id=data.artifact_id, score=data.score, created_at=utc_now_iso())
             session.add(model)
             return model
 

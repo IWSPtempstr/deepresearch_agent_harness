@@ -147,7 +147,16 @@ class RunService:
 
     async def execute_now(self, run_id: str) -> Any:
         """worker 进程入口：直接执行一个 Run（与 API 进程内调度共用同一执行体）。"""
-        return await self._execute(run_id)
+        run = await self.runs.get(run_id)
+        from backend.app.tenancy import set_current_tenant
+
+        token = set_current_tenant(run.tenant_id if run is not None else "default")
+        try:
+            return await self._execute(run_id)
+        finally:
+            from backend.app.tenancy import _current_tenant
+
+            _current_tenant.reset(token)
 
     async def _execute(self, run_id: str):
         agents: list[Any] = []

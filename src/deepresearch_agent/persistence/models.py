@@ -8,9 +8,30 @@ class Base(DeclarativeBase):
     pass
 
 
+class TenantModel(Base):
+    """租户（P2-8）：预算与限流的归属单位。"""
+
+    __tablename__ = "tenants"
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    budget_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+
+
+class ApiKeyModel(Base):
+    __tablename__ = "api_keys"
+    key_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.tenant_id"), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    label: Mapped[str] = mapped_column(String(160), nullable=False, default="")
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    revoked_at: Mapped[str | None] = mapped_column(String(40))
+
+
 class SessionModel(Base):
     __tablename__ = "sessions"
     session_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, default="default", index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     summary_json: Mapped[str | None] = mapped_column(Text)
@@ -27,6 +48,7 @@ class SessionModel(Base):
 class MessageModel(Base):
     __tablename__ = "messages"
     message_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, default="default", index=True)
     session_id: Mapped[str] = mapped_column(ForeignKey("sessions.session_id"), nullable=False)
     run_id: Mapped[str | None] = mapped_column(String(64))
     client_message_id: Mapped[str | None] = mapped_column(String(128))
@@ -45,6 +67,7 @@ class MessageModel(Base):
 class RunModel(Base):
     __tablename__ = "runs"
     run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, default="default", index=True)
     session_id: Mapped[str] = mapped_column(ForeignKey("sessions.session_id"), nullable=False)
     trigger_message_id: Mapped[str] = mapped_column(ForeignKey("messages.message_id"), nullable=False, unique=True)
     source_mode: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -142,6 +165,7 @@ class ToolCallModel(Base):
 class EvidenceModel(Base):
     __tablename__ = "evidence"
     evidence_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, default="default", index=True)
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.run_id"), nullable=False)
     task_id: Mapped[str | None] = mapped_column(String(64))
     tool_call_id: Mapped[str | None] = mapped_column(String(64))

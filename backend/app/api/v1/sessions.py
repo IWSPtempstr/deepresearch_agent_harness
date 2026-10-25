@@ -62,6 +62,11 @@ async def get_session(
     item = await SessionRepository(database).get(session_id)
     if item is None:
         raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
+    from backend.app.tenancy import DEFAULT_TENANT_ID, current_tenant_id
+
+    tenant_id = current_tenant_id()
+    if tenant_id != DEFAULT_TENANT_ID and item.tenant_id != tenant_id:
+        raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
     messages = await MessageRepository(database).list_for_session(session_id, limit=message_limit, offset=message_offset)
     runs = await RunRepository(database).list_for_session(session_id)
     result = session_dict(item)
@@ -81,6 +86,11 @@ async def get_session_whiteboard(session_id: str, database=Depends(get_database)
     """Return a durable chronological log of messages, Run events and tool I/O."""
     item = await SessionRepository(database).get(session_id)
     if item is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
+    from backend.app.tenancy import DEFAULT_TENANT_ID, current_tenant_id
+
+    tenant_id = current_tenant_id()
+    if tenant_id != DEFAULT_TENANT_ID and item.tenant_id != tenant_id:
         raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
     async with database.sessions() as session:
         messages = list((await session.execute(

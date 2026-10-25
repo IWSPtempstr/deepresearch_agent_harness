@@ -223,12 +223,21 @@ class FailoverChatOpenAI(PrefixAwareChatOpenAI):
         return result, None
 
     def _run_chain(self, invoke_primary, invoke_client):
-        """同步调用链：限流排队 → 按健康度逐 provider 尝试。"""
+        """同步调用链：限流排队（按租户键）→ 按健康度逐 provider 尝试。"""
         limiter = self.gateway_limiter
         if limiter is None:
             return self._run_chain_inner(invoke_primary, invoke_client)
-        with limiter.slot("default"):
+        with limiter.slot(self._tenant_key()):
             return self._run_chain_inner(invoke_primary, invoke_client)
+
+    @staticmethod
+    def _tenant_key() -> str:
+        try:
+            from backend.app.tenancy import current_tenant_id
+
+            return current_tenant_id() or "default"
+        except Exception:
+            return "default"
 
     def _run_chain_inner(self, invoke_primary, invoke_client):
         last_error: Optional[Exception] = None
@@ -258,7 +267,7 @@ class FailoverChatOpenAI(PrefixAwareChatOpenAI):
             return await self._agenerate_chain(messages, stop, run_manager, **kwargs)
         # 同步限流器（threading.Condition）通过 to_thread 复用到异步路径；
         # 槽位上下文管理器必须先构造再跨线程 enter/exit，保证释放的是同一个槽
-        slot = limiter.slot("default")
+        slot = limiter.slot(self._tenant_key())
         await asyncio.to_thread(slot.__enter__)
         try:
             return await self._agenerate_chain(messages, stop, run_manager, **kwargs)

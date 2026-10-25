@@ -2,6 +2,8 @@
 
 import re
 
+from sqlalchemy import select
+
 from backend.app.schemas import MessageCreate, MessageSend, RunAccepted, RunCreate
 from deepresearch_agent.config.settings import HARNESS_BUDGETS, LEARNING_REVIEW_MODEL, OPENAI_LLM_MODEL
 from deepresearch_agent.harness.errors import AppError, ErrorCode
@@ -34,6 +36,10 @@ class ChatService:
 
     async def send(self, session_id: str, request: MessageSend) -> RunAccepted:
         session = await self.sessions.get(session_id)
+        from backend.app.tenancy import DEFAULT_TENANT_ID, current_tenant_id
+
+        if session is not None and current_tenant_id() != DEFAULT_TENANT_ID and session.tenant_id != current_tenant_id():
+            raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
         if session is None:
             raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
         if session.status != "active":
@@ -69,6 +75,24 @@ class ChatService:
         detailed_request = request.report_type == "long_document" or any(
             marker in request.content for marker in ("详细", "深入", "全面", "长篇")
         )
+        # P2-8：租户预算覆盖默认预算（部分键覆盖，其余沿用 HARNESS_BUDGETS）
+        budget = dict(HARNESS_BUDGETS)
+        from backend.app.tenancy import current_tenant_id
+
+        tenant_row = None
+        if current_tenant_id() != "default":
+            from backend.app.tenancy import TenantRegistry
+
+            async with self.runs.database.sessions() as db_session:
+                from deepresearch_agent.persistence.models import TenantModel
+
+                tenant_row = (await db_session.execute(
+                    select(TenantModel).where(TenantModel.tenant_id == current_tenant_id())
+                )).scalar_one_or_none()
+        if tenant_row is not None:
+            import json as _json
+
+            budget = {**budget, **(_json.loads(tenant_row.budget_json or "{}") or {})}
         message, run, created = await self.runs.create_for_user_message(
             MessageCreate(
                 session_id=session_id, role="user", content=request.content,
@@ -86,7 +110,7 @@ class ChatService:
                     "deep_research_max_iterations": 1 if request.source_mode.value == "graphrag" else 2,
                     "schema_version": 1,
                 },
-                budget=HARNESS_BUDGETS,
+                budget=budget,
             ),
         )
         if created:

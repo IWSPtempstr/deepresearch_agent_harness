@@ -104,6 +104,8 @@ LLM_MAX_CONCURRENT_CALLS = _get_env_int("LLM_MAX_CONCURRENT_CALLS", 8) or 8
 LLM_QUEUE_TIMEOUT_SECONDS = _get_env_float("LLM_QUEUE_TIMEOUT_SECONDS", 30.0) or 30.0
 # provider 连续失败的冷却基数（指数退避，上限 300s）
 LLM_PROVIDER_COOLDOWN_SECONDS = _get_env_float("LLM_PROVIDER_COOLDOWN_SECONDS", 30.0) or 30.0
+# 多租户（P2-8）：true 时无 API key 一律 401；false 时库中存在 api_keys 才强制
+TENANT_AUTH_REQUIRED = _get_env_bool("TENANT_AUTH_REQUIRED", False)
 ARTIFACT_ROOT = Path(os.getenv("ARTIFACT_ROOT", PROJECT_ROOT / "data" / "artifacts")).expanduser()
 SKILLS_ROOT = Path(os.getenv("SKILLS_ROOT", PROJECT_ROOT / "skills")).expanduser()
 AUTO_RESUME_RUNS = _get_env_bool("AUTO_RESUME_RUNS", True)

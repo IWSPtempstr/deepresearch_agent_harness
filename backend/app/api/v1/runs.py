@@ -105,6 +105,12 @@ async def require_run(database, run_id: str):
     run = await RunRepository(database).get(run_id)
     if run is None:
         raise AppError(ErrorCode.NOT_FOUND, "Run 不存在")
+    # P2-8：Run 归属租户校验；default 兜底租户放行（单机兼容），其余强制一致
+    from backend.app.tenancy import DEFAULT_TENANT_ID, current_tenant_id
+
+    tenant_id = current_tenant_id()
+    if tenant_id != DEFAULT_TENANT_ID and run.tenant_id != tenant_id:
+        raise AppError(ErrorCode.TENANT_FORBIDDEN, "Run 不属于当前租户", retryable=False)
     return run
 
 

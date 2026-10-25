@@ -86,6 +86,11 @@ class Database:
                 "target": "VARCHAR(32)",
                 "archived_at": "VARCHAR(40)",
             },
+            # P2-8 多租户：旧库平滑升级（create_all 不改已有表）
+            "sessions": {"tenant_id": "VARCHAR(64) DEFAULT 'default'"},
+            "runs": {"tenant_id": "VARCHAR(64) DEFAULT 'default'"},
+            "messages": {"tenant_id": "VARCHAR(64) DEFAULT 'default'"},
+            "evidence": {"tenant_id": "VARCHAR(64) DEFAULT 'default'"},
         }
         for table_name, columns in required.items():
             existing = {row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()}

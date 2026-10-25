@@ -23,8 +23,10 @@ class SessionRepository:
         self.database = database
 
     async def create(self, data: SessionCreate) -> SessionModel:
+        from backend.app.tenancy import current_tenant_id
+
         now = utc_now_iso()
-        model = SessionModel(session_id=new_id("ses"), title=data.title, status="active", created_at=now, updated_at=now)
+        model = SessionModel(session_id=new_id("ses"), tenant_id=current_tenant_id(), title=data.title, status="active", created_at=now, updated_at=now)
         async with self.database.transaction() as session:
             session.add(model)
         return model
@@ -56,9 +58,14 @@ class SessionRepository:
             return (await session.execute(query)).scalar_one_or_none()
 
     async def list(self, *, limit: int = 30, offset: int = 0, include_archived: bool = False) -> list[SessionModel]:
+        from backend.app.tenancy import DEFAULT_TENANT_ID, current_tenant_id
+
         limit = max(1, min(limit, 100))
         async with self.database.sessions() as session:
             query = select(SessionModel).where(SessionModel.deleted_at.is_(None))
+            tenant_id = current_tenant_id()
+            if tenant_id != DEFAULT_TENANT_ID:
+                query = query.where(SessionModel.tenant_id == tenant_id)
             if not include_archived:
                 query = query.where(SessionModel.status == "active")
             result = await session.execute(query.order_by(SessionModel.updated_at.desc()).limit(limit).offset(max(0, offset)))
@@ -100,11 +107,17 @@ class SessionRepository:
             return result.rowcount == 1
 
     async def search(self, query: str, *, limit: int = 20) -> list[SessionModel]:
+        from backend.app.tenancy import DEFAULT_TENANT_ID, current_tenant_id
+
         async with self.database.sessions() as session:
             ids = await self.database.search.search_session_ids(session, query, limit=limit)
             if not ids:
                 return []
-            return list((await session.execute(select(SessionModel).where(SessionModel.session_id.in_(ids), SessionModel.deleted_at.is_(None)))).scalars())
+            statement = select(SessionModel).where(SessionModel.session_id.in_(ids), SessionModel.deleted_at.is_(None))
+            tenant_id = current_tenant_id()
+            if tenant_id != DEFAULT_TENANT_ID:
+                statement = statement.where(SessionModel.tenant_id == tenant_id)
+            return list((await session.execute(statement)).scalars())
 
     async def update_summary(self, session_id: str, summary: dict[str, Any]) -> bool:
         async with self.database.transaction() as session:
@@ -117,12 +130,15 @@ class MessageRepository:
         self.database = database
 
     async def append(self, data: MessageCreate) -> tuple[MessageModel, bool]:
+        from backend.app.tenancy import current_tenant_id
+
+        tenant_id = current_tenant_id()
         async with self.database.transaction() as session:
             if data.client_message_id:
                 existing = (await session.execute(select(MessageModel).where(MessageModel.session_id == data.session_id, MessageModel.client_message_id == data.client_message_id))).scalar_one_or_none()
                 if existing:
                     return existing, False
-            model = MessageModel(message_id=new_id("msg"), session_id=data.session_id, run_id=data.run_id, client_message_id=data.client_message_id, role=data.role, content=data.content, metadata_json=json_text(data.metadata), created_at=utc_now_iso())
+            model = MessageModel(message_id=new_id("msg"), tenant_id=tenant_id, session_id=data.session_id, run_id=data.run_id, client_message_id=data.client_message_id, role=data.role, content=data.content, metadata_json=json_text(data.metadata), created_at=utc_now_iso())
             session.add(model)
             return model, True
 
@@ -168,8 +184,10 @@ class RunRepository:
         self.database = database
 
     async def create(self, data: RunCreate) -> RunModel:
+        from backend.app.tenancy import current_tenant_id
+
         now = utc_now_iso()
-        model = RunModel(run_id=new_id("run"), session_id=data.session_id, trigger_message_id=data.trigger_message_id, source_mode=data.source_mode.value, workflow_mode=data.workflow_mode.value, status="queued", config_snapshot_json=json_text(data.config_snapshot), model_snapshot_json="{}", budget_json=json_text(data.budget), usage_json="{}", created_at=now, updated_at=now)
+        model = RunModel(run_id=new_id("run"), tenant_id=current_tenant_id(), session_id=data.session_id, trigger_message_id=data.trigger_message_id, source_mode=data.source_mode.value, workflow_mode=data.workflow_mode.value, status="queued", config_snapshot_json=json_text(data.config_snapshot), model_snapshot_json="{}", budget_json=json_text(data.budget), usage_json="{}", created_at=now, updated_at=now)
         try:
             async with self.database.transaction() as session:
                 session.add(model)
@@ -179,6 +197,8 @@ class RunRepository:
 
     async def create_for_user_message(self, message: MessageCreate, run: RunCreate) -> tuple[MessageModel, RunModel, bool]:
         """Atomically apply idempotency, user message, queued Run and queued event."""
+        from backend.app.tenancy import current_tenant_id
+
         if message.role != "user" or message.session_id != run.session_id:
             raise ValueError("原子创建仅接受同一 Session 的 user message")
         async with self.database.transaction() as session:
@@ -190,8 +210,8 @@ class RunRepository:
                         raise AppError(ErrorCode.IDEMPOTENCY_CONFLICT, "client_message_id 已被不同的消息或运行参数使用")
                     return existing_message, existing_run, False
             now = utc_now_iso()
-            message_model = MessageModel(message_id=new_id("msg"), session_id=message.session_id, client_message_id=message.client_message_id, role="user", content=message.content, metadata_json=json_text(message.metadata), created_at=now)
-            run_model = RunModel(run_id=new_id("run"), session_id=run.session_id, trigger_message_id=message_model.message_id, source_mode=run.source_mode.value, workflow_mode=run.workflow_mode.value, status="queued", config_snapshot_json=json_text(run.config_snapshot), model_snapshot_json="{}", budget_json=json_text(run.budget), usage_json="{}", created_at=now, updated_at=now)
+            message_model = MessageModel(message_id=new_id("msg"), tenant_id=current_tenant_id(), session_id=message.session_id, client_message_id=message.client_message_id, role="user", content=message.content, metadata_json=json_text(message.metadata), created_at=now)
+            run_model = RunModel(run_id=new_id("run"), tenant_id=message_model.tenant_id, session_id=run.session_id, trigger_message_id=message_model.message_id, source_mode=run.source_mode.value, workflow_mode=run.workflow_mode.value, status="queued", config_snapshot_json=json_text(run.config_snapshot), model_snapshot_json="{}", budget_json=json_text(run.budget), usage_json="{}", created_at=now, updated_at=now)
             event_model = RunEventModel(run_id=run_model.run_id, event_type="run.queued", stage="queued", payload_json=json_text({"run_id": run_model.run_id, "schema_version": EVENT_SCHEMA_VERSION}), schema_version=EVENT_SCHEMA_VERSION, created_at=now)
             session.add(message_model)
             await session.flush()
