@@ -22,6 +22,15 @@ def session_dict(item):
     )}
 
 
+def _assert_session_tenant(item):
+    """评审 M2：default 兜底租户放行（单机兼容），其余租户强制归属一致。"""
+    from backend.app.tenancy import DEFAULT_TENANT_ID, current_tenant_id
+
+    tenant_id = current_tenant_id()
+    if tenant_id != DEFAULT_TENANT_ID and item.tenant_id != tenant_id:
+        raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_session(payload: SessionCreate, database=Depends(get_database)):
     return session_dict(await SessionRepository(database).create(payload))
@@ -62,11 +71,7 @@ async def get_session(
     item = await SessionRepository(database).get(session_id)
     if item is None:
         raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
-    from backend.app.tenancy import DEFAULT_TENANT_ID, current_tenant_id
-
-    tenant_id = current_tenant_id()
-    if tenant_id != DEFAULT_TENANT_ID and item.tenant_id != tenant_id:
-        raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
+    _assert_session_tenant(item)
     messages = await MessageRepository(database).list_for_session(session_id, limit=message_limit, offset=message_offset)
     runs = await RunRepository(database).list_for_session(session_id)
     result = session_dict(item)
@@ -87,11 +92,7 @@ async def get_session_whiteboard(session_id: str, database=Depends(get_database)
     item = await SessionRepository(database).get(session_id)
     if item is None:
         raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
-    from backend.app.tenancy import DEFAULT_TENANT_ID, current_tenant_id
-
-    tenant_id = current_tenant_id()
-    if tenant_id != DEFAULT_TENANT_ID and item.tenant_id != tenant_id:
-        raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
+    _assert_session_tenant(item)
     async with database.sessions() as session:
         messages = list((await session.execute(
             select(MessageModel).where(MessageModel.session_id == session_id)
@@ -158,8 +159,11 @@ async def get_session_whiteboard(session_id: str, database=Depends(get_database)
 @router.patch("/{session_id}")
 async def patch_session(session_id: str, payload: SessionPatch, database=Depends(get_database)):
     repository = SessionRepository(database)
-    if await repository.get(session_id) is None:
+    item = await repository.get(session_id)
+    if item is None:
         raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
+    # 评审 M2：写路径与读路径同权校验归属（此前仅 GET 校验，存在跨租户改名/删除）
+    _assert_session_tenant(item)
     if payload.title is not None:
         await repository.rename(session_id, payload.title)
     if payload.status == "archived":
@@ -171,6 +175,10 @@ async def patch_session(session_id: str, payload: SessionPatch, database=Depends
 
 @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_session(session_id: str, database=Depends(get_database)):
+    item = await SessionRepository(database).get(session_id)
+    if item is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
+    _assert_session_tenant(item)
     if not await SessionRepository(database).soft_delete(session_id):
         raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -84,6 +84,13 @@ async def test_two_tenants_are_strictly_isolated(database):
         # 会话详情同样隔离
         assert client.get(f"/api/v1/sessions/{session_b}", headers=headers_a).status_code == 404
 
+        # 评审 M2：写路径同权——跨租户改名/归档/软删除/白板读取全部拒绝
+        assert client.patch(f"/api/v1/sessions/{session_b}", json={"title": "hijacked"}, headers=headers_a).status_code == 404
+        assert client.delete(f"/api/v1/sessions/{session_b}", headers=headers_a).status_code == 404
+        assert client.get(f"/api/v1/sessions/{session_b}/whiteboard", headers=headers_a).status_code == 404
+        # B 的会话未被 A 破坏
+        assert client.get(f"/api/v1/sessions/{session_b}", headers=headers_b).json()["title"] != "hijacked"
+
 
 async def test_missing_key_rejected_once_api_keys_exist(database):
     registry = TenantRegistry(database)

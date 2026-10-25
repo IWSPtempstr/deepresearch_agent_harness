@@ -77,17 +77,19 @@ class Database:
     @staticmethod
     def _ensure_additive_columns(connection) -> None:
         required = {
+            # 评审 M1：sessions 只能有一个键——dict 重复键会被静默覆盖，
+            # 旧库的 memory_snapshot 自愈列会丢失
             "sessions": {
                 "memory_snapshot_json": "TEXT",
                 "memory_snapshot_version": "INTEGER",
                 "memory_snapshot_created_at": "VARCHAR(40)",
+                "tenant_id": "VARCHAR(64) DEFAULT 'default'",
             },
             "memories": {
                 "target": "VARCHAR(32)",
                 "archived_at": "VARCHAR(40)",
             },
             # P2-8 多租户：旧库平滑升级（create_all 不改已有表）
-            "sessions": {"tenant_id": "VARCHAR(64) DEFAULT 'default'"},
             "runs": {"tenant_id": "VARCHAR(64) DEFAULT 'default'"},
             "messages": {"tenant_id": "VARCHAR(64) DEFAULT 'default'"},
             "evidence": {"tenant_id": "VARCHAR(64) DEFAULT 'default'"},
