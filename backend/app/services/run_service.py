@@ -178,6 +178,7 @@ class RunService:
             event_bus=self.event_bus,
             context_builder=self.context_builder, memory_extractor=self.memory_extractor, skill_distiller=None,
             prefix_tracker=prefix_tracker,
+            lease_seconds=settings.RUN_LEASE_SECONDS,
         )
         try:
             return await runtime.execute_run(run_id)
@@ -246,6 +247,17 @@ class RunService:
         for run_id in run_ids:
             self.schedule(run_id)
         await self.skill_learning.recover()
+        return run_ids
+
+    async def recover_expired(self) -> list[str]:
+        """P0-3b 周期扫描：把租约过期的在跑 Run 标记 interrupted 并重新投递。
+
+        多 worker 重复投递是安全的：执行侧以条件 UPDATE 抢租约，
+        抢不到的实例直接让位（RunLeaseLost 语义），租约就是互斥量。
+        """
+        run_ids = await RecoveryManager(self.runs).scan(auto_resume=True)
+        for run_id in run_ids:
+            self.schedule(run_id)
         return run_ids
 
     async def cancel(self, run_id: str) -> bool:

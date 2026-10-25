@@ -24,6 +24,17 @@ from deepresearch_agent.queueing import RedisStreamRunQueue
 SHUTDOWN_GRACE_SECONDS = 30.0
 
 
+async def _scan_loop(service: RunService, interval: float) -> None:
+    """P0-3b：周期扫描过期租约并触发接管投递。"""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await service.recover_expired()
+        except Exception:
+            # 单轮扫描失败（如 DB 抖动）不终止循环；下一轮重试
+            continue
+
+
 async def _consume(worker_name: str | None = None) -> None:
     if not settings.REDIS_URL:
         raise SystemExit("worker 进程需要设置 REDIS_URL（平台模式）")
@@ -47,9 +58,10 @@ async def _consume(worker_name: str | None = None) -> None:
             return
 
     try:
-        semaphore = asyncio.Semaphore(max(1, settings.WORKER_CONCURRENCY))
-        inflight: set[asyncio.Task] = set()
-        generator = queue.consume()
+    semaphore = asyncio.Semaphore(max(1, settings.WORKER_CONCURRENCY))
+    inflight: set[asyncio.Task] = set()
+    scanner = asyncio.create_task(_scan_loop(service, settings.RECOVERY_SCAN_SECONDS), name="lease-scanner")
+    generator = queue.consume()
         while not stop.is_set():
             try:
                 run_id = await asyncio.wait_for(anext(generator), timeout=1.0)
@@ -68,6 +80,8 @@ async def _consume(worker_name: str | None = None) -> None:
         if inflight:
             await asyncio.wait(set(inflight), timeout=SHUTDOWN_GRACE_SECONDS)
     finally:
+        scanner.cancel()
+        await asyncio.gather(scanner, return_exceptions=True)
         await service.shutdown()
         await queue.close()
         await database.close()

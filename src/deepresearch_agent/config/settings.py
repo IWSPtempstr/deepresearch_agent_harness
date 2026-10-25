@@ -91,6 +91,10 @@ APP_DATABASE_URL = os.getenv(
 REDIS_URL = (os.getenv("REDIS_URL") or "").strip()
 # worker 进程同时在跑的 Run 数上限（API 进程内模式不设此限）
 WORKER_CONCURRENCY = _get_env_int("WORKER_CONCURRENCY", 4) or 4
+# 租约 TTL（秒）；心跳按 TTL/3 续约。接管窗口上界 ≈ TTL + 扫描间隔
+RUN_LEASE_SECONDS = _get_env_int("RUN_LEASE_SECONDS", 30) or 30
+# 过期租约扫描间隔（秒），worker 进程内运行
+RECOVERY_SCAN_SECONDS = _get_env_float("RECOVERY_SCAN_SECONDS", 15.0) or 15.0
 ARTIFACT_ROOT = Path(os.getenv("ARTIFACT_ROOT", PROJECT_ROOT / "data" / "artifacts")).expanduser()
 SKILLS_ROOT = Path(os.getenv("SKILLS_ROOT", PROJECT_ROOT / "skills")).expanduser()
 AUTO_RESUME_RUNS = _get_env_bool("AUTO_RESUME_RUNS", True)
