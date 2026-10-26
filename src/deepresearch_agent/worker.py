@@ -44,6 +44,26 @@ async def _scan_loop(service: RunService, interval: float) -> None:
             continue
 
 
+async def execute_safely(service: RunService, run_id: str) -> None:
+    """评审遗留修复：execute_run 已把失败状态落库，这里补日志与指标现场。
+
+    异常必须吞掉：单个 Run 的失败不能拖垮 worker 的消费循环。
+    """
+    import logging
+
+    from deepresearch_agent.observability import WORKER_RUN_FAILURES
+
+    logger = logging.getLogger("deepresearch.worker")
+    try:
+        await service.execute_now(run_id)
+    except Exception:
+        logger.exception("Run %s 执行异常（状态已落库）", run_id)
+        try:
+            WORKER_RUN_FAILURES.inc()
+        except Exception:
+            pass
+
+
 async def _consume(worker_name: str | None = None) -> None:
     if not settings.REDIS_URL:
         raise SystemExit("worker 进程需要设置 REDIS_URL（平台模式）")
@@ -65,17 +85,13 @@ async def _consume(worker_name: str | None = None) -> None:
         loop.add_signal_handler(sig, stop.set)
 
     async def run_one(run_id: str) -> None:
-        try:
-            await service.execute_now(run_id)
-        except Exception:
-            # execute_run 内部已把失败落库；此处吞掉避免单个 Run 拖垮消费循环
-            return
+        await execute_safely(service, run_id)
 
     try:
-    semaphore = asyncio.Semaphore(max(1, settings.WORKER_CONCURRENCY))
-    inflight: set[asyncio.Task] = set()
-    scanner = asyncio.create_task(_scan_loop(service, settings.RECOVERY_SCAN_SECONDS), name="lease-scanner")
-    generator = queue.consume()
+        semaphore = asyncio.Semaphore(max(1, settings.WORKER_CONCURRENCY))
+        inflight: set[asyncio.Task] = set()
+        scanner = asyncio.create_task(_scan_loop(service, settings.RECOVERY_SCAN_SECONDS), name="lease-scanner")
+        generator = queue.consume()
         while not stop.is_set():
             try:
                 run_id = await asyncio.wait_for(anext(generator), timeout=1.0)

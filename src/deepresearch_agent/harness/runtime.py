@@ -97,7 +97,9 @@ class HarnessRuntime:
             try:
                 context = await self._execute_run_inner(run_id)
                 run_span.set_attribute("run.status", context.status.value)
-                RUN_TOTAL.labels(status=context.status.value).inc()
+                # 评审遗留修复：仅终态计数——让位/接管中的非终态不产生伪维度
+                if self.state_machine.is_terminal(context.status):
+                    RUN_TOTAL.labels(status=context.status.value).inc()
                 return context
             except BaseException as exc:
                 try:
@@ -127,7 +129,12 @@ class HarnessRuntime:
                 if context.status is RunStatus.QUEUED:
                     await self._transition(context, RunStatus.CONTEXT_BUILDING, event_type="run.started")
                 if self.context_builder is not None:
-                    context = await self.context_builder.build(context)
+                    # 评审遗留修复：context 构建同样受租约保护——构建被拉长超过
+                    # TTL 时续约，被抢占即让位（否则接管者会与本地双写上下文快照）
+                    build_budget = BudgetManager(context.budget_limits, context.budget_usage)
+                    context = await self._run_with_heartbeat(
+                        context, build_budget, self.context_builder.build(context), owner=owner,
+                    )
                     selected_skill = context.context_snapshot.get("selected_skill") or {}
                     await self.runs.update_model_snapshot(run_id, {
                         **context.model_snapshot,

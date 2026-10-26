@@ -10,11 +10,14 @@ import asyncio
 import pytest
 import pytest_asyncio
 
+from fake_driver import CompletedFakeDriver
+
 from backend.app.schemas import MessageCreate, RunCreate, SessionCreate
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionMetadata, ExecutionRecord, ToolCall
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalMetadata, RetrievalResult
 from deepresearch_agent.harness import RunStatus, SourceMode, WorkflowMode
 from deepresearch_agent.harness.budgets import BudgetLimits
+from deepresearch_agent.observability import RUN_TOTAL
 from deepresearch_agent.harness.runtime import HarnessRuntime
 from deepresearch_agent.persistence import ArtifactStore, Database
 from deepresearch_agent.persistence.repositories import (
@@ -169,3 +172,72 @@ async def test_lease_loss_stops_local_runtime_without_terminal_transition(databa
     persisted = await RunRepository(database).get(run.run_id)
     assert persisted.status == "executing", "Run 应停留在非终态等待接管者"
     assert persisted.error_code is None and persisted.error_message is None
+
+class SlowContextBuilder:
+    """可配置阻塞的 context_builder；记录构建是否完成/被取消。"""
+
+    def __init__(self, sleep_seconds: float):
+        self.sleep_seconds = sleep_seconds
+        self.built = False
+        self.cancelled = False
+
+    async def build(self, context):
+        try:
+            await asyncio.sleep(self.sleep_seconds)
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        self.built = True
+        return context
+
+
+async def test_context_build_renews_lease_during_long_build(database, tmp_path):
+    """评审遗留修复：context 构建超过 TTL 时租约必须保住（构建期心跳续约）。"""
+    run = await create_queued_run(database)
+    builder = SlowContextBuilder(4.4)
+
+    def factory(context, events=None):
+        return CompletedFakeDriver(context, events=events)
+
+    runtime = build_runtime(database, tmp_path, factory, lease_seconds=3)
+    runtime.context_builder = builder
+    task = asyncio.create_task(runtime.execute_run(run.run_id))
+    await asyncio.sleep(3.6)
+    stolen = await RunRepository(database).acquire_lease(run.run_id, "rival-runtime", ttl_seconds=30)
+    assert not stolen, "context 构建超过 TTL 时租约被抢走：构建期心跳续约未生效"
+    context = await task
+    assert context.status is RunStatus.COMPLETED
+    assert builder.built is True
+
+
+async def test_lease_loss_during_context_build_cancels_build_and_skips_run_counter(database, tmp_path):
+    """评审遗留修复：构建期被抢占 → 构建任务被取消、Run 停留非终态、非终态不计入 dra_runs_total。"""
+    run = await create_queued_run(database)
+    builder = SlowContextBuilder(30.0)
+
+    def factory(context, events=None):
+        return CompletedFakeDriver(context, events=events)
+
+    runs_repository = RunRepository(database)
+    original_acquire = runs_repository.acquire_lease
+    acquire_calls = {"count": 0}
+
+    async def acquire_then_report_stolen(run_id, owner, *, ttl_seconds=60):
+        acquire_calls["count"] += 1
+        if acquire_calls["count"] > 1:
+            return False
+        return await original_acquire(run_id, owner, ttl_seconds=ttl_seconds)
+
+    runs_repository.acquire_lease = acquire_then_report_stolen
+    runtime = build_runtime(database, tmp_path, factory, lease_seconds=2)
+    runtime.context_builder = builder
+    runtime.runs = runs_repository
+
+    before = RUN_TOTAL.labels(status="context_building")._value.get()
+    context = await runtime.execute_run(run.run_id)
+    assert acquire_calls["count"] >= 2, "构建期未尝试续约"
+    assert builder.cancelled is True, "被抢占后构建任务未被取消"
+    assert context.status is RunStatus.CONTEXT_BUILDING
+    persisted = await RunRepository(database).get(run.run_id)
+    assert persisted.status == "context_building", "Run 应停留在非终态等待接管者"
+    assert RUN_TOTAL.labels(status="context_building")._value.get() == before, "非终态不得计入 dra_runs_total"

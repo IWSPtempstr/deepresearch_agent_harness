@@ -16,11 +16,12 @@ TERMINAL_STATUSES = {"completed", "failed", "budget_exhausted", "cancelled", "pa
 
 
 class EventStreamService:
-    def __init__(self, events: EventRepository, runs: RunRepository, event_bus: EventBus, fanout=None):
+    def __init__(self, events: EventRepository, runs: RunRepository, event_bus: EventBus, fanout=None, *, heartbeat_seconds: float = 20.0):
         self.events = events
         self.runs = runs
         self.event_bus = event_bus
         self.fanout = fanout
+        self.heartbeat_seconds = heartbeat_seconds
 
     @staticmethod
     def serialize(event) -> dict[str, str]:
@@ -72,9 +73,17 @@ class EventStreamService:
                 yield self.serialize(event)
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=20)
+                    event = await asyncio.wait_for(queue.get(), timeout=self.heartbeat_seconds)
                 except asyncio.TimeoutError:
                     yield {"event": "heartbeat", "data": json.dumps({"run_id": run_id, "after_event_id": cursor})}
+                    # 评审遗留修复：Redis 扇出是 at-most-once，终态事件可能丢失——
+                    # 心跳周期顺带查库，终态则做最后一次 DB 补读后结束，流不再悬挂
+                    refreshed = await self.runs.get(run_id)
+                    if refreshed is None or refreshed.status in TERMINAL_STATUSES:
+                        for event in await self.events.list_after(run_id, after_event_id=cursor):
+                            cursor = event.event_id
+                            yield self.serialize(event)
+                        return
                     continue
                 if int(event.get("event_id") or 0) <= cursor:
                     continue

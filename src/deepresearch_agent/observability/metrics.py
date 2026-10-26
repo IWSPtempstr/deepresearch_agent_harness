@@ -26,6 +26,7 @@ LLM_LATENCY_SECONDS = Histogram(
 LLM_TOKENS_TOTAL = Counter("dra_llm_tokens_total", "token 消耗", ["provider", "direction"])
 LLM_RATE_LIMITED_TOTAL = Counter("dra_llm_rate_limited_total", "限流排队超时次数")
 EVENT_FANOUT_FAILURES = Counter("dra_event_fanout_failures_total", "事件扇出失败次数（Redis 不可用等，durable 落库不受影响）")
+WORKER_RUN_FAILURES = Counter("dra_worker_run_failures_total", "worker 执行入口异常次数（Run 状态已落库，此为排障现场计数）")
 
 
 def observe_llm_call(*, provider: str, status: str, latency_ms: int, usage: dict | None) -> None:

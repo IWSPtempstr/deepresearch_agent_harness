@@ -47,6 +47,20 @@ def test_null_tracer_and_log_filter_are_noop():
     assert record.trace_id == "-"
 
 
+async def test_worker_execute_safely_counts_failures_without_raising():
+    """评审遗留修复：worker 执行异常必须有指标现场且不拖垮消费循环。"""
+    from deepresearch_agent.observability import WORKER_RUN_FAILURES
+    from deepresearch_agent.worker import execute_safely
+
+    class ExplodingService:
+        async def execute_now(self, run_id):
+            raise RuntimeError("boom")
+
+    before = WORKER_RUN_FAILURES._value.get()
+    await execute_safely(ExplodingService(), "run-x")
+    assert WORKER_RUN_FAILURES._value.get() == before + 1
+
+
 def test_provider_health_cooldown_cycle():
     health = ProviderHealth(base_cooldown_seconds=0.05, max_cooldown_seconds=0.1)
     health.report_failure("p")

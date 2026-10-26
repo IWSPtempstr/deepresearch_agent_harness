@@ -115,6 +115,45 @@ async def test_event_bus_survives_fanout_failure(database):
     assert EVENT_FANOUT_FAILURES._value.get() == before + 1, "扇出失败必须计数"
 
 
+async def test_stream_ends_after_heartbeat_when_terminal_event_lost(database):
+    """评审遗留修复：扇出静默且终态事件写入晚于订阅时，心跳周期查库兜底——
+    流补回丢失的终态事件后自然结束，不再无限悬挂。"""
+    from backend.app.schemas import RunEventCreate
+
+    fanout = FakeFanout()
+    run = await _create_active_run(database)
+    service = EventStreamService(
+        EventRepository(database), RunRepository(database), EventBus(EventRepository(database)),
+        fanout=fanout, heartbeat_seconds=0.2,
+    )
+    stream = service.stream(run.run_id, after_event_id=0)
+    received: list[dict] = []
+    first = await anext(stream)
+    assert first["event"] == "run.queued"
+    received.append(first)
+
+    async def pump() -> None:
+        try:
+            while True:
+                received.append(await asyncio.wait_for(anext(stream), timeout=3.0))
+        except (StopAsyncIteration, asyncio.TimeoutError):
+            return
+
+    pump_task = asyncio.create_task(pump())
+    # 让生成器推进到订阅 + 心跳等待循环（扇出全程静默）
+    await asyncio.sleep(0.6)
+    # 终态事件与状态写入都发生在订阅之后：实时通道拿不到，只能靠心跳查库
+    await EventRepository(database).append(RunEventCreate(run_id=run.run_id, event_type="run.failed", stage="failed", payload={"status": "failed"}))
+    await RunRepository(database).update_status(run.run_id, status="failed", error_code="X")
+
+    await asyncio.wait_for(pump_task, timeout=5.0)
+    kinds = [item["event"] for item in received]
+    assert "heartbeat" in kinds, "静默期必须产生心跳"
+    assert "run.failed" in kinds, "终态事件必须经心跳路径的 DB 补读捞回"
+    assert kinds.index("run.failed") > kinds.index("heartbeat"), "run.failed 应由心跳后的兜底补读送达"
+    assert kinds[-1] == "run.failed", "流必须在终态事件后自然结束"
+
+
 async def test_stream_replays_then_serves_cross_instance_events(database):
     fanout = FakeFanout()
     run = await _create_active_run(database)

@@ -3,7 +3,7 @@
 from deepresearch_agent.observability.metrics import (
     ACTIVE_RUNS, EVENT_FANOUT_FAILURES, LLM_CALLS_TOTAL, LLM_LATENCY_SECONDS,
     LLM_RATE_LIMITED_TOTAL, LLM_TOKENS_TOTAL, QUEUE_DEPTH, RUN_DURATION_SECONDS,
-    RUN_TOTAL, WAITING_RUNS, observe_llm_call,
+    RUN_TOTAL, WAITING_RUNS, WORKER_RUN_FAILURES, observe_llm_call,
 )
 from deepresearch_agent.observability.tracing import (
     NullTracer, TraceIdLogFilter, current_trace_id, get_tracer, setup_tracing, tracing_enabled,
@@ -11,7 +11,7 @@ from deepresearch_agent.observability.tracing import (
 
 __all__ = [
     "ACTIVE_RUNS", "EVENT_FANOUT_FAILURES", "LLM_CALLS_TOTAL", "LLM_LATENCY_SECONDS", "LLM_RATE_LIMITED_TOTAL",
-    "LLM_TOKENS_TOTAL", "QUEUE_DEPTH", "RUN_DURATION_SECONDS", "RUN_TOTAL", "WAITING_RUNS",
+    "LLM_TOKENS_TOTAL", "QUEUE_DEPTH", "RUN_DURATION_SECONDS", "RUN_TOTAL", "WAITING_RUNS", "WORKER_RUN_FAILURES",
     "observe_llm_call", "NullTracer", "TraceIdLogFilter", "current_trace_id", "get_tracer",
     "setup_tracing", "tracing_enabled",
 ]

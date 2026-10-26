@@ -183,6 +183,29 @@ def test_metering_carries_tenant_dimension():
     assert items and all(item["tenant_id"] == "tenant-xyz" for item in items), items
 
 
+async def test_astream_chain_fails_over_and_meters():
+    """评审遗留修复：流式路径与 _agenerate 同权——主失败切备用、健康度冷却、计量入队。"""
+    import types as _types
+
+    recorder = LlmCallRecorder()
+    model, primary, fallback = build_model(FakeClient(fail_times=99), FakeClient(), recorder=recorder)
+
+    async def primary_stream(messages, stop=None, run_manager=None):
+        raise RuntimeError("primary down")
+        yield  # pragma: no cover
+
+    async def fallback_stream(client, messages, stop=None, run_manager=None):
+        yield _types.SimpleNamespace(usage_metadata=None)
+        yield _types.SimpleNamespace(usage_metadata={"input_tokens": 5, "output_tokens": 7, "total_tokens": 12})
+
+    chunks = [chunk async for chunk in model._astream_chain([], None, None, primary_stream, fallback_stream)]
+    assert len(chunks) == 2
+    assert model.gateway_health.in_cooldown("primary.local")
+    items = [recorder._queue.get_nowait() for _ in range(recorder._queue.qsize())]
+    assert any(item["provider"] == "primary.local" and item["status"] == "error" for item in items)
+    assert any(item["provider"] == "fallback.local" and item["status"] == "ok" and item["total_tokens"] == 12 for item in items)
+
+
 def test_usage_extraction_variants():
     assert _usage_from_result(None) == {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     usage = _usage_from_result(FakeChatResult(total_tokens=50))

@@ -21,6 +21,16 @@ from deepresearch_agent.persistence.repositories import MessageRepository, RunRe
 POSTGRES_URL = os.environ.get("TEST_POSTGRES_URL")
 
 
+def test_escape_like_handles_metacharacters():
+    """评审遗留：PG ILIKE 转义的纯函数行为（真实 ILIKE 行为需连 PG 验证）。"""
+    from deepresearch_agent.persistence.search import _escape_like
+
+    assert _escape_like("50% off") == "50\% off"
+    assert _escape_like("snake_case") == "snake\_case"
+    assert _escape_like("back\\slash") == "back\\\\slash"
+    assert _escape_like("plain") == "plain"
+
+
 async def test_rejects_unsupported_dialect(tmp_path):
     with pytest.raises(ValueError):
         Database(f"mysql+pymysql:///{(tmp_path / 'x.db').as_posix()}")

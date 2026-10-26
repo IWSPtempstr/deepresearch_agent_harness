@@ -186,8 +186,9 @@ class FailoverChatOpenAI(PrefixAwareChatOpenAI):
             chain = chain[1:]
         return chain
 
-    def _meter(self, label: str, result: Any, latency_ms: int, error_code: Optional[str]) -> None:
-        usage = _usage_from_result(result)
+    def _meter(self, label: str, result: Any = None, latency_ms: int = 0, error_code: Optional[str] = None, *, usage: Optional[dict[str, int]] = None) -> None:
+        if usage is None:
+            usage = _usage_from_result(result)
         try:
             from deepresearch_agent.observability import observe_llm_call
 
@@ -293,6 +294,64 @@ class FailoverChatOpenAI(PrefixAwareChatOpenAI):
             self.gateway_health.report_success(label)
             self._meter(label, result, int((time.monotonic() - started) * 1000), None)
             return result
+        raise AppError(
+            ErrorCode.LLM_ALL_PROVIDERS_FAILED,
+            f"LLM 网关所有 provider 均不可用（{len(self.gateway_fallbacks) + 1} 个）: {last_error}",
+        ) from last_error
+
+    async def _astream(self, messages, stop=None, run_manager=None, **kwargs):
+        """评审遗留修复：流式路径与 _agenerate 同权——限流/failover/健康度/计量全覆盖。"""
+        import asyncio
+
+        super_astream = super()._astream
+
+        def primary_factory(m, s, rm):
+            return super_astream(m, stop=s, run_manager=rm, **kwargs)
+
+        def client_factory(client, m, s, rm):
+            return client._astream(m, stop=s, run_manager=rm, **kwargs)
+
+        limiter = self.gateway_limiter
+        if limiter is None:
+            async for chunk in self._astream_chain(messages, stop, run_manager, primary_factory, client_factory):
+                yield chunk
+            return
+        # 与 _agenerate 相同：同步限流器经 to_thread 复用，槽位对象跨 enter/exit 复用
+        slot = limiter.slot(self._tenant_key())
+        await asyncio.to_thread(slot.__enter__)
+        try:
+            async for chunk in self._astream_chain(messages, stop, run_manager, primary_factory, client_factory):
+                yield chunk
+        finally:
+            await asyncio.to_thread(slot.__exit__, None, None, None)
+
+    async def _astream_chain(self, messages, stop, run_manager, primary_factory, client_factory):
+        last_error: Optional[Exception] = None
+        for label, client in self._provider_chain():
+            started = time.monotonic()
+            usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+            try:
+                iterator = primary_factory(messages, stop, run_manager) if client is self else client_factory(client, messages, stop, run_manager)
+                async for chunk in iterator:
+                    # token 取最后一个携带 usage_metadata 的 chunk（流式 usage 挂在末尾）
+                    meta = getattr(chunk, "usage_metadata", None)
+                    if isinstance(meta, dict):
+                        input_tokens = int(meta.get("input_tokens") or 0)
+                        output_tokens = int(meta.get("output_tokens") or 0)
+                        usage = {
+                            "input_tokens": input_tokens,
+                            "output_tokens": output_tokens,
+                            "total_tokens": int(meta.get("total_tokens") or (input_tokens + output_tokens)),
+                        }
+                    yield chunk
+            except Exception as exc:
+                self.gateway_health.report_failure(label)
+                self._meter(label, latency_ms=int((time.monotonic() - started) * 1000), error_code=type(exc).__name__, usage=usage)
+                last_error = exc
+                continue
+            self.gateway_health.report_success(label)
+            self._meter(label, latency_ms=int((time.monotonic() - started) * 1000), error_code=None, usage=usage)
+            return
         raise AppError(
             ErrorCode.LLM_ALL_PROVIDERS_FAILED,
             f"LLM 网关所有 provider 均不可用（{len(self.gateway_fallbacks) + 1} 个）: {last_error}",
