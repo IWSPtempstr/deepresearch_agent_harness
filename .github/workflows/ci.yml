@@ -16,8 +16,8 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -r requirements.txt
-      - name: 全量回归（137+ 用例，离线可复现）
+      - run: pip install -r requirements-ci.txt
+      - name: 全量回归（离线可复现）
         run: python -m pytest tests/ -q
       - name: 评测回归门（gold 集，低于阈值失败）
         run: python scripts/evaluation_gate.py --output eval-results.json
@@ -64,7 +64,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements-ci.txt
       - name: 迁移链（空库 upgrade head）
         run: PYTHONPATH=src:. python -m alembic upgrade head
       - name: 方言一致性 + 全量回归（PG 后端）
