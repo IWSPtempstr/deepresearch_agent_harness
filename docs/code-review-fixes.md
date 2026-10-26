@@ -15,19 +15,25 @@
 | M4 | `6c90290` | llm_calls.tenant_id 恒为 default，per-tenant token 面板失真 | 网关 _meter 传当前租户；测试断言 tenant-xyz 落库 |
 | M6 | `c8b3622` | CI 用完整 requirements.txt（textract/hanlp/torch 重依赖）安装易失败 | requirements-ci.txt 最小集；fresh venv 实证：安装成功 + 194 用例通过 + 评测门通过 |
 
-## 未修复（已知遗留，按优先级）
+## 二轮修复（150b3ad，全部离线闭环）
 
-1. **context building 阶段无心跳续约**：`_run_with_heartbeat` 只包 plan/execute/report；`context_builder.build` 超 TTL（30s）租约可过期被抢占。当前 build 为纯 DB 读秒级完成，暂无实际风险；若未来引入远程上下文源需补。
-2. **SSE fanout 丢终态事件 → 流悬挂**：Redis pub/sub at-most-once，终态事件丢失后流只发 heartbeat。客户端可自行断开；闭环需在心跳超时路径顺带查库。
-3. **前端未接入 X-API-Key**：平台模式启用租户后 React 界面不可用（H3 已保住 health/metrics；H3 提交正文有注明）。
-4. **流式 LLM 调用绕过网关**：`FailoverChatOpenAI` 未覆写 `_astream`（failover/限流/计量不覆盖流式）。当前 Run 执行链无人使用 stream_llm，接流式前必须补。
-5. **PG 侧 0004-0007 未实测**：SQLite 全链 7/7/7 往返已验；PG 只验到 0003（低配环境无容器）。幂等守卫为方言通用写法，风险低。
-6. **`RUN_TOTAL` 指标口径**：RunLeaseLost 路径会记 `status="executing"` 非终态维度；接管完成的 Run 由接管方再记一次终态，聚合面板需用 `dra_runs_total{status="completed"}` 之类精确选择器。
-7. **worker `run_one` 静默吞异常**：execute_now 失败无日志无指标（Run 状态本身已落库，但排障缺现场）。
-8. **PG 的 ILIKE ESCAPE 转义路径零测试覆盖**（双方言测试查询串不含 `%`/`_`）。
+原遗留 1/2/4/6/7/8（部分）已修复：
+
+1. **context 构建租约保护**：build 调用纳入 `_run_with_heartbeat`（构建期续约，被抢占取消让位）。
+2. **SSE 终态兜底**：心跳超时路径查库，终态则 DB 补读后返回；心跳间隔参数化（heartbeat_seconds）。
+4. **流式网关**：`FailoverChatOpenAI._astream` 补齐限流/failover/健康度/计量（token 取末尾 usage_metadata）。
+6. **RUN_TOTAL 口径**：仅终态计数，非终态让位不再产生伪维度。
+7. **worker 异常现场**：`execute_safely` 抽出，logger.exception + `dra_worker_run_failures_total`。
+8. **`_escape_like` 纯函数单测补齐**（`%`/`_`/反斜杠）。
+
+## 未修复（已知遗留，均需容器或属功能开发）
+
+1. **前端未接入 X-API-Key**：平台模式启用租户后 React 界面不可用（属前端功能开发；H3 已保住 health/metrics）。
+2. **PG 侧 0004-0007 未实测 + ILIKE 真实行为**：需要 PostgreSQL 容器（SQLite 全链 7/7/7 往返已验，迁移守卫为方言通用写法）。
 
 ## 数字
 
+- 二轮修复后：194 → **200 通过**（+6：context 构建续约/抢占 2、SSE 兜底 1、流式网关 1、worker 现场 1、转义 1）。
 - 评审后测试：188 → **194 通过**（+6：迁移回归 2、运维豁免 1、扇出容错 1、记忆隔离 1、租户计量 1；M2 用例并入既有隔离测试）；仍 3 门控跳过、2 预存在失败（原作者仓库缺失 acceptance 交付文档）。
 - 迁移链：7 个迁移，SQLite upgrade(7)/downgrade(7)/re-upgrade(7) 全通过；有数据库升级专项测试覆盖。
 - 依赖：fresh venv 从 requirements-ci.txt 冷启动全量测试通过。
