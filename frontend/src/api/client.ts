@@ -2,9 +2,46 @@ import { ApiError, CacheStats, Capabilities, ContextInspector, CuratedMemory, Ev
 
 export const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api/v1").replace(/\/$/, "");
 
+// ---- 租户凭据（X-API-Key）----------------------------------------------
+// 后端签发过 api_keys 后强制认证（见 backend/app/tenancy.py）；key 只存
+// localStorage，随每个请求头注入。401 统一广播给设置弹窗重新采集。
+
+const API_KEY_STORAGE = "dra.api_key";
+const unauthorizedListeners = new Set<() => void>();
+
+export function getApiKey(): string {
+  return localStorage.getItem(API_KEY_STORAGE) ?? "";
+}
+
+export function setApiKey(value: string): void {
+  const trimmed = value.trim();
+  if (trimmed) localStorage.setItem(API_KEY_STORAGE, trimmed);
+  else localStorage.removeItem(API_KEY_STORAGE);
+}
+
+export function clearApiKey(): void {
+  localStorage.removeItem(API_KEY_STORAGE);
+}
+
+/** 订阅 401 事件（任意请求被拒时触发）；返回退订函数。 */
+export function onUnauthorized(listener: () => void): () => void {
+  unauthorizedListeners.add(listener);
+  return () => unauthorizedListeners.delete(listener);
+}
+
+function authHeaders(): Record<string, string> {
+  const key = getApiKey();
+  return key ? { "X-API-Key": key } : {};
+}
+
+// SSE 流式请求（useRunEvents）不能走 request<T>（响应是流不是 JSON），
+// 单独导出请求头构造器
+export { authHeaders };
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, { ...init, headers: { "Content-Type": "application/json", ...init?.headers } });
+  const response = await fetch(`${API_BASE}${path}`, { ...init, headers: { "Content-Type": "application/json", ...authHeaders(), ...init?.headers } });
   if (!response.ok) {
+    if (response.status === 401) for (const listener of [...unauthorizedListeners]) listener();
     const payload = await response.json().catch(() => ({ error: { code: "NETWORK_ERROR", message: response.statusText } }));
     throw new ApiError(payload.error ?? { code: "HTTP_ERROR", message: response.statusText });
   }
