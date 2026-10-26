@@ -26,14 +26,17 @@
 7. **worker 异常现场**：`execute_safely` 抽出，logger.exception + `dra_worker_run_failures_total`。
 8. **`_escape_like` 纯函数单测补齐**（`%`/`_`/反斜杠）。
 
-## 未修复（已知遗留，均需容器或属功能开发）
+## 三轮修复（4f6423f，前端接入 X-API-Key）
 
-1. **前端未接入 X-API-Key**：平台模式启用租户后 React 界面不可用（属前端功能开发；H3 已保住 health/metrics）。
-2. **PG 侧 0004-0007 未实测 + ILIKE 真实行为**：需要 PostgreSQL 容器（SQLite 全链 7/7/7 往返已验，迁移守卫为方言通用写法）。
+原遗留 3（前端）已修复：方案经确认选 fetch 流重写——SSE 消费仅 useRunEvents 一处且重连本为手写游标续传，替换 EventSource 零功能损失、凭据不进 URL。改动：client.ts 凭据存取 + 全请求头注入 + 401 广播；useRunEvents 改 fetch + ReadableStream 解析（终态/断线语义不变）；ApiKeyDialog 全局入口（401 自动弹出）。验证：tsc + vite build 通过（浏览器联调需起服务，属部署验证）。
+
+## 未修复（已知遗留，均需容器）
+
+1. **PG 侧 0004-0007 未实测 + ILIKE 真实行为**：需要 PostgreSQL 容器（SQLite 全链 7/7/7 往返已验，迁移守卫为方言通用写法）。
 
 ## 数字
 
-- 二轮修复后：194 → **200 通过**（+6：context 构建续约/抢占 2、SSE 兜底 1、流式网关 1、worker 现场 1、转义 1）。
+- 二轮修复后：194 → **200 通过**（+6：context 构建续约/抢占 2、SSE 兜底 1、流式网关 1、worker 现场 1、转义 1）；三轮为前端功能项（tsc + vite build 验证，pytest 数不变）。
 - 评审后测试：188 → **194 通过**（+6：迁移回归 2、运维豁免 1、扇出容错 1、记忆隔离 1、租户计量 1；M2 用例并入既有隔离测试）；仍 3 门控跳过、2 预存在失败（原作者仓库缺失 acceptance 交付文档）。
 - 迁移链：7 个迁移，SQLite upgrade(7)/downgrade(7)/re-upgrade(7) 全通过；有数据库升级专项测试覆盖。
 - 依赖：fresh venv 从 requirements-ci.txt 冷启动全量测试通过。
