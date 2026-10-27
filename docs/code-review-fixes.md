@@ -30,13 +30,25 @@
 
 原遗留 3（前端）已修复：方案经确认选 fetch 流重写——SSE 消费仅 useRunEvents 一处且重连本为手写游标续传，替换 EventSource 零功能损失、凭据不进 URL。改动：client.ts 凭据存取 + 全请求头注入 + 401 广播；useRunEvents 改 fetch + ReadableStream 解析（终态/断线语义不变）；ApiKeyDialog 全局入口（401 自动弹出）。验证：tsc + vite build 通过（浏览器联调需起服务，属部署验证）。
 
+## 四轮修复（908e853 + 8747640，第二轮全面评审）
+
+第二轮评审审查了修复代码本身，抓到两个逃过测试的缺陷：
+
+- **F1（高危，fetch SSE 重写引入）**：sse-starlette 以 \r\n 分隔事件块（DEFAULT_SEPARATOR），前端按 "\n\n" 找边界永远失配——浏览器端实时流全瞎。旧 EventSource 原生处理 CRLF 从未暴露；测试停在序列化层不触字节流。修复：解析抽为 api/sse.ts 纯函数（CRLF/孤 CR 归一化 + 跨 chunk 残块缓冲），引入 vitest 补 8 用例（含本次事故场景）。
+- **F2（中危）**：_astream_chain 中途失败重放备用 provider，输出重复拼接。修复：emitted 标志，首块后失败 re-raise 不 failover；测试断言备用零调用。
+- F3/F4：README Star History 删除补提交；.learn-by-building/ 入 gitignore。
+
+方法论记录：修复代码本身也需要被评审——最年轻的代码被测试冲刷最少，且「测试全绿」只覆盖被测层（字节流解析、流式中途失败都在层间缝隙里）。
+
 ## 未修复（已知遗留，均需容器）
 
 1. **PG 侧 0004-0007 未实测 + ILIKE 真实行为**：需要 PostgreSQL 容器（SQLite 全链 7/7/7 往返已验，迁移守卫为方言通用写法）。
+2. **API 侧 schedule() 异常孤儿告警**：队列模式下 enqueue task 的 LEASE_UNAVAILABLE 无人 await，表现为日志噪音（worker 消费路径已被 execute_safely 覆盖）。
 
 ## 数字
 
 - 二轮修复后：194 → **200 通过**（+6：context 构建续约/抢占 2、SSE 兜底 1、流式网关 1、worker 现场 1、转义 1）；三轮为前端功能项（tsc + vite build 验证，pytest 数不变）。
+- 四轮修复后：pytest 200 → **210**（+1 网关流式中途失败；此前三轮间随错误码/异常边界修复增至 209），vitest 8/8，前端构建通过。
 - 评审后测试：188 → **194 通过**（+6：迁移回归 2、运维豁免 1、扇出容错 1、记忆隔离 1、租户计量 1；M2 用例并入既有隔离测试）；仍 3 门控跳过、2 预存在失败（原作者仓库缺失 acceptance 交付文档）。
 - 迁移链：7 个迁移，SQLite upgrade(7)/downgrade(7)/re-upgrade(7) 全通过；有数据库升级专项测试覆盖。
 - 依赖：fresh venv 从 requirements-ci.txt 冷启动全量测试通过。
