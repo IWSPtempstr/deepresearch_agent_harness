@@ -35,6 +35,9 @@ class BudgetUsage(BaseModel):
     replans: int = 0
     task_retries: int = 0
     llm_tokens: int = 0
+    # 时效口径：仅在 assert_available()/snapshot()/refresh_elapsed() 调用时刷新。
+    # 两次检查之间直接读 usage.elapsed_seconds 会滞后于真实值；执行期由心跳
+    # 每秒 snapshot 刷新一次，跨检查点的精确时长统计应以事件时间戳为准。
     elapsed_seconds: float = 0.0
     # 前缀缓存观测（由 PrefixCacheTracker 在 Run 结束时回填）
     prefix_cache_requests: int = 0
@@ -49,13 +52,16 @@ class BudgetManager:
         self._started = time.monotonic() - self.usage.elapsed_seconds
 
     def snapshot(self) -> dict[str, Any]:
-        self.usage.elapsed_seconds = max(0.0, time.monotonic() - self._started)
+        self.refresh_elapsed()
         return {"limits": self.limits.model_dump(), "usage": self.usage.model_dump()}
 
+    def refresh_elapsed(self) -> float:
+        """elapsed 刷新的唯一入口：读取精确已耗时长时统一走这里。"""
+        self.usage.elapsed_seconds = max(0.0, time.monotonic() - self._started)
+        return self.usage.elapsed_seconds
+
     def assert_available(self) -> None:
-        elapsed = max(0.0, time.monotonic() - self._started)
-        self.usage.elapsed_seconds = elapsed
-        self._check("wall_time_seconds", elapsed, self.limits.wall_time_seconds)
+        self._check("wall_time_seconds", self.refresh_elapsed(), self.limits.wall_time_seconds)
         self._check("plan_tasks", self.usage.plan_tasks, self.limits.max_plan_tasks)
         self._check("llm_tokens", self.usage.llm_tokens, self.limits.max_llm_tokens)
         self._check("tool_calls", self.usage.tool_calls, self.limits.max_tool_calls)
@@ -64,6 +70,7 @@ class BudgetManager:
         self._check("task_retries", self.usage.task_retries, self.limits.max_task_retries)
 
     def remaining_tokens(self) -> int:
+        """剩余 LLM Token 配额——预算口径唯一出处，调用方勿再手写 limits-usage。"""
         return max(0, self.limits.max_llm_tokens - self.usage.llm_tokens)
 
     def has_token_reserve(self, required: int) -> bool:
@@ -82,11 +89,20 @@ class BudgetManager:
         self.assert_available()
 
     def observe_plan_tasks(self, count: int) -> None:
+        """以本次观察值【覆盖】计划任务计数——非增量累加。
+
+        与 observe_tokens 同为幂等重放口径：从执行记录恢复时直接写入累计值，
+        较小的观察值会静默压低计数（重放语义所需）。累加语义请用 consume_*。
+        """
         self.usage.plan_tasks = max(0, count)
         self.assert_available()
 
     def observe_tokens(self, count: int) -> None:
-        """Record an idempotent cumulative token total reported by a workflow."""
+        """以本次观察值【覆盖】累计 Token（非增量）——幂等重放口径。
+
+        取 max(usage, count) 防重放回退；来源是工作流上报的累计值而非单次
+        消耗，累加语义请用 consume_tokens。
+        """
         self.usage.llm_tokens = max(self.usage.llm_tokens, max(0, count))
         self.assert_available()
 

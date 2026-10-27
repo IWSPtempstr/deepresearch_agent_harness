@@ -297,10 +297,7 @@ class HarnessRuntime:
                         await self.checkpoints.save(context, "failed")
                         continue
                     await self.checkpoints.save(context, "executing")
-                    remaining_tokens = max(
-                        0,
-                        budget.limits.max_llm_tokens - budget.usage.llm_tokens,
-                    )
+                    remaining_tokens = budget.remaining_tokens()
                     await self.events.publish(
                         run_id,
                         "budget.stage_reserved",
@@ -309,7 +306,7 @@ class HarnessRuntime:
                             "remaining_tokens": remaining_tokens,
                             "report_reserved_tokens": REPORT_RESERVED_TOKENS,
                             "verification_reserved_tokens": VERIFICATION_RESERVED_TOKENS,
-                            "reserved_budget_fallback": remaining_tokens < (
+                            "reserved_budget_fallback": not budget.has_token_reserve(
                                 REPORT_RESERVED_TOKENS + VERIFICATION_RESERVED_TOKENS
                             ),
                         },

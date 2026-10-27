@@ -344,9 +344,10 @@ class PlanExecuteReportDriver:
                 "evidence_card_count": len(cards),
                 "model_calls": 0,
                 "reserved_budget_fallback": True,
-                "remaining_tokens_at_entry": (
+                "remaining_tokens_at_entry": max(
+                    0,
                     self.context.budget_limits.max_llm_tokens
-                    - self.context.budget_usage.llm_tokens
+                    - self.context.budget_usage.llm_tokens,
                 ),
             },
         )

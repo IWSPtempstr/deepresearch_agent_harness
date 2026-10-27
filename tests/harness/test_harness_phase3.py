@@ -278,6 +278,39 @@ def test_budget_manager_enforces_tool_retry_and_replan_limits(monkeypatch):
     assert manager.usage.llm_tokens == 102142
 
 
+def test_budget_remaining_tokens_and_observe_overwrite_semantics(monkeypatch):
+    """remaining_tokens/has_token_reserve 口径唯一出处；observe_* 为覆盖非增量。"""
+    from deepresearch_agent.harness import budgets as budget_module
+
+    ticks = iter((10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0))
+    monkeypatch.setattr(budget_module.time, "monotonic", lambda: next(ticks))
+    manager = BudgetManager(BudgetLimits(max_llm_tokens=1000))
+    assert manager.remaining_tokens() == 1000
+    assert manager.has_token_reserve(1000)
+    assert not manager.has_token_reserve(1001)
+    manager.consume_tokens(400)
+    assert manager.remaining_tokens() == 600
+    # observe_tokens 取 max(usage, count)：更小的上报值不回退累计（防重放回退）
+    manager.observe_tokens(300)
+    assert manager.usage.llm_tokens == 400
+    assert manager.remaining_tokens() == 600
+    # 从零计数的管理器上 observe_tokens 直接写入绝对值
+    fresh = BudgetManager(BudgetLimits(max_llm_tokens=1000))
+    fresh.observe_tokens(300)
+    assert fresh.usage.llm_tokens == 300 and fresh.remaining_tokens() == 700
+    # observe_plan_tasks 为纯覆盖（max(0, count)）
+    manager.observe_plan_tasks(5)
+    assert manager.usage.plan_tasks == 5
+    manager.observe_plan_tasks(2)
+    assert manager.usage.plan_tasks == 2
+
+    ticks = iter((100.0, 145.5, 145.6))
+    monkeypatch.setattr(budget_module.time, "monotonic", lambda: next(ticks))
+    manager = BudgetManager(BudgetLimits())
+    assert manager.refresh_elapsed() == pytest.approx(45.5)
+    assert manager.usage.elapsed_seconds == pytest.approx(45.5)
+
+
 def test_token_usage_total_does_not_double_count_provider_total():
     assert HarnessRuntime._token_usage_total({"prompt_tokens": 60, "completion_tokens": 10, "total_tokens": 70}) == 70
     assert HarnessRuntime._token_usage_total({"prompt_tokens": 60, "completion_tokens": 10}) == 70
