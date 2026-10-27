@@ -17,6 +17,7 @@ from deepresearch_agent.agents.multi_agent.core.execution_record import Executio
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalMetadata, RetrievalResult
 from deepresearch_agent.harness import RunStatus, SourceMode, WorkflowMode
 from deepresearch_agent.harness.budgets import BudgetLimits
+from deepresearch_agent.harness.errors import AppError, ErrorCode
 from deepresearch_agent.observability import RUN_TOTAL
 from deepresearch_agent.harness.runtime import HarnessRuntime
 from deepresearch_agent.persistence import ArtifactStore, Database
@@ -241,3 +242,18 @@ async def test_lease_loss_during_context_build_cancels_build_and_skips_run_count
     persisted = await RunRepository(database).get(run.run_id)
     assert persisted.status == "context_building", "Run 应停留在非终态等待接管者"
     assert RUN_TOTAL.labels(status="context_building")._value.get() == before, "非终态不得计入 dra_runs_total"
+
+
+async def test_lease_conflict_raises_typed_retryable_error(database, tmp_path):
+    """评审审计：初始获取租约失败必须是类型化 LEASE_UNAVAILABLE（可重试）。"""
+    run = await create_queued_run(database)
+    assert await RunRepository(database).acquire_lease(run.run_id, "other-runtime", ttl_seconds=60)
+
+    def factory(context, events=None):
+        return CompletedFakeDriver(context, events=events)
+
+    runtime = build_runtime(database, tmp_path, factory, lease_seconds=5)
+    with pytest.raises(AppError) as excinfo:
+        await runtime.execute_run(run.run_id)
+    assert excinfo.value.code == ErrorCode.LEASE_UNAVAILABLE
+    assert excinfo.value.retryable is True

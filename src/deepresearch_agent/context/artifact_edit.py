@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import re
+
+from deepresearch_agent.harness.errors import AppError
 from dataclasses import dataclass
 
 
@@ -55,8 +57,11 @@ class ArtifactEditContextBuilder:
             if artifact is None:
                 continue
             try:
-                report = self.store.read_bytes(artifact.relative_path).decode("utf-8")
+                # 完整性校验：摘要不一致的历史报告不可作为改写基线，跳过该候选
+                report = self.store.read_verified(artifact.relative_path, artifact.sha256).decode("utf-8")
             except (OSError, UnicodeDecodeError):
+                continue
+            except AppError:
                 continue
             sections = self.parse_sections(report)
             selected = self._select(query, sections)

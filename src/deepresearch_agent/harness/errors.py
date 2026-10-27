@@ -1,4 +1,12 @@
-"""Typed public errors; messages are safe to expose and never contain secrets."""
+"""Typed public errors; messages are safe to expose and never contain secrets.
+
+契约约定：
+- ``code`` 是稳定契约——对外展示文案由客户端按 code 映射，message 仅作
+  日志与调试回退（中文写死是有意的；i18n 时改展示层而非本模块）。
+- raise 点分布：NOT_FOUND / TENANT_* / CONFLICT 等由 backend Web 层抛出，
+  HARNESS 层只抛执行域错误；DATABASE_UNAVAILABLE / PERSISTENCE_FAILED 为
+  防御性预留（持久层故障当前以原始异常向上传播，由通用 500 兜底）。
+"""
 
 from enum import Enum
 from typing import Any, Dict, Optional

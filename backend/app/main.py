@@ -38,7 +38,7 @@ def create_app(
     auto_resume: bool | None = None,
 ) -> FastAPI:
     if not settings.LOCAL_MVP_SINGLE_WORKER and not settings.REDIS_URL:
-        raise RuntimeError("单机模式必须设置 FASTAPI_WORKERS=1；多实例部署请配置 REDIS_URL 切换平台模式（Run 执行由独立 worker 消费）")
+        raise AppError(ErrorCode.CONFIGURATION_INVALID, "单机模式必须设置 FASTAPI_WORKERS=1；多实例部署请配置 REDIS_URL 切换平台模式（Run 执行由独立 worker 消费）")
     database = Database(database_url or settings.APP_DATABASE_URL)
     # 平台模式共享一个 Redis 扇出：API 侧发布的控制事件与 worker 侧发布的
     # Run 事件都经它推给任意实例的 SSE 订阅者
@@ -113,9 +113,13 @@ def create_app(
             ErrorCode.INVALID_SOURCE_MODE: 422, ErrorCode.TAVILY_API_KEY_MISSING: 503,
             ErrorCode.SOURCE_UNAVAILABLE: 503, ErrorCode.DATABASE_UNAVAILABLE: 503,
             ErrorCode.TENANT_UNAUTHENTICATED: 401, ErrorCode.TENANT_FORBIDDEN: 403,
-            ErrorCode.LLM_RATE_LIMITED: 429,
+            ErrorCode.LLM_RATE_LIMITED: 429, ErrorCode.CONFIGURATION_INVALID: 500,
         }.get(exc.code, 400)
-        return _error(request, status_code=status_code, code=exc.code.value, message=exc.message, retryable=exc.retryable, details=exc.details)
+        # 复用 as_dict()，响应 error 结构与错误类型定义同源，避免漂移
+        return JSONResponse(
+            status_code=status_code,
+            content={"error": exc.as_dict(), "request_id": getattr(request.state, "request_id", "unknown")},
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError):

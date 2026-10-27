@@ -64,5 +64,28 @@ class ArtifactStore:
             return False
         return hashlib.sha256(target.read_bytes()).hexdigest() == expected_sha256
 
+    def read_verified(self, relative_path: str | Path, expected_sha256: str) -> bytes:
+        """读取并校验内容摘要；缺失或被篡改即抛 ARTIFACT_INTEGRITY_FAILED。
+
+        用于「依据历史内容做后续动作」的路径（如报告章节改写的基线读取）：
+        基线被篡改时宁可失败也不能盲目替换。expected_sha256 为空时视为
+        未登记摘要，直接放行读取（兼容无记录的调用方）。
+        """
+        try:
+            content = self.read_bytes(relative_path)
+        except OSError as exc:
+            raise AppError(
+                ErrorCode.ARTIFACT_INTEGRITY_FAILED,
+                "Artifact 内容校验失败：文件缺失",
+                details={"relative_path": str(relative_path)},
+            ) from exc
+        if expected_sha256 and hashlib.sha256(content).hexdigest() != expected_sha256:
+            raise AppError(
+                ErrorCode.ARTIFACT_INTEGRITY_FAILED,
+                "Artifact 内容校验失败：文件与登记摘要不一致",
+                details={"relative_path": str(relative_path)},
+            )
+        return content
+
     def read_bytes(self, relative_path: str | Path) -> bytes:
         return self._resolve(relative_path).read_bytes()

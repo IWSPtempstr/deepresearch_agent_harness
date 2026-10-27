@@ -14,7 +14,7 @@ from deepresearch_agent.harness.checkpoints import CheckpointManager
 from deepresearch_agent.harness.contracts import ContractEvaluator, RunStatus, SourceMode, WorkflowMode
 from deepresearch_agent.harness.evidence import EvidenceLedger
 from deepresearch_agent.harness.event_bus import EventBus
-from deepresearch_agent.harness.errors import RunCancelled, RunLeaseLost
+from deepresearch_agent.harness.errors import AppError, ErrorCode, RunCancelled, RunLeaseLost
 from deepresearch_agent.harness.recovery import classify_exception, classify_verification_failures
 from deepresearch_agent.harness.run_context import RunContext
 from deepresearch_agent.harness.state_machine import StateMachine
@@ -114,7 +114,8 @@ class HarnessRuntime:
     async def _execute_run_inner(self, run_id: str) -> RunContext:
         owner = f"harness-{uuid.uuid4().hex}"
         if not await self.runs.acquire_lease(run_id, owner, ttl_seconds=self.lease_seconds):
-            raise RuntimeError(f"Run {run_id} 已由其他 Runtime 执行")
+            # 其他实例持有未过期租约：对调用方是可重试的暂时性冲突
+            raise AppError(ErrorCode.LEASE_UNAVAILABLE, f"Run {run_id} 已由其他 Runtime 执行", retryable=True)
         context: RunContext | None = None
         recovery_target: RunStatus | None = None
         set_current_run(run_id)
@@ -697,5 +698,6 @@ class HarnessRuntime:
             return generated_report
         if self.artifact_store is None:
             raise ValueError("Artifact edit requires an ArtifactStore")
-        base_report = self.artifact_store.read_bytes(contract["relative_path"]).decode("utf-8")
+        # 基线被篡改时宁可失败也不能盲目替换章节（摘要随 contract 下发）
+        base_report = self.artifact_store.read_verified(contract["relative_path"], contract.get("base_sha256", "")).decode("utf-8")
         return ArtifactEditContextBuilder.apply_replacement(base_report, contract, generated_report)
