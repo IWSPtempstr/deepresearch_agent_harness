@@ -206,6 +206,28 @@ async def test_astream_chain_fails_over_and_meters():
     assert any(item["provider"] == "fallback.local" and item["status"] == "ok" and item["total_tokens"] == 12 for item in items)
 
 
+async def test_astream_never_fails_over_mid_stream():
+    """评审 F2：已产出 chunk 后失败必须上抛——备用流从头重放会重复拼接输出。"""
+    import types as _types
+
+    model, primary, fallback = build_model(FakeClient(), FakeClient())
+
+    async def primary_stream(messages, stop=None, run_manager=None):
+        yield _types.SimpleNamespace(usage_metadata=None)
+        raise RuntimeError("mid-stream drop")
+
+    async def fallback_stream(client, messages, stop=None, run_manager=None):
+        yield _types.SimpleNamespace(usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2})
+
+    chunks = []
+    with pytest.raises(RuntimeError, match="mid-stream drop"):
+        async for chunk in model._astream_chain([], None, None, primary_stream, fallback_stream):
+            chunks.append(chunk)
+    assert len(chunks) == 1, "失败前的 chunk 保留，但不得出现备用重放"
+    assert model.gateway_health.in_cooldown("primary.local")
+    assert fallback.calls == 0, "中途失败禁止切换备用"
+
+
 def test_usage_extraction_variants():
     assert _usage_from_result(None) == {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     usage = _usage_from_result(FakeChatResult(total_tokens=50))

@@ -330,6 +330,7 @@ class FailoverChatOpenAI(PrefixAwareChatOpenAI):
         for label, client in self._provider_chain():
             started = time.monotonic()
             usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+            emitted = False
             try:
                 iterator = primary_factory(messages, stop, run_manager) if client is self else client_factory(client, messages, stop, run_manager)
                 async for chunk in iterator:
@@ -343,11 +344,16 @@ class FailoverChatOpenAI(PrefixAwareChatOpenAI):
                             "output_tokens": output_tokens,
                             "total_tokens": int(meta.get("total_tokens") or (input_tokens + output_tokens)),
                         }
+                    # 评审 F2：产出过 chunk 就不再 failover——备用流从头重放会与
+                    # 已发出的前缀重复拼接，此时上抛由调用方按半途失败处理
+                    emitted = True
                     yield chunk
             except Exception as exc:
                 self.gateway_health.report_failure(label)
                 self._meter(label, latency_ms=int((time.monotonic() - started) * 1000), error_code=type(exc).__name__, usage=usage)
                 last_error = exc
+                if emitted:
+                    raise
                 continue
             self.gateway_health.report_success(label)
             self._meter(label, latency_ms=int((time.monotonic() - started) * 1000), error_code=None, usage=usage)
