@@ -54,3 +54,12 @@ class RunCancelled(RuntimeError):
 
 class RunLeaseLost(RuntimeError):
     """本地租约已被其他 Runtime 抢占；本实例必须立即停止写入，由接管者驱动状态机。"""
+
+
+class NeedsUserInput(ValueError):
+    """研究问题信息不足，需用户澄清后才能继续。
+
+    引擎以异常【类型】而非消息文案识别该路径（魔法字符串比对会在上游改
+    文案时静默失效）。继承 ValueError 以兼容既有按 ValueError 捕获/断言
+    的调用方与测试。
+    """

@@ -14,7 +14,7 @@ from deepresearch_agent.harness.checkpoints import CheckpointManager
 from deepresearch_agent.harness.contracts import ContractEvaluator, RunStatus, SourceMode, WorkflowMode
 from deepresearch_agent.harness.evidence import EvidenceLedger
 from deepresearch_agent.harness.event_bus import EventBus
-from deepresearch_agent.harness.errors import AppError, ErrorCode, RunCancelled, RunLeaseLost
+from deepresearch_agent.harness.errors import AppError, ErrorCode, NeedsUserInput, RunCancelled, RunLeaseLost
 from deepresearch_agent.harness.recovery import classify_exception, classify_verification_failures
 from deepresearch_agent.harness.run_context import RunContext
 from deepresearch_agent.harness.state_machine import StateMachine
@@ -451,30 +451,40 @@ class HarnessRuntime:
 
             return context
         except (RunCancelled, asyncio.CancelledError):
-            assert context is not None
+            if context is None:
+                # 加载阶段即被取消：无状态机可驱动，原样传播（finally 释放租约）
+                raise
             if context.status is not RunStatus.CANCELLING:
                 await self._transition(context, RunStatus.CANCELLING, event_type="run.cancelling")
             await self._transition(context, RunStatus.CANCELLED, event_type="run.cancelled")
             await self.checkpoints.save(context, "cancelled")
             return context
         except BudgetExceeded as exc:
-            assert context is not None
+            if context is None:
+                raise
             await self._transition(context, RunStatus.BUDGET_EXHAUSTED, event_type="run.budget_exhausted", error_code="BUDGET_EXHAUSTED", error_message=str(exc))
             await self.checkpoints.save(context, "budget_exhausted")
             return context
         except RunLeaseLost:
             # 租约被抢占：Run 的状态机由接管者驱动，本地不做任何状态转换或
             # checkpoint 写入，否则会与接管者双写互相覆盖
-            assert context is not None
+            if context is None:
+                raise
             return context
         except Exception as exc:
-            if context is not None and not self.state_machine.is_terminal(context.status):
-                if str(exc) == "needs_user_input":
+            if context is None:
+                # 加载阶段失败（Run 不存在/Checkpoint 损坏等）尚无状态机可驱动：
+                # 直接落库失败并上抛原始异常——不再经 _load_context 二次抛出
+                # 掩盖第一现场，也不用 assert 的 AssertionError 取而代之
+                await self.runs.update_status(run_id, status="failed", error_code=type(exc).__name__, error_message=str(exc))
+                raise
+            if not self.state_machine.is_terminal(context.status):
+                if isinstance(exc, NeedsUserInput):
                     await self._transition(context, RunStatus.NEEDS_USER_INPUT, event_type="run.needs_user_input", error_message=str(exc))
                 else:
                     await self._transition(context, RunStatus.FAILED, event_type="run.failed", error_code=type(exc).__name__, error_message=str(exc))
                 await self.checkpoints.save(context, context.status.value)
-            return context if context is not None else await self._load_context(run_id)
+            return context
         finally:
             set_current_run(None)
             await self.runs.release_lease(run_id, owner)

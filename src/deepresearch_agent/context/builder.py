@@ -7,6 +7,7 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from deepresearch_agent.harness.errors import NeedsUserInput
 from deepresearch_agent.harness.run_context import RunContext
 from .resolver import QueryResolver
 from .tokens import count_tokens
@@ -118,7 +119,7 @@ class ContextBuilder:
             )
         if resolution.confidence < 0.7 and not historical_results:
             context.config_snapshot["clarification_question"] = "当前问题包含无法消解的指代，请明确要继续的主题、报告或章节。"
-            raise ValueError("needs_user_input")
+            raise NeedsUserInput("needs_user_input")
 
         policy = (
             "# SYSTEM CONTRACT\n"

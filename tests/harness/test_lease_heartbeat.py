@@ -257,3 +257,45 @@ async def test_lease_conflict_raises_typed_retryable_error(database, tmp_path):
         await runtime.execute_run(run.run_id)
     assert excinfo.value.code == ErrorCode.LEASE_UNAVAILABLE
     assert excinfo.value.retryable is True
+
+
+async def test_needs_user_input_routes_by_exception_type_not_message(database, tmp_path):
+    """评审修复：NEEDS_USER_INPUT 路由必须按异常类型识别——文案改动不再静默失效。"""
+    from deepresearch_agent.harness.errors import NeedsUserInput
+
+    run = await create_queued_run(database)
+
+    class ClarificationDriver(CompletedFakeDriver):
+        async def plan(self, failures=None):
+            # 文案故意与历史魔法串不同：字符串比对的旧实现会把它误判为 FAILED。
+            # 澄清发生在规划期（状态机只允许 planning → needs_user_input）
+            raise NeedsUserInput("请澄清研究对象后重试")
+
+    runtime = build_runtime(database, tmp_path, lambda context, events=None: ClarificationDriver(context, events=events), lease_seconds=5)
+    context = await runtime.execute_run(run.run_id)
+    assert context.status is RunStatus.NEEDS_USER_INPUT
+    persisted = await RunRepository(database).get(run.run_id)
+    assert persisted.status == "needs_user_input"
+
+
+async def test_load_failure_is_persisted_and_reraised_without_assert_masking(database, tmp_path):
+    """评审修复：加载阶段异常不再被 assert 的 AssertionError 取代——原始异常上抛且 Run 落库失败。"""
+    from deepresearch_agent.harness.checkpoints import CheckpointCorrupt
+
+    run = await create_queued_run(database)
+    # 写入一个 hash 不符的损坏 checkpoint，使 _load_context 在 try 内抛出
+    await CheckpointRepository(database).save(run.run_id, "planning", {"boom": True})
+    from sqlalchemy import text as sql_text
+
+    async with database.transaction() as session:
+        await session.execute(sql_text("UPDATE checkpoints SET state_hash = 'deadbeef' WHERE run_id = :run_id"), {"run_id": run.run_id})
+
+    def factory(context, events=None):
+        return CompletedFakeDriver(context, events=events)
+
+    runtime = build_runtime(database, tmp_path, factory, lease_seconds=5)
+    with pytest.raises(CheckpointCorrupt):
+        await runtime.execute_run(run.run_id)
+    persisted = await RunRepository(database).get(run.run_id)
+    assert persisted.status == "failed", "加载失败必须落库 failed，而非停留 queued 等待接管"
+    assert persisted.error_code == "CheckpointCorrupt"

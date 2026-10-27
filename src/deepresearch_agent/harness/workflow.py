@@ -12,6 +12,7 @@ from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.orchestrator import MultiAgentOrchestrator
+from deepresearch_agent.harness.errors import NeedsUserInput
 from deepresearch_agent.agents.multi_agent.planner.base_planner import PlannerResult
 from deepresearch_agent.agents.multi_agent.reporter.base_reporter import ReportResult, SectionContent
 from deepresearch_agent.agents.multi_agent.reporter.consistency_checker import ConsistencyCheckResult
@@ -140,7 +141,7 @@ class PlanExecuteReportDriver:
         )
         if self.planner_result.plan_spec is None:
             if self.planner_result.needs_clarification():
-                raise RuntimeError("needs_user_input")
+                raise NeedsUserInput("needs_user_input")
             raise RuntimeError("Planner 未生成可执行 PlanSpec")
 
     async def execute(self) -> None:
