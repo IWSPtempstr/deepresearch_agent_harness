@@ -278,6 +278,31 @@ async def test_needs_user_input_routes_by_exception_type_not_message(database, t
     assert persisted.status == "needs_user_input"
 
 
+async def test_needs_user_input_during_context_build_routes_to_clarification(database, tmp_path):
+    """评审修复：context 构建期抛 NeedsUserInput 必须进入澄清态——状态机
+    放行 context_building → needs_user_input 后，except 块内的 _transition
+    不再以 InvalidTransition 取代原始异常，澄清问题快照得以保留。"""
+    from deepresearch_agent.harness.errors import NeedsUserInput
+
+    run = await create_queued_run(database)
+
+    class ClarifyingContextBuilder:
+        async def build(self, context):
+            context.config_snapshot["clarification_question"] = "请明确要继续的主题"
+            raise NeedsUserInput("needs_user_input")
+
+    def factory(context, events=None):
+        return CompletedFakeDriver(context, events=events)
+
+    runtime = build_runtime(database, tmp_path, factory, lease_seconds=5)
+    runtime.context_builder = ClarifyingContextBuilder()
+    context = await runtime.execute_run(run.run_id)
+    assert context.status is RunStatus.NEEDS_USER_INPUT
+    assert context.config_snapshot.get("clarification_question") == "请明确要继续的主题"
+    persisted = await RunRepository(database).get(run.run_id)
+    assert persisted.status == "needs_user_input"
+
+
 async def test_load_failure_is_persisted_and_reraised_without_assert_masking(database, tmp_path):
     """评审修复：加载阶段异常不再被 assert 的 AssertionError 取代——原始异常上抛且 Run 落库失败。"""
     from deepresearch_agent.harness.checkpoints import CheckpointCorrupt
@@ -299,3 +324,28 @@ async def test_load_failure_is_persisted_and_reraised_without_assert_masking(dat
     persisted = await RunRepository(database).get(run.run_id)
     assert persisted.status == "failed", "加载失败必须落库 failed，而非停留 queued 等待接管"
     assert persisted.error_code == "CheckpointCorrupt"
+
+
+async def test_load_failure_persistence_is_best_effort_and_reraises_original(database, tmp_path):
+    """评审修复：加载失败后的落库自身故障不得取代原始异常——第一现场必须始终是最终上抛者。"""
+    run = await create_queued_run(database)
+
+    def factory(context, events=None):
+        return CompletedFakeDriver(context, events=events)
+
+    runtime = build_runtime(database, tmp_path, factory, lease_seconds=5)
+    runs_repository = RunRepository(database)
+
+    async def failing_get(run_id):
+        raise ValueError("持久层第一现场")
+
+    async def failing_update_status(*args, **kwargs):
+        raise RuntimeError("落库二次故障")
+
+    runtime.runs = runs_repository
+    runs_repository.get = failing_get
+    runs_repository.update_status = failing_update_status
+
+    with pytest.raises(ValueError) as excinfo:
+        await runtime.execute_run(run.run_id)
+    assert "第一现场" in str(excinfo.value), "上抛的应是原始异常而非落库的二次异常"

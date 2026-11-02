@@ -227,6 +227,12 @@ def test_state_machine_rejects_illegal_and_unverified_completion():
     machine.validate(RunStatus.VERIFYING, RunStatus.COMPLETED, contract_passed=True)
 
 
+def test_state_machine_allows_clarification_from_context_building():
+    # 评审修复：context 构建期抛 NeedsUserInput 必须能进澄清态——出边缺失时
+    # except 块里的 _transition 会抛 InvalidTransition 取代原始异常
+    StateMachine().validate(RunStatus.CONTEXT_BUILDING, RunStatus.NEEDS_USER_INPUT)
+
+
 def test_verification_failure_routing_is_complete():
     assert classify_verification_failures(["report_consistency"]).action == "repair_report"
     assert classify_verification_failures(["citation_integrity"]).action == "repair_report"

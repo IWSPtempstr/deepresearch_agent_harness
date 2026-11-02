@@ -476,7 +476,12 @@ class HarnessRuntime:
                 # 加载阶段失败（Run 不存在/Checkpoint 损坏等）尚无状态机可驱动：
                 # 直接落库失败并上抛原始异常——不再经 _load_context 二次抛出
                 # 掩盖第一现场，也不用 assert 的 AssertionError 取而代之
-                await self.runs.update_status(run_id, status="failed", error_code=type(exc).__name__, error_message=str(exc))
+                try:
+                    await self.runs.update_status(run_id, status="failed", error_code=type(exc).__name__, error_message=str(exc))
+                except Exception:
+                    # 落库尽力而为：失败本就可能源自持久层故障，落库的二次异常
+                    # 不得取代第一现场上抛
+                    pass
                 raise
             if not self.state_machine.is_terminal(context.status):
                 if isinstance(exc, NeedsUserInput):
