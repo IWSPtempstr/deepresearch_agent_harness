@@ -61,12 +61,18 @@
 
 ### T-005 — 单独迁移步骤与兼容窗口
 
-- 状态：`pending`
+- 状态：`done`（review 修复完成，随本阶段提交）
 - 目标：将生产迁移从 API/worker 启动中分离，定义 expand/contract 和失败恢复。
 - 前置依赖：`T-001`
-- 涉及文件：`backend/Dockerfile`、`backend/app/main.py`、`persistence/database.py`、migrations
-- 验收：空库/历史库升级、旧新版本兼容、失败迁移处理。
-- 预期证据：Alembic 输出和迁移测试。
+- 实现方式：
+  1. 新增 `SCHEMA_BOOTSTRAP_ON_STARTUP`（默认 true 保持本地零配置；false=生产语义，API lifespan 与 worker 启动不执行 create_schema）
+  2. `scripts/migrate.py` 统一迁移入口（真实 alembic 子进程 + 5 次锁竞争重试）
+  3. compose 平台模式：backend `SCHEMA_BOOTSTRAP_ON_STARTUP=false`（CMD 内 alembic 先行）、worker 先跑 migrate.py 再启动（启动不 DDL）
+  4. 启动 fail-fast：跳过迁移就启动会在首次依赖查询处明确失败（诚实失败，测试断言 OperationalError + 零建表）
+  5. 兼容窗口与不可逆点（0006 downgrade 清 scholar 数据）文档化：`docs/runbooks/deploy-migrate-rollback.md`
+- 验收：4 个新测试（bootstrap false 零建表+fail-fast / true 行为不变 / create_schema 双调用幂等 / migrate.py 真实子进程 upgrade head）；全量 241 passed 0 failed。
+- 证据明细：见 acceptance.md「T-005 证据」。
+- 日期：2026-11-05
 
 ### T-006 — Worker drain、恢复和资源关闭
 
@@ -126,9 +132,9 @@
 
 ## 进度摘要
 
-- 已完成：4
+- 已完成：5
 - 进行中：0
 - 阻塞：0
-- 待执行：6
-- 下一步：按依赖进入 T-003（依赖故障与队列重建）
+- 待执行：5
+- 下一步：按依赖进入 T-006（worker drain）
 - 最后更新：2026-11-04

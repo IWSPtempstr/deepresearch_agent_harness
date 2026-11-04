@@ -76,7 +76,10 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        await database.create_schema()
+        # T-005：生产部署（SCHEMA_BOOTSTRAP_ON_STARTUP=false）下启动不执行 DDL——
+        # schema 由单独的迁移步骤（alembic upgrade head）先行完成；本地/测试保持零配置引导
+        if settings.SCHEMA_BOOTSTRAP_ON_STARTUP:
+            await database.create_schema()
         from deepresearch_agent.llm_gateway import start_metering, stop_metering
         from deepresearch_agent.observability import setup_tracing
 

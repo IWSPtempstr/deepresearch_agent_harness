@@ -11,6 +11,22 @@
 - 费用：LLM 目标上限 $5/日、$50/月；实际计费不可用时以 Token/调用数限额落实。**已由用户确认目标值**。
 - 状态：作品集目标与数值已批准；具体 GitHub Pages 实现和模型 ID 映射待后续任务确定。
 
+## 当前阶段记录：T-005 迁移生命周期
+
+- 分支：`feat/github-static-portfolio`
+- 状态：`done`（待提交）
+- 交付：`SCHEMA_BOOTSTRAP_ON_STARTUP` 开关（API/worker 双接线）、`scripts/migrate.py`、compose 生产语义、fail-fast 语义、迁移 runbook。
+
+### T-005 证据（本地，2026-11-05）
+
+- 定向：`pytest tests/acceptance/test_migration_lifecycle.py -q` → **4 passed**：
+  - bootstrap=false：零建表 + lifespan 因缺表 fail-fast（OperationalError，诚实失败）
+  - bootstrap=true：本地行为不变（建表）
+  - create_schema 双调用幂等（含建数据后再调用）
+  - `scripts/migrate.py` 真实 alembic 子进程空库 upgrade head（sessions/runs 表落位）
+- 全量：`pytest tests/ -q` → **241 passed, 4 skipped, 0 failed**（基线 237 → 241）。
+- 兼容窗口：历史迁移均为条件化 expand（0002/0005/0007 列存在性检查 + 回填），0006 收缩不可逆点已写入 runbook 回滚决策树。
+
 ## 当前阶段记录：T-004 备份恢复演练
 
 - 分支：`feat/github-static-portfolio`
@@ -91,9 +107,9 @@
 
 - [x] T-001 作品集目标与验收边界
 - [x] T-002 GitHub 静态展示与仓库安全检查（两轮 review 通过，证据见上方；本地提交于 `feat/github-static-portfolio`，未推送）
-- [ ] T-003 依赖故障与队列重建（review 通过（PASS with 2 majors 已修），证据见上方；待本地提交）
+- [x] T-003 依赖故障与队列重建（提交 604af58）
 - [x] T-004 真实平台备份恢复（CI 真实 PG 演练作业 + sqlite 干跑 PASS；本机容器演练待用户同意 Docker）
-- [ ] T-005 单独迁移与兼容窗口
+- [x] T-005 单独迁移与兼容窗口（开关+独立入口+fail-fast+镜像 COPY scripts；证据见上方）
 - [ ] T-006 worker drain 与资源关闭
 - [ ] T-007 Readiness、SLO、告警、费用与模型路由
 - [ ] T-008 本地运行、恢复与面试演示 runbook

@@ -83,7 +83,9 @@ async def _consume(worker_name: str | None = None) -> None:
     if not settings.REDIS_URL and not settings.KAFKA_BOOTSTRAP_SERVERS:
         raise SystemExit("worker 进程需要设置 REDIS_URL 或 KAFKA_BOOTSTRAP_SERVERS（平台模式）")
     database = Database(settings.APP_DATABASE_URL)
-    await database.create_schema()
+    # T-005：生产部署下启动不执行 DDL（迁移由单独步骤完成）；本地引导开关保持默认 true
+    if settings.SCHEMA_BOOTSTRAP_ON_STARTUP:
+        await database.create_schema()
     from deepresearch_agent.llm_gateway import start_metering, stop_metering
     from deepresearch_agent.observability import setup_tracing
 

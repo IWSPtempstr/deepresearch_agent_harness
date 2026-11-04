@@ -45,6 +45,8 @@ services:
       SKILLS_ROOT: "/app/skills"
       NEO4J_URI: "bolt://neo4j:7687"
       FRONTEND_ORIGINS: "http://127.0.0.1:${FRONTEND_PORT:-5173},http://localhost:${FRONTEND_PORT:-5173}"
+      # T-005：生产模式启动不执行应用内 DDL；schema 由镜像 CMD 的 alembic upgrade head 先行完成
+      SCHEMA_BOOTSTRAP_ON_STARTUP: "false"
     ports:
       - "127.0.0.1:8000-8001:8000"
     volumes:
@@ -137,7 +139,8 @@ services:
       SKILLS_ROOT: "/app/skills"
       NEO4J_URI: "bolt://neo4j:7687"
     # schema 迁移带重试：与 api 并发启动时 alembic 可能撞车，重试后为幂等空操作
-    command: ["sh", "-c", "until alembic upgrade head; do echo 'waiting for schema'; sleep 2; done && python -m deepresearch_agent.worker"]
+    # T-005：迁移作为独立步骤先行（scripts/migrate.py 带锁竞争重试），worker 启动不再执行 DDL
+    command: ["sh", "-c", "python scripts/migrate.py && SCHEMA_BOOTSTRAP_ON_STARTUP=false python -m deepresearch_agent.worker"]
     volumes:
       - ./data:/app/data
       - ./skills:/app/skills

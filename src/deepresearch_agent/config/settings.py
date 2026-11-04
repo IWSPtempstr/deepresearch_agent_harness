@@ -116,6 +116,10 @@ OPENALEX_MAILTO = (os.getenv("OPENALEX_MAILTO") or "").strip()
 ARTIFACT_ROOT = Path(os.getenv("ARTIFACT_ROOT", PROJECT_ROOT / "data" / "artifacts")).expanduser()
 SKILLS_ROOT = Path(os.getenv("SKILLS_ROOT", PROJECT_ROOT / "skills")).expanduser()
 AUTO_RESUME_RUNS = _get_env_bool("AUTO_RESUME_RUNS", True)
+# T-005：启动期 schema 引导开关。true（默认）= 进程内 create_schema（本地零配置可跑）；
+# false = 生产部署语义——DDL 只经单独的 `alembic upgrade head` 迁移步骤执行，
+# API/worker 启动不执行任何竞争性 DDL（多副本安全）
+SCHEMA_BOOTSTRAP_ON_STARTUP = _get_env_bool("SCHEMA_BOOTSTRAP_ON_STARTUP", True)
 CONTEXT_MAX_CHARS = _require_positive("CONTEXT_MAX_CHARS", _get_env_int("CONTEXT_MAX_CHARS", 16000) or 16000)
 CONTEXT_RECENT_TURNS = _require_positive("CONTEXT_RECENT_TURNS", _get_env_int("CONTEXT_RECENT_TURNS", 8) or 8)
 CONTEXT_MAX_TOKENS = _require_positive("CONTEXT_MAX_TOKENS", _get_env_int("CONTEXT_MAX_TOKENS", 12000) or 12000)
