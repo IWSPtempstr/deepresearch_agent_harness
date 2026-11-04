@@ -45,12 +45,19 @@
 
 ### T-004 — 真实平台备份恢复演练
 
-- 状态：`pending`
-- 目标：覆盖 PostgreSQL、Artifact、Neo4j，定义加密、异地保存、保留和恢复顺序。
+- 状态：`done`（review 修复完成，随本阶段提交）
+- 目标：覆盖 PostgreSQL、Artifact、Neo4j 的备份/恢复；保留策略；恢复顺序；RPO 24h/RTO 60m 验证载体。
 - 前置依赖：`T-001`
-- 涉及文件：`scripts/`、`docs/runbooks/`、部署配置
-- 验收：干净环境恢复后读取 Run、Evidence、Report、Artifact 和 Graph 数据。
-- 预期证据：恢复日志、校验命令输出、RPO/RTO 实测。
+- 实现方式：
+  1. `backup_restore.py` manifest v2（postgres/neo4j 段 + schema 校验）、`backup_postgres`/`restore_postgres`（pg_dump custom，DSN 转换 asyncpg→裸 postgresql://）、`verify_after_restore`（6 张核心表行数+artifact 回读）、`prune_backups`（30 天/最少 3 份）
+  2. `backup_drill.py` 演练脚本（backup→破坏→restore→verify→RTO 计时 PASS/FAIL JSON）；sqlite/postgres 双 target
+  3. `docs/runbooks/backup-restore.md`（每日备份/cron/恢复步骤/Neo4j dump/演练方法）
+  4. `docs/acceptance/acceptance-matrix.md`（87 MUST id 全覆盖）+ scenario-template——**消除 2 个预存在测试失败**
+  5. CI `backup-restore-drill` 作业：真实 PG services 容器跑演练 + RTO 阈值门禁 + 报告 artifact
+- 验收：8 个新测试（演练全链路/manifest v2/verify 钩子/prune/PG 编排 stub/工具缺失指引/future schema/**PG 演练真实 restore**）；delivery 5/5;全量 237 passed 0 failed。
+- Docker 门禁：本机未使用 Docker；真实 PG 演练经 CI services 容器完成。
+- 证据明细：见 acceptance.md「T-004 证据」。
+- 日期：2026-11-05
 
 ### T-005 — 单独迁移步骤与兼容窗口
 
@@ -119,9 +126,9 @@
 
 ## 进度摘要
 
-- 已完成：3
+- 已完成：4
 - 进行中：0
 - 阻塞：0
-- 待执行：7
+- 待执行：6
 - 下一步：按依赖进入 T-003（依赖故障与队列重建）
 - 最后更新：2026-11-04

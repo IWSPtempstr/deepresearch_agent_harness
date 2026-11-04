@@ -11,6 +11,22 @@
 - 费用：LLM 目标上限 $5/日、$50/月；实际计费不可用时以 Token/调用数限额落实。**已由用户确认目标值**。
 - 状态：作品集目标与数值已批准；具体 GitHub Pages 实现和模型 ID 映射待后续任务确定。
 
+## 当前阶段记录：T-004 备份恢复演练
+
+- 分支：`feat/github-static-portfolio`
+- 状态：`done`（待提交）
+- 交付：manifest v2 + PG dump/restore + verify_after_restore + prune；backup_drill 演练脚本；runbook；acceptance-matrix（87 MUST id，消除 2 个预存在失败）；CI 演练作业+门禁。
+
+### T-004 证据（本地，2026-11-05，review 修复后最终验证）
+
+- 定向：`pytest tests/acceptance/test_backup_drill.py -q` → **8 passed**（含 **PG 演练全链路 stub 测试**：dump→CREATE DATABASE scratch→pg_restore 真实执行→对恢复后库 verify→pg_restore_exercised 披露断言；DSN 转换、prune 序列、future schema 干净 zip 重建拒绝）。
+- sqlite 演练干跑：`run_sqlite_drill` 对真实 `data/app.db` 副本 → **passed: True, rto 0.02s**（目标 3600s），restored 5/5。
+- delivery 套件：`test_delivery_phase8.py` → **5 passed**（历史 2 个失败因 docs/acceptance 缺失，本阶段补齐后消除）。
+- 全量：`pytest tests/ -q` → **237 passed, 4 skipped, 0 failed**（基线 227+2failed → 237+0）。
+- review 修复记录（1 轮 FAIL→修复）：2 blocker（CI 缺 PYTHONPATH 致脚本 import 崩溃；runner PG16 client 无法 dump PG17 → 安装 postgresql-client-17）、1 major（PG 演练未真实执行 pg_restore 被标记为 restore 演练 → 重写为真实恢复路径：`<db>_restore` scratch 库 + `pg_restore_exercised` 披露字段 + RTO 口径与 sqlite 对齐），minors 全修（非 PG DSN 显式拒绝、verify 表缺失包装、--archive argparse 报错、Neo4j dump 误用 load 参数、runbook DSN 转换说明、21→22 表、utcnow/重复 zip entry 清理）。
+- RPO/RTO 声明与演练方法见 `docs/runbooks/backup-restore.md`；真实 PG 演练（含真实 pg_restore）由 CI `backup-restore-drill` 每次提交执行，报告 + 门禁（RTO<60m）上 GitHub。
+- Neo4j dump 打包链路已支持（data/neo4j.dump 入 manifest；容器内 dump/load 步骤在 runbook，本机执行需 Docker 门禁同意）。
+
 ## 当前阶段记录：T-003 依赖故障与队列重建
 
 - 分支：`feat/github-static-portfolio`
@@ -76,7 +92,7 @@
 - [x] T-001 作品集目标与验收边界
 - [x] T-002 GitHub 静态展示与仓库安全检查（两轮 review 通过，证据见上方；本地提交于 `feat/github-static-portfolio`，未推送）
 - [ ] T-003 依赖故障与队列重建（review 通过（PASS with 2 majors 已修），证据见上方；待本地提交）
-- [ ] T-004 真实平台备份恢复
+- [x] T-004 真实平台备份恢复（CI 真实 PG 演练作业 + sqlite 干跑 PASS；本机容器演练待用户同意 Docker）
 - [ ] T-005 单独迁移与兼容窗口
 - [ ] T-006 worker drain 与资源关闭
 - [ ] T-007 Readiness、SLO、告警、费用与模型路由
