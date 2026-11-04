@@ -168,9 +168,8 @@
 - [x] T-005 单独迁移与兼容窗口（开关+独立入口+fail-fast+镜像 COPY scripts；证据见上方）
 - [x] T-006 worker drain 与资源关闭（3 测试+资源关闭补全；证据见上方）
 - [x] T-007 Readiness、SLO、告警、费用
-- [x] T-009 按任务难度配置模型路由
 - [x] T-008 runbook 索引与实现级文档套件（runbooks/README.md + 两份实现级 runbook）
-- [ ] T-009 按任务难度配置模型路由
+- [x] T-009 按任务难度配置模型路由（提交 3f46e17）
 - [x] T-010 可选 Kafka 传输层（两轮 review 通过，证据见上方；本地提交于 `feat/github-static-portfolio`，未推送）
 - [x] T-011 Kafka 事件流分发（FanoutChain+审计消费组；证据见上方）
 
