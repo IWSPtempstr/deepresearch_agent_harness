@@ -321,6 +321,8 @@ Harness 实际支持两种工作流（`WorkflowMode` 成员，见 `src/deepresea
 
 启用 GitHub Pages：在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。之后更新 `main` 分支上的作品集源码，`.github/workflows/pages.yml` 会以 `/<repo>/` 为 base 构建作品集入口并发布静态文件（构建产物同时提供 `index.html` 与 `portfolio.html`，站点根路径可直接访问）。发布地址由 GitHub Pages 设置页提供。静态页面只链接公开仓库内容，不包含 API key 或真实运行数据。
 
+运维 runbook 索引见 [docs/runbooks/README.md](docs/runbooks/README.md)(备份恢复/迁移发布/告警响应/成本天花板)。
+
 ---
 
 ## 快速启动
