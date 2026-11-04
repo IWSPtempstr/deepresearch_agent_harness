@@ -9,6 +9,7 @@ __pycache__/
 cache/
 data/
 frontend/dist/
+frontend/portfolio-dist/
 frontend/node_modules/
 .pytest_cache/
 .learn-by-building/
@@ -36,4 +37,5 @@ evals/**/results.md
 **/*Resume*
 **/*简历*
 .github/skills/
+.zcode/
 scripts/typesafe_smoke.py
