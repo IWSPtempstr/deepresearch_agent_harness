@@ -87,6 +87,13 @@ class TimeoutBoundProvider:
                 details={"timeout_seconds": self._timeout_seconds},
             ) from exc
 
+    async def aclose(self) -> None:
+        """T-006：委托关闭被包装的 provider（如 scholar httpx 客户端）。"""
+        inner = getattr(self._provider, "_instance", None) or self._provider
+        close = getattr(inner, "aclose", None)
+        if close is not None:
+            await close()
+
 
 def ensure_results(value: Sequence[RetrievalResult]) -> list[RetrievalResult]:
     return list(value)

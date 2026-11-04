@@ -221,6 +221,9 @@ class RunService:
             for agent in agents:
                 if hasattr(agent, "close"):
                     agent.close()
+            # T-006：终态清除 per-run prefix 记账（防 worker 生命周期内无界增长）
+            clear_run_cancelled(run_id)
+            prefix_tracker.evict_run(run_id)
             run = await self.runs.get(run_id)
             config = json.loads(run.config_snapshot_json or "{}") if run else {}
             if not config.get("evaluation_run") and run and run.status not in {"paused", "pausing"}:
@@ -289,10 +292,15 @@ class RunService:
 
         多 worker 重复投递是安全的：执行侧以条件 UPDATE 抢租约，
         抢不到的实例直接让位（RunLeaseLost 语义），租约就是互斥量。
+
+        T-006：queue 模式（API/worker 队列传输）下返回待重投 run_ids 交由调用方
+        经队列投递——worker 内不再进程内 spawn 执行（旧行为绕过 WORKER_CONCURRENCY
+        信号量、且关停时被立即取消写 CANCELLED，违背 drain 语义）。
         """
         run_ids = await RecoveryManager(self.runs).scan(auto_resume=True)
-        for run_id in run_ids:
-            self.schedule(run_id)
+        if self.queue is None:
+            for run_id in run_ids:
+                self.schedule(run_id)
         return run_ids
 
     async def cancel(self, run_id: str) -> bool:
@@ -361,6 +369,12 @@ class RunService:
         return resumed
 
     async def shutdown(self) -> None:
+        # T-006：释放 router 内 provider 资源（scholar httpx 客户端等）
+        if self._router is not None:
+            try:
+                await self._router.aclose()
+            except Exception:
+                pass
         await self.skill_learning.shutdown()
         active = list(self._tasks.values())
         if not active:

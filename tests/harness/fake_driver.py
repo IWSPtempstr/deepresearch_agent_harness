@@ -53,3 +53,17 @@ class CompletedFakeDriver:
     def plan_record(self):
         tasks = [{"task_id": f"task-{self.context.run_id}", "task_type": "deep_research", "source_mode": self.mode, "status": "pending", "description": "research-0"}]
         return ({"plan_id": f"plan-{self.context.run_id}", "status": "executing", "tasks": tasks}, tasks)
+
+
+class SlowFakeDriver(CompletedFakeDriver):
+    """执行阶段持锁 N 秒的变体：供 SIGTERM drain 测试观察“在跑 Run 自然完成”。"""
+
+    def __init__(self, context, events=None, hold_seconds: float = 0.0, run_id: str | None = None):
+        super().__init__(context, events=events)
+        self._hold_seconds = hold_seconds
+
+    async def execute(self):
+        import asyncio
+
+        await asyncio.sleep(self._hold_seconds)
+        self.executed = True

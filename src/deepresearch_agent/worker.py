@@ -33,16 +33,25 @@ logger = logging.getLogger("deepresearch.worker")
 
 
 async def _scan_loop(service: RunService, interval: float) -> None:
-    """P0-3b：周期扫描过期租约并触发接管投递；顺带刷新队列深度与等待指标。"""
+    """P0-3b：周期扫描过期租约；T-006：恢复的 Run 经队列重投（受信号量纪律）。"""
     from deepresearch_agent.observability import QUEUE_DEPTH, WAITING_RUNS
 
     while True:
         await asyncio.sleep(interval)
         try:
-            await service.recover_expired()
+            recovered = await service.recover_expired()
         except Exception:
             # 单轮扫描失败（如 DB 抖动）不终止循环；下一轮重试
             continue
+        for run_id in recovered:
+            # queue 模式下 recover_expired 返回待重投列表；进程内模式
+            # recover_expired 已内部调度（此处列表为空）
+            try:
+                if service.queue is not None:
+                    await service.queue.enqueue(run_id)
+            except Exception:
+                # 入队失败不致命：run 留在 interrupted，下一轮扫描仍会重投
+                continue
         try:
             # T-003：WAITING_RUNS = queued 状态行数（复用扫描轮次，不增加查询频率）
             waiting = await service.runs.count_by_status("queued")
@@ -104,8 +113,14 @@ async def _consume(worker_name: str | None = None) -> None:
     service = RunService(database, event_fanout=event_fanout)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
+    # T-006：第二次 SIGTERM = 快速退出升级（跳过宽限，等价崩溃，租约接管兜底）
+    def _handle_signal(sig, _frame=None):
+        if stop.is_set() and sig == signal.SIGTERM:
+            logger.warning("收到第二次 SIGTERM：跳过宽限立即退出（等价崩溃，租约接管兜底）")
+            raise SystemExit(130)
+        stop.set()
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, stop.set)
+        loop.add_signal_handler(sig, _handle_signal, sig)
 
     async def run_one(run_id: str, ack=None) -> None:
         try:
@@ -182,6 +197,13 @@ async def _consume(worker_name: str | None = None) -> None:
             reconnect_backoff = 1.0
             run_id, ack = delivered if isinstance(delivered, tuple) else (delivered, None)
             next_item = None
+            # T-006：stop 置位后不再启动新 Run——已在手信号写回等待（Kafka 未
+            # ack 会重投；Redis 侧由租约扫描兜底），先完成已 inflight 的 Run
+            if stop.is_set():
+                with contextlib.suppress(Exception):
+                    await generator.aclose()
+                generator = None
+                break
             await semaphore.acquire()
             task = asyncio.create_task(run_one(run_id, ack), name=f"run:{run_id}")
 
@@ -191,7 +213,10 @@ async def _consume(worker_name: str | None = None) -> None:
             task.add_done_callback(_release)
             inflight.add(task)
             task.add_done_callback(inflight.discard)
-        # 停止拉取后给在跑 Run 宽限窗口；超时直接退出交给租约接管
+        # 停止拉取后给在跑 Run 宽限窗口；超时不取消也不写终态（等价崩溃，
+        # 由租约接管）——但资源关闭顺序保证不再破坏它们：先关外层（队列/扇出），
+        # 再等 teardown；宽限超期的 Run 由 asyncio.run 撤销时其 DB 写会失败，
+        # 状态修复交给接管者的 checkpoint 恢复
         if inflight:
             await asyncio.wait(set(inflight), timeout=SHUTDOWN_GRACE_SECONDS)
     finally:
@@ -204,9 +229,16 @@ async def _consume(worker_name: str | None = None) -> None:
             await asyncio.gather(next_item, return_exceptions=True)
         with contextlib.suppress(Exception):
             await generator.aclose()
-        await service.shutdown()
-        await stop_metering()
-        await queue.close()
+        with contextlib.suppress(Exception):
+            await service.shutdown()
+        with contextlib.suppress(Exception):
+            await stop_metering()
+        with contextlib.suppress(Exception):
+            await queue.close()
+        if event_fanout is not None:
+            # T-006：worker 侧 RedisEventFanout 专属客户端此前从未关闭
+            with contextlib.suppress(Exception):
+                await event_fanout.close()
         await database.close()
 
 

@@ -76,12 +76,17 @@
 
 ### T-006 — Worker drain、恢复和资源关闭
 
-- 状态：`pending`
+- 状态：`done`（review 待派，随本阶段提交）
 - 目标：SIGTERM/SIGKILL 期间安全等待、checkpoint、释放资源，避免未 join 任务。
 - 前置依赖：`T-003`
-- 涉及文件：`src/deepresearch_agent/worker.py`、`run_service.py`
-- 验收：长任务 SIGTERM/SIGKILL 子进程测试，验证可接管、无非法终态和无重复副作用。
-- 预期证据：进程测试日志、Run 状态、事件和 tool_call 记录。
+- 实现方式：
+  1. **stop 后不启动新 Run**：消费循环在 stop 置位后关闭当前生成器并 break（在手信号由 Kafka 重投/扫描兜底）
+  2. **双重 SIGTERM 升级**：第二次 SIGTERM 抛 SystemExit(130) 快速退出（等价崩溃，租约接管兜底）
+  3. **扫描恢复路径改道**：queue 模式下 `recover_expired` 返回待重投列表，worker `_scan_loop` 经**队列**重投（旧行为进程内 spawn 绕过 WORKER_CONCURRENCY 且关停时被立即取消写 CANCELLED，违背 drain 语义）
+  4. **资源关闭补全**：finally 全部 suppress 化（单点失败不再跳过 database.close）；worker 侧 RedisEventFanout 首次关闭；RunService.shutdown 关闭 router providers（scholar httpx aclose 首次有调用方，TimeoutBoundProvider 委托）
+  5. **无界增长修复**：prefix_tracker 新增 `evict_run`，Run 终态后清除 per-run 记账；`clear_run_cancelled` 同点调用
+- 验收：3 个 drain 测试（子进程 SIGTERM 优雅退出+在跑 Run 自然完成+不启动新 Run；升级分支；宽限/租约量级静态断言）；全量 244 passed 0 failed。
+- 证据明细：见 acceptance.md「T-006 证据」。
 
 ### T-007 — Readiness、SLO、告警与成本控制
 
@@ -132,9 +137,9 @@
 
 ## 进度摘要
 
-- 已完成：5
+- 已完成：6
 - 进行中：0
 - 阻塞：0
-- 待执行：5
+- 待执行：4
 - 下一步：按依赖进入 T-006（worker drain）
 - 最后更新：2026-11-04

@@ -30,6 +30,18 @@ class RetrievalRouter:
             )
         return provider
 
+    async def aclose(self) -> None:
+        """T-006：关停时释放各 provider 持有的资源（如 scholar httpx 客户端）。"""
+        for provider in self._providers.values():
+            inner = getattr(provider, "_instance", None) or provider
+            close = getattr(inner, "aclose", None)
+            if close is None:
+                continue
+            try:
+                await close()
+            except Exception:
+                continue
+
 
 class _LazyProvider:
     """Delay provider imports and external-service initialization until selected."""
