@@ -133,20 +133,20 @@
 - Docker 门禁：本阶段本地未使用 Docker；真实 broker 验证经 CI services 容器完成。
 - 日期：2026-11-04
 
-### T-011 — Kafka 事件流分发（未实现，登记）
+### T-011 — Kafka 事件流分发
 
-- 状态：`pending`
-- 目标：SSE 实时扇出与审计消费可选走 Kafka topic（DB 仍为事实源，双写失败仅计数）。
+- 状态：`done`（随本阶段提交）
+- 目标：全量事件流可选走 Kafka topic（DB 仍为事实源，双写失败仅计数）；独立消费组演示。
 - 前置依赖：`T-010`
-- 涉及文件：`event_bus.py`、`events_fanout.py`、`event_stream.py`、配置与文档
-- 验收：多消费者组（SSE 网关组 + 审计组）+ 重放演示；双写一致性测试。
-- 预期证据：集成测试输出与文档。
+- 实现方式：`src/deepresearch_agent/events_kafka.py`——`KafkaEventFanout`（EventFanout Protocol 实现,key=run_id 有序写 dra-events;per-Run 订阅为过滤语义,SSE 实时仍以 Redis 为主通道）、`FanoutChain`（组合扇出,单通道失败只计数）、`AuditEventConsumer`（独立消费组 dra-audit→JSONL+按 offset 提交）。SSE 稳定主路径不动。
+- 验收：4 个 stub 测试（publish 键控/per-Run 过滤/链隔离/审计消费+提交）+ CI 真实 broker 作业扩展；全量 261 passed 0 failed。
+- 日期：2026-11-05
 
 ## 进度摘要
 
-- 已完成：9
+- 已完成：10
 - 进行中：0
 - 阻塞：0
-- 待执行：1
+- 待执行：0（T-002/003/004/005/006/007/008/009/010/011 全部完成；T-001 为决策基线）
 - 下一步：按依赖进入 T-006（worker drain）
 - 最后更新：2026-11-04

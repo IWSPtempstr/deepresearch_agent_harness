@@ -101,8 +101,10 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements-ci.txt
-      - name: Kafka 队列回归（真实 broker）
-        run: python -m pytest tests/harness/test_run_queue.py -q
+      - name: Kafka 队列与事件流回归（真实 broker）
+        run: |
+          python -m pytest tests/harness/test_run_queue.py -q
+          python -m pytest tests/acceptance/test_events_kafka.py -q
 
   backup-restore-drill:
     # T-004：PG 备份演练 + 真实 pg_restore 到 scratch 库（恢复路径真实执行）

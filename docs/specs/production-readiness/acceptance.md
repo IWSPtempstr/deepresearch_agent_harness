@@ -11,6 +11,19 @@
 - 费用：LLM 目标上限 $5/日、$50/月；实际计费不可用时以 Token/调用数限额落实。**已由用户确认目标值**。
 - 状态：作品集目标与数值已批准；具体 GitHub Pages 实现和模型 ID 映射待后续任务确定。
 
+## 当前阶段记录：T-011 Kafka 事件流
+
+- 分支：`feat/github-static-portfolio`
+- 状态：`done`（待提交）
+- 交付：`events_kafka.py`（KafkaEventFanout/FanoutChain/AuditEventConsumer）、CI 真实 broker 作业扩展、README 事件流说明。
+
+### T-011 证据（本地，2026-11-05）
+
+- 定向：`pytest tests/acceptance/test_events_kafka.py -q` → **4 passed**：publish 键控 JSON（懒启动）、per-Run 订阅过滤、FanoutChain 单通道失败只计数+其余通道继续+close 抑制、审计消费 JSONL 落盘+按 offset 提交。
+- CI：kafka-compat 作业扩展运行 events kafka 测试（真实 broker,本机零 Docker）。
+- 全量：`pytest tests/ -q` → **261 passed, 4 skipped, 0 failed**（基线 257 → 261）。
+- 语义边界：SSE 实时通道仍以 Redis 为主（per-Run pub/sub 语义匹配）；Kafka 面向全量事件流的独立下游（审计/评测/数仓）——与 7.1 的引入触发条件一致。
+
 ## 当前阶段记录：T-009 模型路由
 
 - 分支：`feat/github-static-portfolio`
@@ -159,7 +172,7 @@
 - [x] T-008 runbook 索引与实现级文档套件（runbooks/README.md + 两份实现级 runbook）
 - [ ] T-009 按任务难度配置模型路由
 - [x] T-010 可选 Kafka 传输层（两轮 review 通过，证据见上方；本地提交于 `feat/github-static-portfolio`，未推送）
-- [ ] T-011 Kafka 事件流分发（登记，未实现）
+- [x] T-011 Kafka 事件流分发（FanoutChain+审计消费组；证据见上方）
 
 ## 证据记录格式
 

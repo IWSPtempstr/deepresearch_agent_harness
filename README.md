@@ -433,6 +433,8 @@ Run 的唤醒信号队列支持两种可替换实现，由环境变量选择（K
 docker compose --profile kafka up -d --build
 ~~~
 
+事件流分发（T-011）：`dra-events` topic 以 key=run_id 承载全量事件（durable-first 语义不变——事件先落库），`FanoutChain` 组合 Redis（per-Run 实时）+ Kafka（全量流）双通道，单通道失败只计数；`AuditEventConsumer` 演示独立消费组（审计/评测/数仓场景）。
+
 定位说明：这是**传输层可替换性的能力验证**，不是生产必选项——是否引入 Kafka 取决于流量与消费者规模，取舍记录见 `docs/specs/production-readiness/design.md`。CI 的 `kafka-compat` 作业用真实 broker 跑队列回归（`tests/harness/test_run_queue.py`，本地无 broker 时自动跳过）。
 
 ---
