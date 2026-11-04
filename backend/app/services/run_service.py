@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -33,6 +34,8 @@ from deepresearch_agent.models.get_models import get_llm_model
 from deepresearch_agent.retrieval.router import create_default_router
 from deepresearch_agent.retrieval.base import TimeoutBoundProvider
 from backend.app.schemas import MessageCreate, RunCreate, SessionCreate
+
+logger = logging.getLogger("deepresearch.run_service")
 
 
 class RunService:
@@ -133,8 +136,11 @@ class RunService:
 
     def schedule(self, run_id: str) -> asyncio.Task:
         if self.queue is not None:
-            # 队列模式：仅投递唤醒信号；执行由 worker 进程消费（runs 表是事实源）
+            # 队列模式：仅投递唤醒信号；执行由 worker 进程消费（runs 表是事实源）。
+            # T-003：enqueue task 不再无观测——done-callback 捕获异常并计数，
+            # run 留在 queued，由租约扫描（≤15s）重建投递，不在请求路径同步重试
             task = asyncio.create_task(self.queue.enqueue(run_id), name=f"enqueue:{run_id}")
+            task.add_done_callback(self._observe_enqueue)
             return task
         existing = self._tasks.get(run_id)
         if existing is not None and not existing.done():
@@ -144,6 +150,25 @@ class RunService:
         self._tasks[run_id] = task
         task.add_done_callback(lambda _task: self._tasks.pop(run_id, None))
         return task
+
+    @staticmethod
+    def _observe_enqueue(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            return
+        from deepresearch_agent.observability import QUEUE_ENQUEUE_FAILURES
+
+        logger.error(
+            "唤醒信号入队失败（run_id=%s，run 留在 queued，等待租约扫描重建投递）",
+            task.get_name().removeprefix("enqueue:"),
+            exc_info=exc,
+        )
+        try:
+            QUEUE_ENQUEUE_FAILURES.inc()
+        except Exception:
+            pass
 
     async def execute_now(self, run_id: str) -> Any:
         """worker 进程入口：直接执行一个 Run（与 API 进程内调度共用同一执行体）。"""

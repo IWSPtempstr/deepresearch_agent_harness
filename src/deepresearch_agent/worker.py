@@ -33,8 +33,8 @@ logger = logging.getLogger("deepresearch.worker")
 
 
 async def _scan_loop(service: RunService, interval: float) -> None:
-    """P0-3b：周期扫描过期租约并触发接管投递；顺带刷新队列深度指标。"""
-    from deepresearch_agent.observability import QUEUE_DEPTH
+    """P0-3b：周期扫描过期租约并触发接管投递；顺带刷新队列深度与等待指标。"""
+    from deepresearch_agent.observability import QUEUE_DEPTH, WAITING_RUNS
 
     while True:
         await asyncio.sleep(interval)
@@ -43,6 +43,12 @@ async def _scan_loop(service: RunService, interval: float) -> None:
         except Exception:
             # 单轮扫描失败（如 DB 抖动）不终止循环；下一轮重试
             continue
+        try:
+            # T-003：WAITING_RUNS = queued 状态行数（复用扫描轮次，不增加查询频率）
+            waiting = await service.runs.count_by_status("queued")
+            WAITING_RUNS.set(int(waiting))
+        except Exception:
+            pass
         try:
             # 仅 Redis Streams 提供积压深度（流只承载唤醒信号，该值仅供观测）；
             # Kafka/进程内队列无对应语义，跳过该指标
@@ -117,13 +123,63 @@ async def _consume(worker_name: str | None = None) -> None:
         # KafkaRunQueue 提供 consume_with_ack（执行后提交 offset 的至少一次语义）；
         # 其余实现沿用无 ack 的 consume()
         consume_with_ack = getattr(queue, "consume_with_ack", None)
-        generator = consume_with_ack() if consume_with_ack is not None else queue.consume()
+
+        def _open_stream():
+            # T-003：断连自愈——每次（重）连都重建消费生成器；
+            # Kafka/Redis/进程内实现统一适用
+            return consume_with_ack() if consume_with_ack is not None else queue.consume()
+
+        generator = _open_stream()
+        reconnect_backoff = 1.0
+        # T-003 关键修复：anext 用独立 task 承载，wait_for 超时只放弃"这一次等待"，
+        # 不取消生成器——否则挂起中的消费循环（如 Redis xreadgroup block）会被
+        # 1s 超时反复杀死，交付值丢失、生成器死亡。下次循环继续收同一个 anext。
+        next_item: asyncio.Task | None = None
         while not stop.is_set():
+            if next_item is None:
+                next_item = asyncio.ensure_future(anext(generator))
             try:
-                delivered = await asyncio.wait_for(anext(generator), timeout=1.0)
+                delivered = await asyncio.wait_for(asyncio.shield(next_item), timeout=1.0)
+            except asyncio.CancelledError:
+                next_item.cancel()
+                raise
             except (asyncio.TimeoutError, TimeoutError):
+                # 区分两种超时（py3.11+ 同类型）：
+                # - 1s 等待超时且任务仍挂起 → 正常空转，anext 保持
+                # - 任务自身抛 TimeoutError（如 socket_timeout）→ done 任务
+                #   每轮立即重抛造成零 yield 忙旋、饿死 stop 信号 → 走断连自愈
+                if not next_item.done():
+                    continue
+                delivered = None  # 落入下方断连自愈
+            except Exception:
+                delivered = None  # 连接类/其他异常：落入下方断连自愈
+            if delivered is None:
+                # T-003：Redis/Kafka 断连不再杀死 worker——记日志 + 计数 +
+                # 指数退避（1s 起、30s 封顶，stop 信号可打断）后重建生成器继续。
+                # 恢复语义不变：未 ack 的信号重投/丢失信号由租约扫描兜底。
+                from deepresearch_agent.observability import WORKER_CONSUME_RECONNECTS
+
+                next_item = None
+                logger.exception("队列消费流断连，%.1fs 后重建生成器重试", reconnect_backoff)
+                with contextlib.suppress(Exception):
+                    await generator.aclose()
+                try:
+                    WORKER_CONSUME_RECONNECTS.inc()
+                except Exception:
+                    pass
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=reconnect_backoff)
+                except (asyncio.TimeoutError, TimeoutError):
+                    pass
+                if stop.is_set():
+                    break
+                reconnect_backoff = min(reconnect_backoff * 2, 30.0)
+                generator = _open_stream()
                 continue
+            # 正常消费成功一次即重置退避
+            reconnect_backoff = 1.0
             run_id, ack = delivered if isinstance(delivered, tuple) else (delivered, None)
+            next_item = None
             await semaphore.acquire()
             task = asyncio.create_task(run_one(run_id, ack), name=f"run:{run_id}")
 
@@ -139,7 +195,11 @@ async def _consume(worker_name: str | None = None) -> None:
     finally:
         scanner.cancel()
         await asyncio.gather(scanner, return_exceptions=True)
-        # 显式关闭消费生成器：结束 Kafka/Redis 客户端侧的拉取循环，再关队列资源
+        # 取消悬挂中的 anext 任务，再显式关闭消费生成器：
+        # 结束 Kafka/Redis 客户端侧的拉取循环，然后关队列资源
+        if next_item is not None and not next_item.done():
+            next_item.cancel()
+            await asyncio.gather(next_item, return_exceptions=True)
         with contextlib.suppress(Exception):
             await generator.aclose()
         await service.shutdown()

@@ -14,7 +14,7 @@ RUN_DURATION_SECONDS = Histogram(
     buckets=(5, 15, 30, 60, 120, 300, 600, 1200, 1800, float("inf")),
 )
 ACTIVE_RUNS = Gauge("dra_active_runs", "当前执行中的 Run 数（进程内视图）")
-WAITING_RUNS = Gauge("dra_waiting_runs", "排队等待执行的 Run 数（进程内队列视图）")
+WAITING_RUNS = Gauge("dra_waiting_runs", "queued 状态 Run 数（worker 扫描轮次统计 DB 行数）")
 QUEUE_DEPTH = Gauge("dra_queue_depth", "执行队列积压深度")
 
 # ---- LLM 网关 --------------------------------------------------------------
@@ -27,6 +27,14 @@ LLM_TOKENS_TOTAL = Counter("dra_llm_tokens_total", "token 消耗", ["provider", 
 LLM_RATE_LIMITED_TOTAL = Counter("dra_llm_rate_limited_total", "限流排队超时次数")
 EVENT_FANOUT_FAILURES = Counter("dra_event_fanout_failures_total", "事件扇出失败次数（Redis 不可用等，durable 落库不受影响）")
 WORKER_RUN_FAILURES = Counter("dra_worker_run_failures_total", "worker 执行入口异常次数（Run 状态已落库，此为排障现场计数）")
+QUEUE_ENQUEUE_FAILURES = Counter(
+    "dra_queue_enqueue_failures_total",
+    "唤醒信号入队失败次数（重试耗尽后；run 留在 queued，由租约扫描重建投递）",
+)
+WORKER_CONSUME_RECONNECTS = Counter(
+    "dra_worker_consume_reconnects_total",
+    "worker 消费流断连后重建生成器的次数（Redis/Kafka 断连自愈）",
+)
 
 
 def observe_llm_call(*, provider: str, status: str, latency_ms: int, usage: dict | None) -> None:

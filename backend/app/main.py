@@ -6,6 +6,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import sqlalchemy.exc as sqlalchemy_exc
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +31,21 @@ def _error(request: Request, *, status_code: int, code: str, message: str, retry
         status_code=status_code,
         content={"error": {"code": code, "message": message, "retryable": retryable, "details": details or {}}, "request_id": getattr(request.state, "request_id", "unknown")},
     )
+
+
+def _map_unexpected_status(exc: Exception) -> tuple[int, dict]:
+    """T-003：未预期异常的 HTTP 映射。DB 连接类故障映射为可重试的 503，
+    其余为 500。独立纯函数便于单测（不起真实 PG）。"""
+    if isinstance(exc, (sqlalchemy_exc.OperationalError, sqlalchemy_exc.InterfaceError)):
+        return 503, {
+            "error": {
+                "code": ErrorCode.DATABASE_UNAVAILABLE.value,
+                "message": "数据库暂不可用，请稍后重试",
+                "retryable": True,
+                "details": {},
+            }
+        }
+    return 500, {"error": {"code": "INTERNAL_ERROR", "message": "服务内部错误", "retryable": False, "details": {}}}
 
 
 def create_app(
@@ -133,7 +149,12 @@ def create_app(
 
     @app.exception_handler(Exception)
     async def unexpected_error_handler(request: Request, exc: Exception):
-        return _error(request, status_code=500, code="INTERNAL_ERROR", message="服务内部错误")
+        # T-003：DB 连接类故障不再是裸 500——映射为可重试的 503 DATABASE_UNAVAILABLE
+        status_code, payload = _map_unexpected_status(exc)
+        return JSONResponse(
+            status_code=status_code,
+            content={**payload, "request_id": getattr(request.state, "request_id", "unknown")},
+        )
 
     app.include_router(api_router)
     return app

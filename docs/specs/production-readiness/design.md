@@ -89,6 +89,13 @@ Metrics/Logs/Trace -> local or CI evidence; no public live service requirement
 - **不采用 exactly-once/事务生产者**：唤醒信号幂等，事务性开销不值；此取舍与 7 的"队列不做事实源"一脉相承。
 - **默认拓扑不变**：kafka 服务挂 compose `profiles: ["kafka"]`；CI 新增 `kafka-compat` 作业（services 容器跑真实 broker 回归，本机无 Docker 需求）。
 
+### 7.2 T-003 决策记录：依赖故障行为（2026-11-05）
+
+- **enqueue 失败的兜底选择**：有界重试（3 次退避）后**放弃并在请求路径外观测**（日志 + QUEUE_ENQUEUE_FAILURES），不做 API 侧同步重试循环——避免阻塞用户请求；run 留在 queued，由租约扫描（≤15s）重建投递。这与"DB 是事实源"一致：信号只是优化，扫描才是承诺。
+- **worker 断连自愈**：消费流异常不再终止进程——退避重建生成器。**顺带修复**：`wait_for(anext(gen), 1.0)` 超时路径会取消生成器（asyncio 生成器在 yield 点收到 CancelledError 即死亡，已交付值丢失）；改为独立 anext task + shield，超时仅放弃本轮等待。该缺陷在引入自愈前被"异常穿透退出进程"掩盖，T-003 的故障注入测试使其显形。
+- **DB 故障的 HTTP 语义**：`OperationalError` → 503 retryable（原为裸 500 non-retryable），让客户端/网关能正确重试。
+- **WAITING_RUNS**：借 worker 扫描轮次统计 queued 行数（无新增查询频率），替代"定义但从未接线"状态。
+
 ## 8. 测试与观测
 
 - 单元：配置 fail-closed、队列重连、重建候选、worker drain、幂等和错误分类。

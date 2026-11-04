@@ -25,6 +25,34 @@ CONSUMER_GROUP = "dra-workers"
 KAFKA_TOPIC_DEFAULT = "dra-runs-queue"
 KAFKA_GROUP_DEFAULT = "dra-workers"
 
+# 入队有界重试（T-003）：重试间指数退避；全部耗尽后抛 QueueUnavailableError，
+# 调用方观测记录，run 留在 queued 由租约扫描重建投递
+ENQUEUE_MAX_ATTEMPTS = 3
+ENQUEUE_BACKOFF_BASE_SECONDS = 0.2
+
+
+class QueueUnavailableError(RuntimeError):
+    """队列后端不可用（重试耗尽）：信号未投递，恢复路径依赖 DB 扫描兜底。"""
+
+
+async def _enqueue_with_retry(operation: Callable[[], Any], *, cancel_event: Optional[asyncio.Event] = None) -> None:
+    """执行一次入队操作，带指数退避有界重试；全部失败抛 QueueUnavailableError。"""
+    last_error: BaseException | None = None
+    for attempt in range(1, ENQUEUE_MAX_ATTEMPTS + 1):
+        if cancel_event is not None and cancel_event.is_set():
+            raise QueueUnavailableError("入队取消（cancel_event 已置位）") from last_error
+        try:
+            await operation()
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            last_error = exc
+            if attempt >= ENQUEUE_MAX_ATTEMPTS:
+                break
+            await asyncio.sleep(ENQUEUE_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)))
+    raise QueueUnavailableError(f"入队失败（重试 {ENQUEUE_MAX_ATTEMPTS} 次）") from last_error
+
 
 class RunQueue(Protocol):
     async def enqueue(self, run_id: str) -> None: ...
@@ -72,7 +100,7 @@ class RedisStreamRunQueue:
                 raise
 
     async def enqueue(self, run_id: str) -> None:
-        await self._client.xadd(STREAM_KEY, {"run_id": run_id})
+        await _enqueue_with_retry(lambda: self._client.xadd(STREAM_KEY, {"run_id": run_id}))
 
     async def consume(self) -> AsyncIterator[str]:
         await self.ensure_group()
@@ -198,9 +226,12 @@ class KafkaRunQueue:
         self._started = True
 
     async def enqueue(self, run_id: str) -> None:
-        await self._ensure_started()
+        # start 纳入重试：broker 不可用时的首连失败与后续 send 同等对待（T-003）
+        await _enqueue_with_retry(self._ensure_started)
         # key=run_id：同 Run 信号保序；str 由 aiokafka 按 utf-8 编码
-        await self._producer.send_and_wait(self.topic, value=run_id, key=run_id)
+        await _enqueue_with_retry(
+            lambda: self._producer.send_and_wait(self.topic, value=run_id, key=run_id),
+        )
 
     def consume(self) -> AsyncIterator[str]:
         raise NotImplementedError(

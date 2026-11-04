@@ -11,6 +11,22 @@
 - 费用：LLM 目标上限 $5/日、$50/月；实际计费不可用时以 Token/调用数限额落实。**已由用户确认目标值**。
 - 状态：作品集目标与数值已批准；具体 GitHub Pages 实现和模型 ID 映射待后续任务确定。
 
+## 当前阶段记录：T-003 依赖故障与队列重建
+
+- 分支：`feat/github-static-portfolio`
+- 状态：`in_progress`（实现与本地验证完成，待 code review 后提交）
+- 范围：enqueue 有界重试+观测、worker 消费循环断连自愈（含 anext shield 修复）、DB 故障 503 映射、WAITING_RUNS/QUEUE_ENQUEUE_FAILURES/WORKER_CONSUME_RECONNECTS 指标、5 个故障注入测试。
+- 约束：本机未使用 Docker；未推送远端。
+
+### T-003 证据（本地，2026-11-05，review 修复后最终验证）
+
+- 定向：`python -m pytest tests/harness/test_queue_resilience.py tests/harness/test_run_queue.py -q` → **17 passed, 2 skipped**。
+- 用例（resilience 5 个）：enqueue 重试耗尽→QueueUnavailableError+计数+run 留 queued；重试后成功；Redis xadd 层重试包装（精确断言退避序列 [0.2, 0.4]s）；**worker 断连自愈**（首轮抛 ConnectionError→退避重建→第二轮消费并完成整个 Run）；OperationalError/InterfaceError→503 retryable、ValueError→500。
+- **实现缺陷修复（调试中发现）**：旧 `wait_for(anext(generator), 1.0)` 在超时路径取消生成器——asyncio 生成器在 yield 挂起点收到 CancelledError 即死亡，已交付值丢失；自愈重建会重复交付同一信号。改为独立 anext task + shield（超时仅放弃等待、next_item 跨轮保留），finally 先 cancel 悬挂 anext 再 aclose。
+- review 修复记录（1 轮，PASS with 2 majors）：① worker.py 消费循环 done-TimeoutError 忙旋饿死 stop 信号 → `next_item.done()` 分流走自愈；② reconnect 测试 DDL 污染真实 `./data/app.db` → APP_DATABASE_URL 指向 tmp sqlite（评审实证：文件哈希字节一致但存在新建/ALTER 风险）。另修 minors：Kafka `_ensure_started` 纳入重试、503 谓词加 InterfaceError、全局 asyncio.sleep 补丁模式说明保留、WAITING_RUNS help 文本、死代码清理。
+- 测试隔离（记录给后续维护者）：worker `_consume` 用 settings 默认 DB 与自建 RunService——测试 monkeypatch 注入 fake queue（create_run_queue）、测试 RunService、REDIS_URL 占位符、**APP_DATABASE_URL→tmp sqlite**、RECOVERY_SCAN_SECONDS=1s。
+- 全量回归：`python -m pytest tests/ -q` → **227 passed, 4 skipped, 2 failed**（2 个失败为预存在 `docs/acceptance/` 交付文档缺失，与本阶段无关）。
+
 ## 当前阶段记录：T-010 可选 Kafka 传输层
 
 - 分支：`feat/github-static-portfolio`
@@ -59,7 +75,7 @@
 
 - [x] T-001 作品集目标与验收边界
 - [x] T-002 GitHub 静态展示与仓库安全检查（两轮 review 通过，证据见上方；本地提交于 `feat/github-static-portfolio`，未推送）
-- [ ] T-003 依赖故障与队列重建
+- [ ] T-003 依赖故障与队列重建（review 通过（PASS with 2 majors 已修），证据见上方；待本地提交）
 - [ ] T-004 真实平台备份恢复
 - [ ] T-005 单独迁移与兼容窗口
 - [ ] T-006 worker drain 与资源关闭

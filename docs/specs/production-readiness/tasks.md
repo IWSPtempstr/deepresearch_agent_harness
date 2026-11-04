@@ -31,12 +31,17 @@
 
 ### T-003 — 依赖故障与队列重建
 
-- 状态：`pending`
+- 状态：`done`（review 修复完成，随本阶段提交）
 - 目标：Redis/PostgreSQL 故障、Redis 数据丢失和 reconnect/rebuild 行为明确且可测。
 - 前置依赖：`T-001`
-- 涉及文件：`src/deepresearch_agent/queueing.py`、`worker.py`、`run_service.py`
-- 验收：Redis 重启/清空、DB 暂不可用、候选 Run 重建和重复投递测试。
-- 预期证据：故障测试输出、恢复 Run 轨迹和幂等断言。
+- 实现方式（全部进程内健壮性加固，无新基础设施）：
+  1. **enqueue 可靠化**：`_enqueue_with_retry`（3 次指数退避 0.2/0.4/0.8s）包装 Redis/Kafka 的 enqueue,耗尽抛 `QueueUnavailableError`;`schedule()` done-callback 观测失败(日志 + `QUEUE_ENQUEUE_FAILURES`),run 留 queued 由租约扫描重建——不在请求路径同步重试。
+  2. **worker 消费循环断连自愈**：断连异常不再杀死进程——指数退避(1s→30s,stop 可打断)后重建消费生成器;新增 `WORKER_CONSUME_RECONNECTS` 计数。**顺带修复既有隐藏缺陷**：`wait_for(anext(gen), 1.0)` 超时会取消生成器(交付值丢失),改为 shield 保护的独立 anext task,超时只放弃等待。
+  3. **DB 故障 API 语义**：`OperationalError` → `_map_unexpected_status` 纯函数 → HTTP 503 `DATABASE_UNAVAILABLE`(retryable=true),替代裸 500。
+  4. **可观测补全**：`WAITING_RUNS` gauge 首次接线(worker 扫描轮次统计 queued 行数,`count_by_status` 新仓储方法)。
+- 验收：5 个故障注入测试(enqueue 失败观测/重试后成功/Redis 层重试包装/断连自愈完成 Run/503 映射);全量 227 passed 无新增失败。
+- Docker 门禁：本阶段本地未使用 Docker。
+- 证据明细：见 acceptance.md「T-003 证据」。
 
 ### T-004 — 真实平台备份恢复演练
 

@@ -305,6 +305,12 @@ class RunRepository:
         async with self.database.sessions() as session:
             return list((await session.execute(select(RunModel).where(RunModel.status.in_(self.ACTIVE_STATUSES + ("interrupted",))))).scalars())
 
+    async def count_by_status(self, status: str) -> int:
+        """按状态统计 Run 数（T-003：WAITING_RUNS 指标用，worker 扫描轮次内调用）。"""
+        async with self.database.sessions() as session:
+            result = await session.execute(select(func.count()).select_from(RunModel).where(RunModel.status == status))
+            return int(result.scalar() or 0)
+
     async def mark_expired_leases_interrupted(self) -> list[str]:
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         async with self.database.transaction() as session:
