@@ -413,6 +413,26 @@ npm run dev
 .\scripts\stop-local.ps1
 ~~~
 
+### 5. 可选 Kafka 传输层（T-010）
+
+Run 的唤醒信号队列支持两种可替换实现，由环境变量选择（Kafka 优先于 Redis）：
+
+| 后端 | 触发条件 | 消费语义 |
+|---|---|---|
+| Redis Streams（默认平台模式） | `REDIS_URL` 非空 | 读出即 ACK（at-most-once） |
+| Kafka（可选） | `KAFKA_BOOTSTRAP_SERVERS` 非空 | **执行后提交 offset（at-least-once）** |
+
+两种后端下可靠性语义一致：数据库是事实源，租约条件 UPDATE 是唯一互斥量，重复投递/信号丢失由过期租约扫描兜底。Kafka 侧的实现细节：分区键 = `run_id`（同 Run 信号保序）、幂等 producer（`acks=all` + `enable_idempotence`）、按分区水位线单调提交 offset（乱序完成的任务不会越位提交）、rebalance 时清理本地水位线并接受重投。
+
+启用（Compose 演示，需先遵守项目 Docker 使用约束）：
+
+~~~bash
+# .env 中设置 KAFKA_BOOTSTRAP_SERVERS=kafka:9092（REDIS_URL 可保留用于 SSE 实时扇出）
+docker compose --profile kafka up -d --build
+~~~
+
+定位说明：这是**传输层可替换性的能力验证**，不是生产必选项——是否引入 Kafka 取决于流量与消费者规模，取舍记录见 `docs/specs/production-readiness/design.md`。CI 的 `kafka-compat` 作业用真实 broker 跑队列回归（`tests/harness/test_run_queue.py`，本地无 broker 时自动跳过）。
+
 ---
 
 ## 测试与评测

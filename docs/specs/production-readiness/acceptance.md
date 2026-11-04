@@ -11,6 +11,22 @@
 - 费用：LLM 目标上限 $5/日、$50/月；实际计费不可用时以 Token/调用数限额落实。**已由用户确认目标值**。
 - 状态：作品集目标与数值已批准；具体 GitHub Pages 实现和模型 ID 映射待后续任务确定。
 
+## 当前阶段记录：T-010 可选 Kafka 传输层
+
+- 分支：`feat/github-static-portfolio`
+- 状态：`in_progress`（实现与本地验证完成，待 code review 后提交）
+- 范围：`queueing.py` KafkaRunQueue + 工厂后端选择；settings/main/worker 接线（含 ack 流与 fanout 守卫）；compose `kafka` profile 服务；CI `kafka-compat` 作业；requirements aiokafka；.env.example/README/SDD 决策记录；T-011（事件 topic）登记为 pending。
+- 约束：本机未使用 Docker；真实 broker 验证经 CI services 完成；未推送远端。
+
+### T-010 证据（本地，2026-11-04，两轮 review 修复后最终构建）
+
+- 定向：`python -m pytest tests/harness/test_run_queue.py -q` → **12 passed, 2 skipped**（Redis/Kafka 真实 broker 用例由 env 门控）。
+- 新增用例（12 个中的 Kafka 部分）：工厂选择优先级（monkeypatch 构造器，不要求本地安装 aiokafka）、enqueue 懒启动 + run_id 分区键、至少一次（ack 前零提交/ack 后 offset+1）、乱序 ack 水位线不越位提交、rebalance 后旧代次 ack 在新水位线重建后调用仍被忽略（竞态时序）、**TOCTOU 锁等待交织**（ack 阻塞在 _commit_lock 上时发生 rebalance，锁内代次校验拦截提交）、consume() 显式禁用、close 生命周期。
+- review 修复记录：首轮 2 Major（stale-ack 跨 rebalance 竞态 → 分配代次 + 闭包捕获；CI 广播监听器错误 → INTERNAL/EXTERNAL 双监听器，runner 连 localhost:9094）；次轮 1 Major（代次校验 TOCTOU → 检查移入 _commit_lock 锁内）；评审明确"修复并测试后即可提交"。
+- 全量回归：`python -m pytest tests/ -q` → **222 passed, 4 skipped, 2 failed**；2 个失败为预存在（`docs/acceptance/` 交付文档缺失，stash 至已提交状态复现，与 T-010 无关）。
+- 测试演进：`test_delivery_phase8` compose 服务集合断言改为"必选服务子集 + 新增服务必须挂 profiles"，约束默认拓扑不被静默扩张。
+- 交互式前端未触碰；`PORTFOLIO_BASE` 构建不受影响。
+
 ## 当前阶段记录：T-002 GitHub 静态展示
 
 - 分支：`feat/github-static-portfolio`
@@ -50,6 +66,8 @@
 - [ ] T-007 Readiness、SLO、告警、费用与模型路由
 - [ ] T-008 本地运行、恢复与面试演示 runbook
 - [ ] T-009 按任务难度配置模型路由
+- [x] T-010 可选 Kafka 传输层（两轮 review 通过，证据见上方；本地提交于 `feat/github-static-portfolio`，未推送）
+- [ ] T-011 Kafka 事件流分发（登记，未实现）
 
 ## 证据记录格式
 
@@ -67,11 +85,12 @@
 
 ## 未完成与风险
 
-- T-002 尚待 code review 复核与本地提交；公开动态 API/TLS 服务不在范围内。
-- Docker 本机操作需逐次取得用户明确同意。
-- 任务难度模型路由尚未实施或测试。
-- 真实 PostgreSQL/Artifact/Neo4j 备份恢复尚未演练；Redis/PostgreSQL 故障注入尚未完成。
+- 公开动态 API/TLS 服务不在范围内。
+- Docker 本机操作需逐次取得用户明确同意；真实 broker 验证经 CI services 完成。
+- 任务难度模型路由（T-009）尚未实施或测试。
+- 真实 PostgreSQL/Artifact/Neo4j 备份恢复尚未演练；Redis/PostgreSQL 故障注入尚未完成（T-003）。
+- `docs/acceptance/` 两个预存在失败（交付文档缺失）待后续任务修复。
 
 ## 交接
 
-T-001 已完成。T-002 实现与本地验证完成，当前处于 review 修复→复核→提交阶段；其后按依赖进入 T-003/T-004/T-005。
+T-001、T-002、T-010 已完成。下一步按依赖进入 T-003（依赖故障与队列重建）。

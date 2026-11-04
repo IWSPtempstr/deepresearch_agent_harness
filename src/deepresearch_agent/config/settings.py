@@ -89,6 +89,11 @@ APP_DATABASE_URL = os.getenv(
 ).strip()
 # 平台模式（P0-2）：非空时 Run 执行经 Redis 队列交给独立 worker 进程
 REDIS_URL = (os.getenv("REDIS_URL") or "").strip()
+# 可选 Kafka 传输层（T-010）：非空时唤醒信号改走 Kafka（优先于 REDIS_URL）；
+# 纯能力展示/传输层可替换性验证，非生产必选项——DB 事实源 + 租约 + 扫描兜底语义不变
+KAFKA_BOOTSTRAP_SERVERS = (os.getenv("KAFKA_BOOTSTRAP_SERVERS") or "").strip()
+KAFKA_TOPIC = (os.getenv("KAFKA_TOPIC") or "dra-runs-queue").strip()
+KAFKA_CONSUMER_GROUP = (os.getenv("KAFKA_CONSUMER_GROUP") or "dra-workers").strip()
 # worker 进程同时在跑的 Run 数上限（API 进程内模式不设此限）
 WORKER_CONCURRENCY = _get_env_int("WORKER_CONCURRENCY", 4) or 4
 # 租约 TTL（秒）；心跳按 TTL/3 续约。接管窗口上界 ≈ TTL + 扫描间隔

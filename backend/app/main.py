@@ -37,8 +37,8 @@ def create_app(
     artifact_root: str | Path | None = None, skills_root: str | Path | None = None,
     auto_resume: bool | None = None,
 ) -> FastAPI:
-    if not settings.LOCAL_MVP_SINGLE_WORKER and not settings.REDIS_URL:
-        raise AppError(ErrorCode.CONFIGURATION_INVALID, "单机模式必须设置 FASTAPI_WORKERS=1；多实例部署请配置 REDIS_URL 切换平台模式（Run 执行由独立 worker 消费）")
+    if not settings.LOCAL_MVP_SINGLE_WORKER and not (settings.REDIS_URL or settings.KAFKA_BOOTSTRAP_SERVERS):
+        raise AppError(ErrorCode.CONFIGURATION_INVALID, "单机模式必须设置 FASTAPI_WORKERS=1；多实例部署请配置 REDIS_URL 或 KAFKA_BOOTSTRAP_SERVERS 切换平台模式（Run 执行由独立 worker 消费）")
     database = Database(database_url or settings.APP_DATABASE_URL)
     # 平台模式共享一个 Redis 扇出：API 侧发布的控制事件与 worker 侧发布的
     # Run 事件都经它推给任意实例的 SSE 订阅者
@@ -47,8 +47,14 @@ def create_app(
         database, workflow_factory=workflow_factory,
         artifact_root=artifact_root or settings.ARTIFACT_ROOT,
         skills_root=skills_root or settings.SKILLS_ROOT,
-        # 平台模式：API 只投递唤醒信号，执行在 worker 进程（P0-2）
-        queue=create_run_queue(settings.REDIS_URL) if settings.REDIS_URL else None,
+        # 平台模式：API 只投递唤醒信号，执行在 worker 进程（P0-2）；
+        # KAFKA_BOOTSTRAP_SERVERS 非空时唤醒信号改走 Kafka（T-010 可选传输层）
+        queue=create_run_queue(
+            settings.REDIS_URL,
+            kafka_bootstrap=settings.KAFKA_BOOTSTRAP_SERVERS,
+            kafka_topic=settings.KAFKA_TOPIC,
+            kafka_group=settings.KAFKA_CONSUMER_GROUP,
+        ) if (settings.REDIS_URL or settings.KAFKA_BOOTSTRAP_SERVERS) else None,
         event_fanout=event_fanout,
     )
 

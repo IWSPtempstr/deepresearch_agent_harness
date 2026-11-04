@@ -93,11 +93,30 @@
 - 验收：确定性路由测试覆盖不同难度；无 provider/密钥时安全降级或明确报错；路由 tier/理由可审计但不泄露凭据。
 - 预期证据：配置样例、路由单测输出、成本/Token 限制测试。
 
+### T-010 — 可选 Kafka 传输层（唤醒信号队列）
+
+- 状态：`done`
+- 目标：在保持 DB 事实源 + 租约互斥 + 扫描兜底语义不变的前提下，为唤醒信号队列增加可选 Kafka 实现（传输层可替换性验证与分布式队列语义的正确集成）。
+- 前置依赖：`T-001`
+- 实现方式：`queueing.py` 新增 `KafkaRunQueue`（至少一次 + 执行后提交 offset；run_id 分区键；幂等 producer；分区水位线单调提交；rebalance 监听器 + **分配代次防竞态**——代次校验在 `_commit_lock` 锁内复核，封堵等锁期间 rebalance 的 TOCTOU）；`create_run_queue` 按 `KAFKA_BOOTSTRAP_SERVERS > REDIS_URL > 进程内` 选择；worker 走工厂并支持 ack 流，QUEUE_DEPTH 指标按后端守卫，生成器显式 aclose；compose kafka 服务挂 `profiles: ["kafka"]`；CI `kafka-compat` 作业采用**双监听器**（EXTERNAL 广播 localhost:9094 供 runner 连接）。
+- 验收结果：两轮 review（首轮 2 Major：stale-ack 竞态 + CI 广播监听器错误；次轮 1 Major：代次校验 TOCTOU——均按评审处方修复并补测试）。证据明细见 acceptance.md「T-010 证据」。
+- Docker 门禁：本阶段本地未使用 Docker；真实 broker 验证经 CI services 容器完成。
+- 日期：2026-11-04
+
+### T-011 — Kafka 事件流分发（未实现，登记）
+
+- 状态：`pending`
+- 目标：SSE 实时扇出与审计消费可选走 Kafka topic（DB 仍为事实源，双写失败仅计数）。
+- 前置依赖：`T-010`
+- 涉及文件：`event_bus.py`、`events_fanout.py`、`event_stream.py`、配置与文档
+- 验收：多消费者组（SSE 网关组 + 审计组）+ 重放演示；双写一致性测试。
+- 预期证据：集成测试输出与文档。
+
 ## 进度摘要
 
-- 已完成：2
+- 已完成：3
 - 进行中：0
 - 阻塞：0
 - 待执行：7
-- 下一步：按依赖进入 T-003（依赖故障与队列重建）；涉及容器的验收需先征得用户同意
+- 下一步：按依赖进入 T-003（依赖故障与队列重建）
 - 最后更新：2026-11-04

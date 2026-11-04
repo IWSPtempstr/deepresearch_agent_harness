@@ -78,8 +78,16 @@ Metrics/Logs/Trace -> local or CI evidence; no public live service requirement
 |---|---|---|---|
 | 继续加固 Compose + 托管依赖 | 变化小、复用现有 Harness、落地快 | 单主机 Compose 本身不是全量 HA | 第一阶段选择 |
 | 立即引入 Kubernetes | 调度/发布能力强 | 运维面和改造面显著扩大 | 非本阶段前置条件 |
-| Kafka/RabbitMQ 替换 Redis Streams | 更丰富的队列/日志能力 | 当前队列只传唤醒信号，新增恢复语义会与 DB/Lease 打架 | 暂不引入 |
+| Kafka/RabbitMQ 替换 Redis Streams | 更丰富的队列/日志能力 | 当前队列只传唤醒信号，新增恢复语义会与 DB/Lease 打架 | 生产必要性上暂不引入；**T-010 作为可选传输层落地**（见 7.1） |
 | 让 Redis 作为任务事实源 | 队列恢复更直接 | 与当前 DB 事实源和审计模型冲突 | 不选择 |
+
+### 7.1 T-010 决策记录：可选 Kafka 传输层（2026-11-04）
+
+- **动机**：用户确认以"传输层可替换性验证 + 分布式队列语义的正确集成"为目标引入 Kafka（能力展示定位），非生产必选；README/SDD 明确标注该定位。
+- **嵌入点**：仅替换唤醒信号传输（`RunQueue` Protocol 新增 `KafkaRunQueue` 实现），事件流分发（Kafka topic）登记为 T-011 未实现；SSE 实时扇出仍走 Redis，Kafka-only 模式下 SSE 依赖 DB 重放 + 心跳兜底。
+- **消费语义**（与 Redis 版"读出即 ACK"的有意差异）：**至少一次 + 执行后提交 offset**——crash/rebalance 未提交信号重投，重复执行由租约条件 UPDATE（唯一互斥量）去重；分区键 = run_id 保序；幂等 producer（acks=all + enable_idempotence）；按分区水位线单调提交（乱序完成的任务不越位提交）；rebalance 监听器清理本地水位线。DB 扫描兜底语义不变。
+- **不采用 exactly-once/事务生产者**：唤醒信号幂等，事务性开销不值；此取舍与 7 的"队列不做事实源"一脉相承。
+- **默认拓扑不变**：kafka 服务挂 compose `profiles: ["kafka"]`；CI 新增 `kafka-compat` 作业（services 容器跑真实 broker 回归，本机无 Docker 需求）。
 
 ## 8. 测试与观测
 

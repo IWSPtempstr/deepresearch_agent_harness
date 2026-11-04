@@ -13,8 +13,11 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_compose_packages_three_loopback_services_and_persistent_data():
     compose = yaml.safe_load((ROOT / "docker-compose.yaml").read_text(encoding="utf-8"))
     # P0/P1 平台化改造：postgres（主存）、redis（队列/SSE 扇出）、worker（执行进程）、
-    # prometheus/grafana（可观测性）
-    assert set(compose["services"]) == {"neo4j", "backend", "frontend", "postgres", "redis", "worker", "prometheus", "grafana"}
+    # prometheus/grafana（可观测性）；T-010 的 kafka 为可选 profile，不在默认拓扑集合断言内
+    required_services = {"neo4j", "backend", "frontend", "postgres", "redis", "worker", "prometheus", "grafana"}
+    assert required_services <= set(compose["services"])
+    for name in set(compose["services"]) - required_services:
+        assert compose["services"][name].get("profiles"), f"默认拓扑新增服务 {name} 必须挂在 compose profiles 下"
     for service in compose["services"].values():
         for port in service.get("ports", []):
             assert str(port).startswith("127.0.0.1:")

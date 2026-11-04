@@ -70,6 +70,7 @@ textract==1.6.3
 # regex==2024.11.6
 # tenacity==9.0.0
 redis>=5,<6  # P0-2/P0-4：Run 队列（Redis Streams）与 SSE 跨实例扇出
+aiokafka>=0.10,<0.13  # T-010：可选 Kafka 唤醒信号队列（懒导入，未安装不影响单机/Redis 模式）
 prometheus-client>=0.20,<1.0  # P1-7：Run/LLM 网关指标
 opentelemetry-api>=1.20,<2.0  # P1-6：追踪 API（OTEL_ENABLED=false 时 no-op）
 opentelemetry-sdk>=1.20,<2.0  # P1-6：SDK 与 console exporter
