@@ -73,6 +73,8 @@ curl -s http://127.0.0.1:8000/api/v1/health
 | WorkerRunFailures | warning | 查最近 run.failed 事件的 error_code |
 | LlmRateLimitedBurst | info | 评估 LLM_MAX_CONCURRENT_CALLS 与 provider 容量 |
 
+**模型分层路由(T-009)**:`LLM_TIER_ROUTING_ENABLED`(默认 true)。派生规则(纯函数,`src/deepresearch_agent/models/model_tier.py`):详细/长文档/min_evidence≥3 → complex;默认 brief → simple;显式 `model_tier` 覆盖优先。模型 ID 配置:`LLM_TIER_SIMPLE/STANDARD/COMPLEX_MODEL`(空=回落 `OPENAI_LLM_MODEL`)。每次路由的 tier/reason/model 写入 run.model_snapshot_json,可审计;预算保护由 T-007 日预算兜底。
+
 **成本天花板(T-007)**:`LLM_DAILY_TOKEN_CEILING`(当日 output_tokens;0=不启用)。超限后:
 - 新 Run 被拒(LLM_RATE_LIMITED,429 语义,幂等重发安全)
 - `/api/v1/ready` 返回 503(编排器摘流量)

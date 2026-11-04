@@ -7,6 +7,7 @@ from sqlalchemy import select
 from backend.app.schemas import MessageCreate, MessageSend, RunAccepted, RunCreate
 from deepresearch_agent.config import settings
 from deepresearch_agent.config.settings import HARNESS_BUDGETS, LEARNING_REVIEW_MODEL, OPENAI_LLM_MODEL
+from deepresearch_agent.models.model_tier import resolve_model_for
 from deepresearch_agent.harness.errors import AppError, ErrorCode
 from deepresearch_agent.persistence.repositories import MessageRepository, RunRepository, SessionRepository
 
@@ -125,6 +126,21 @@ class ChatService:
             import json as _json
 
             budget = {**budget, **(_json.loads(tenant_row.budget_json or "{}") or {})}
+        # T-009：按任务难度解析模型层级（纯函数、可审计；留痕进 model_snapshot）
+        snapshot = {
+            # A single weakly-related chunk may be enough for a concise
+            # answer, but must never unlock a user-requested detailed report.
+            "min_evidence": 3 if detailed_request else 1,
+            "report_type": "long_document" if detailed_request else request.report_type,
+            "deep_research_max_iterations": 1 if request.source_mode.value == "graphrag" else 2,
+            "schema_version": 1,
+        }
+        routing = (
+            resolve_model_for(snapshot, content=request.content, settings=settings)
+            if settings.LLM_TIER_ROUTING_ENABLED
+            else {"model": OPENAI_LLM_MODEL, "tier": "standard", "reason": "routing disabled"}
+        )
+        snapshot["model_tier"] = routing["tier"]
         message, run, created = await self.runs.create_for_user_message(
             MessageCreate(
                 session_id=session_id, role="user", content=request.content,
@@ -134,20 +150,15 @@ class ChatService:
             RunCreate(
                 session_id=session_id, trigger_message_id="assigned-atomically",
                 source_mode=request.source_mode, workflow_mode=request.workflow_mode,
-                config_snapshot={
-                    # A single weakly-related chunk may be enough for a concise
-                    # answer, but must never unlock a user-requested detailed report.
-                    "min_evidence": 3 if detailed_request else 1,
-                    "report_type": "long_document" if detailed_request else request.report_type,
-                    "deep_research_max_iterations": 1 if request.source_mode.value == "graphrag" else 2,
-                    "schema_version": 1,
-                },
+                config_snapshot=snapshot,
                 budget=budget,
             ),
         )
         if created:
             await self.runs.update_model_snapshot(run.run_id, {
-                "llm_model": OPENAI_LLM_MODEL,
+                "llm_model": routing["model"],
+                "llm_model_tier": routing["tier"],
+                "llm_model_routing_reason": routing["reason"],
                 "learning_review_model": LEARNING_REVIEW_MODEL,
             })
             if session.title.strip() in {"新对话", "New conversation", "Untitled"}:

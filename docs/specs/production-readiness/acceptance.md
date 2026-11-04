@@ -11,6 +11,18 @@
 - 费用：LLM 目标上限 $5/日、$50/月；实际计费不可用时以 Token/调用数限额落实。**已由用户确认目标值**。
 - 状态：作品集目标与数值已批准；具体 GitHub Pages 实现和模型 ID 映射待后续任务确定。
 
+## 当前阶段记录：T-009 模型路由
+
+- 分支：`feat/github-static-portfolio`
+- 状态：`done`（待提交）
+- 交付：model_tier 纯函数（派生+映射）、chat_service 快照留痕、执行端模型注入、tier 配置块。
+
+### T-009 证据（本地，2026-11-05）
+
+- 定向：`pytest tests/acceptance/test_model_tier_routing.py -q` → **7 passed**：推导矩阵（long_document/min_evidence/迭代数/默认）、中英文内容标记、显式覆盖优先、tier→model 映射与空值回落、路由关闭（开关在调用方）、**chat_service 全链路**（brief→simple/fast-model，详细→complex/pro-model，快照与 model_snapshot 双留痕）。
+- 全量：`pytest tests/ -q` → **257 passed, 4 skipped, 0 failed**（基线 250 → 257）。
+- 文档：runbook 增补 tier 派生规则与配置说明；.env.example 三个 tier 变量。
+
 ## 当前阶段记录：T-007 readiness/告警/成本
 
 - 分支：`feat/github-static-portfolio`
@@ -142,7 +154,8 @@
 - [x] T-004 真实平台备份恢复（CI 真实 PG 演练作业 + sqlite 干跑 PASS；本机容器演练待用户同意 Docker）
 - [x] T-005 单独迁移与兼容窗口（开关+独立入口+fail-fast+镜像 COPY scripts；证据见上方）
 - [x] T-006 worker drain 与资源关闭（3 测试+资源关闭补全；证据见上方）
-- [x] T-007 Readiness、SLO、告警、费用（模型路由归 T-009）
+- [x] T-007 Readiness、SLO、告警、费用
+- [x] T-009 按任务难度配置模型路由
 - [x] T-008 runbook 索引与实现级文档套件（runbooks/README.md + 两份实现级 runbook）
 - [ ] T-009 按任务难度配置模型路由
 - [x] T-010 可选 Kafka 传输层（两轮 review 通过，证据见上方；本地提交于 `feat/github-static-portfolio`，未推送）

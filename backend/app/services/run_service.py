@@ -194,7 +194,11 @@ class RunService:
                 timeout_seconds=context.budget_limits.tool_timeout_seconds,
             )
             if context.workflow_mode is WorkflowMode.DEEP_RESEARCH:
-                agent = DeepResearchAgent(use_deeper_tool=True, retrieval_provider=provider, run_id=context.run_id)
+                tier_model = self._tier_model_for(context)
+                agent = DeepResearchAgent(
+                    use_deeper_tool=True, retrieval_provider=provider, run_id=context.run_id,
+                    llm_model=tier_model,
+                )
                 agents.append(agent)
                 return DeepResearchDriver(context, agent, events=events)
             worker = WorkerCoordinator(
@@ -237,6 +241,15 @@ class RunService:
                         name=str(selected.get("name")), version=str(selected.get("version")),
                         succeeded=bool(run and run.status == "completed"), safety_violation=safety_violation,
                     )
+
+    def _tier_model_for(self, context) -> str | None:
+        """T-009：从 Run config_snapshot 解析分层模型 ID；路由关闭/未配置返回 None（旧行为）。"""
+        if not settings.LLM_TIER_ROUTING_ENABLED:
+            return None
+        from deepresearch_agent.models.model_tier import resolve_model_for
+
+        routing = resolve_model_for(context.config_snapshot or {})
+        return routing["model"] if routing["model"] != settings.OPENAI_LLM_MODEL else None
 
     async def run_evaluation_case(self, *, query: str, source_mode: str, workflow_mode: str, forced_skill=None) -> dict[str, Any]:
         """Execute one isolated real Harness Run for paired Skill evaluation."""

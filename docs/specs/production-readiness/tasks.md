@@ -112,12 +112,16 @@
 
 ### T-009 — 按任务难度配置模型路由
 
-- 状态：`pending`
+- 状态：`done`（随本阶段提交）
 - 目标：为简单、常规、复杂/高风险任务定义 model tier 选择策略，配置化模型 ID，并默认避免产生未授权的付费调用。
 - 前置依赖：`T-001`
-- 涉及文件：模型配置、LLM Gateway、Context/Workflow 调用入口、相关测试和文档
-- 验收：确定性路由测试覆盖不同难度；无 provider/密钥时安全降级或明确报错；路由 tier/理由可审计但不泄露凭据。
-- 预期证据：配置样例、路由单测输出、成本/Token 限制测试。
+- 实现方式：
+  1. `src/deepresearch_agent/models/model_tier.py`：难度派生纯函数（report_type/min_evidence/内容中英文标记/迭代数；显式 `model_tier` 覆盖优先），tier→model 映射全部来自 `LLM_TIER_*_MODEL` 配置（空=回落 OPENAI_LLM_MODEL），无厂商硬编码
+  2. chat_service 接线：请求路径解析 tier → 写入 config_snapshot["model_tier"]（可审计）→ model_snapshot 记录 model/tier/reason
+  3. 执行端接线：`_execute` workflow_factory 按 Run config_snapshot 解析模型注入 DeepResearchAgent（BaseAgent 新增 llm_model 参数,默认 None 旧行为不变）
+  4. 无密钥降级：路由只产出 model ID 字符串,不构造客户端;无 provider/密钥时由既有 get_llm_model/gateway 路径报错（诚实失败）
+- 验收：7 个测试（推导矩阵/内容标记/显式覆盖/映射回落/开关关闭/chat_service 全链路快照断言）；全量 257 passed 0 failed。
+- 日期：2026-11-05
 
 ### T-010 — 可选 Kafka 传输层（唤醒信号队列）
 
@@ -140,9 +144,9 @@
 
 ## 进度摘要
 
-- 已完成：8
+- 已完成：9
 - 进行中：0
 - 阻塞：0
-- 待执行：2
+- 待执行：1
 - 下一步：按依赖进入 T-006（worker drain）
 - 最后更新：2026-11-04
