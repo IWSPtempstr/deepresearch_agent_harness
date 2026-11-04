@@ -11,6 +11,22 @@
 - 费用：LLM 目标上限 $5/日、$50/月；实际计费不可用时以 Token/调用数限额落实。**已由用户确认目标值**。
 - 状态：作品集目标与数值已批准；具体 GitHub Pages 实现和模型 ID 映射待后续任务确定。
 
+## 当前阶段记录：T-007 readiness/告警/成本
+
+- 分支：`feat/github-static-portfolio`
+- 状态：`done`（待提交）
+- 交付：/ready 端点（DB+队列+成本门禁）、LLM_DAILY_TOKEN_CEILING 请求路径强制、alert-rules.yml 6 条+Prometheus 挂载、6 个测试。
+
+### T-007 证据（本地，2026-11-05）
+
+- 定向：`pytest tests/acceptance/test_readiness_and_cost.py -q` → **6 passed**：
+  - 单机 /ready 200（queue 非必需自动通过）；DB 断连 → 503 unavailable
+  - 日预算超限 → /ready 503 + exhausted 标记；低于阈值自动恢复
+  - send 请求路径超限 → AppError LLM_RATE_LIMITED（429 语义）
+  - 告警规则引用的 dra_ 指标全部已注册（防漂移测试）；prometheus.yml 含 rule_files
+- 全量：`pytest tests/ -q` → **250 passed, 4 skipped, 0 failed**（基线 244 → 250）。
+- yamls：prometheus.yml/alert-rules.yml/compose 校验通过。
+
 ## 当前阶段记录：T-006 worker drain
 
 - 分支：`feat/github-static-portfolio`
@@ -126,7 +142,7 @@
 - [x] T-004 真实平台备份恢复（CI 真实 PG 演练作业 + sqlite 干跑 PASS；本机容器演练待用户同意 Docker）
 - [x] T-005 单独迁移与兼容窗口（开关+独立入口+fail-fast+镜像 COPY scripts；证据见上方）
 - [x] T-006 worker drain 与资源关闭（3 测试+资源关闭补全；证据见上方）
-- [ ] T-007 Readiness、SLO、告警、费用与模型路由
+- [x] T-007 Readiness、SLO、告警、费用（模型路由归 T-009）
 - [ ] T-008 本地运行、恢复与面试演示 runbook
 - [ ] T-009 按任务难度配置模型路由
 - [x] T-010 可选 Kafka 传输层（两轮 review 通过，证据见上方；本地提交于 `feat/github-static-portfolio`，未推送）

@@ -90,13 +90,16 @@
 
 ### T-007 — Readiness、SLO、告警与成本控制
 
-- 状态：`pending`
-- 目标：为本地/CI 可复现演示补齐 worker/依赖 readiness、运行告警、费用保护和难度模型路由证据；不要求部署公开监控服务。
+- 状态：`done`（随本阶段提交）
+- 目标：readiness(硬依赖+成本门禁)、告警规则、平台级 LLM 成本天花板。
 - 前置依赖：`T-003`
-- 涉及文件：`backend/app/api/v1/health.py`、`observability/`、Prometheus 配置、LLM gateway、模型配置
-- 验收：依赖异常时 readiness 正确变化；模拟指标能触发告警；预算达到上限阻止新增调用；不同难度任务选择预期模型 tier 并留下记录。
-- 预期证据：指标样例、告警/路由测试输出。
-- Docker 门禁：任何基于容器的本机测试需先取得用户同意。
+- 实现方式：
+  1. `GET /api/v1/ready` readiness 端点：DB 可写（必需）+ 平台模式队列 Redis ping（必需）+ 日预算门禁；单机模式无队列自动通过；与 /health（人看面板）分工明确
+  2. `LLM_DAILY_TOKEN_CEILING`（当日 output_tokens 聚合,0=不启用）：ChatService.send 超限抛 LLM_RATE_LIMITED（429 语义,幂等安全）；/ready 同步 503 摘流量
+  3. `observability/alert-rules.yml` 6 条告警（queued 积压/enqueue 失败/断连重连/扇出失败/执行异常/LLM 限流暴发）+ Prometheus rule_files 挂载 + compose 卷
+  4. 测试 6 个：readiness 单机 ok/DB 断连 503/成本超限 503+恢复/send 门禁 429/告警指标引用防漂移/prometheus 配置含 rule_files
+- 证据明细：见 acceptance.md「T-007 证据」。
+- 日期：2026-11-05
 
 ### T-008 — 本地运行、恢复与面试演示 runbook
 
@@ -137,9 +140,9 @@
 
 ## 进度摘要
 
-- 已完成：6
+- 已完成：7
 - 进行中：0
 - 阻塞：0
-- 待执行：4
+- 待执行：3
 - 下一步：按依赖进入 T-006（worker drain）
 - 最后更新：2026-11-04

@@ -4,7 +4,8 @@ import asyncio
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from backend.app.dependencies import get_database
@@ -81,3 +82,78 @@ async def prometheus_metrics():
     from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@router.get("/ready", include_in_schema=True)
+async def readiness(request: Request):
+    """T-007 readiness：部署编排判定「能否接流量」。
+
+    与 /health（人看的状态面板）不同，readiness 只含**接流量的硬依赖**：
+    - 数据库可写（必需）
+    - 平台模式的队列连通（必需；单机模式无队列，自动通过）
+    成本天花板触发时 readiness 返回 503（欠费保护：不再接新流量）。
+    liveness（进程活着）由容器存活本身表达，不单设端点。
+    """
+    import redis as redis_module
+
+    components: dict[str, dict] = {}
+    ready = True
+
+    database = request.app.state.database
+    db_status = "healthy"
+    try:
+        async with database.engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "unavailable"
+        ready = False
+    components["database"] = {"status": db_status, "required": True}
+
+    queue = getattr(request.app.state.run_service, "queue", None)
+    if queue is not None and hasattr(queue, "_client"):
+        redis_status = "healthy"
+        try:
+            await asyncio.wait_for(queue._client.ping(), timeout=0.75)
+        except (redis_module.exceptions.RedisError, asyncio.TimeoutError, OSError, Exception):
+            redis_status = "unavailable"
+            ready = False
+        components["queue_redis"] = {"status": redis_status, "required": True}
+    else:
+        components["queue_redis"] = {"status": "not_configured", "required": False, "note": "单机进程内模式"}
+
+    ceiling = settings.LLM_DAILY_TOKEN_CEILING
+    cost_gate = {"enabled": ceiling > 0}
+    if ceiling > 0:
+        spent = await _tokens_since_midnight(database)
+        cost_gate.update({"spent_tokens": spent, "ceiling_tokens": ceiling, "exhausted": spent >= ceiling})
+        if spent >= ceiling:
+            ready = False
+    components["llm_cost_gate"] = cost_gate
+
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={
+            "ready": ready,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "components": components,
+        },
+    )
+
+
+async def _tokens_since_midnight(database) -> int:
+    """当日 llm_calls 的 output_tokens 总和（成本天花板口径）。"""
+    from sqlalchemy import func, select
+
+    from deepresearch_agent.persistence.models import LlmCallModel
+
+    midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        async with database.engine.connect() as connection:
+            row = await connection.execute(
+                select(func.coalesce(func.sum(LlmCallModel.output_tokens), 0)).where(
+                    LlmCallModel.created_at >= midnight.isoformat()
+                )
+            )
+            return int(row.scalar() or 0)
+    except Exception:
+        return 0  # 计量不可读时按未超限处理（诚实失败原则适用于降级而非误杀）

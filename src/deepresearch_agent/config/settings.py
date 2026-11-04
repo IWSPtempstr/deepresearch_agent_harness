@@ -116,6 +116,9 @@ OPENALEX_MAILTO = (os.getenv("OPENALEX_MAILTO") or "").strip()
 ARTIFACT_ROOT = Path(os.getenv("ARTIFACT_ROOT", PROJECT_ROOT / "data" / "artifacts")).expanduser()
 SKILLS_ROOT = Path(os.getenv("SKILLS_ROOT", PROJECT_ROOT / "skills")).expanduser()
 AUTO_RESUME_RUNS = _get_env_bool("AUTO_RESUME_RUNS", True)
+# T-007：平台级 LLM 成本天花板（当日 output_tokens 总和；0=不启用）。
+# 超限后 /ready 返回 503、新 Run 创建被拒——作品集保护阈值，非云账单保证
+LLM_DAILY_TOKEN_CEILING = _get_env_int("LLM_DAILY_TOKEN_CEILING", 0) or 0
 # T-005：启动期 schema 引导开关。true（默认）= 进程内 create_schema（本地零配置可跑）；
 # false = 生产部署语义——DDL 只经单独的 `alembic upgrade head` 迁移步骤执行，
 # API/worker 启动不执行任何竞争性 DDL（多副本安全）

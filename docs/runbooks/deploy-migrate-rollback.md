@@ -60,7 +60,27 @@ curl -s http://127.0.0.1:8000/api/v1/health
 - 密钥经环境变量/部署平台 Secret 注入;轮换 = 更新 Secret → 滚动重启
 - `.env` 不入库(`.gitignore`);`scan_secrets.py` 可作提交前检查
 
-## 5. 故障应急入口
+## 5. 告警响应(T-007)
+
+告警规则:`observability/alert-rules.yml`(Prometheus rule_files 已挂载)。按 severity 响应:
+
+| 告警 | severity | 第一响应 |
+|---|---|---|
+| RunStuckQueued | warning | 查 worker 存活(`docker compose ps worker`)与 Redis/Kafka 连通 |
+| EnqueueFailures | warning | 队列故障;恢复后 queued Run 自动收敛(无需人工重投) |
+| WorkerConsumeReconnects | warning | Redis/Kafka 抖动;持续 >15m 检查网络与持久化配置 |
+| EventFanoutFailures | info | SSE 实时推送退化,DB 重放兜底;恢复 Redis 即可 |
+| WorkerRunFailures | warning | 查最近 run.failed 事件的 error_code |
+| LlmRateLimitedBurst | info | 评估 LLM_MAX_CONCURRENT_CALLS 与 provider 容量 |
+
+**成本天花板(T-007)**:`LLM_DAILY_TOKEN_CEILING`(当日 output_tokens;0=不启用)。超限后:
+- 新 Run 被拒(LLM_RATE_LIMITED,429 语义,幂等重发安全)
+- `/api/v1/ready` 返回 503(编排器摘流量)
+- 解除:次日 UTC 0 点自动重置,或管理员调高/置 0 后滚动重启
+
+readiness 与 health 的分工:`/ready` 给编排器(硬依赖+成本门禁,503=摘流量);`/health` 给人(全组件状态面板)。
+
+## 6. 故障应急入口
 
 - Redis/队列故障 → `docs/specs/production-readiness/design.md` 7.2(T-003 自愈语义)
 - worker 崩溃接管 → README「多实例扩容与崩溃接管演示」
