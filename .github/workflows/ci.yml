@@ -72,13 +72,12 @@ jobs:
 
   kafka-compat:
     # T-010：可选 Kafka 传输层；真实 broker 由 service 容器提供（本机无 Docker 需求）。
-    # 双监听器：INTERNAL 供容器网络内消费，EXTERNAL 广播 localhost 供 runner 连接
+    # 官方 apache/kafka KRaft 单节点；runner 通过映射端口 9092 连接
     runs-on: ubuntu-latest
     services:
       kafka:
         # apache/kafka 官方镜像（KRaft 单节点）；bitnami 镜像已迁出 Docker Hub
         image: apache/kafka:3.9.2
-        env:
         env:
           KAFKA_NODE_ID: "1"
           KAFKA_PROCESS_ROLES: broker,controller

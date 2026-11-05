@@ -106,7 +106,6 @@ services:
     profiles: ["kafka"]
     restart: unless-stopped
     environment:
-        env:
           KAFKA_NODE_ID: "1"
           KAFKA_PROCESS_ROLES: broker,controller
           KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
