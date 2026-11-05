@@ -11,26 +11,36 @@ import shutil
 from pathlib import Path
 
 import pytest
+import json as _json
+
 import yaml
-from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 
 from backend.app.main import create_app
 
 
-@pytest.fixture
-def app_client(tmp_path):
-    db_url = f"sqlite+aiosqlite:///{(tmp_path / 'ready.db').as_posix()}"
-    app = create_app(database_url=db_url)
-    with TestClient(app) as client:
-        yield client, tmp_path
+class _FakeRequest:
+    """最小 Request 替身：readiness 路由只用 request.app.state。"""
+
+    def __init__(self, app):
+        self.app = app
+        self.state = type("S", (), {"request_id": "req-test"})()
 
 
-def test_ready_ok_single_machine(app_client):
-    client, _ = app_client
-    response = client.get("/api/v1/ready")
+async def test_ready_ok_single_machine(tmp_path):
+    """单机模式 /ready：DB 健康 → ready；无队列时队列组件非必需自动通过。
+
+    直接调用路由协程（不走 TestClient context manager）：CI 上
+    pytest-asyncio + Python 3.11 下 TestClient portal 的 loop 与
+    pytest-asyncio 的 loop 作用域冲突，teardown 会抛 "Event loop is closed"
+    并污染后续测试。
+    """
+    from backend.app.api.v1.health import readiness
+
+    app = create_app(database_url=f"sqlite+aiosqlite:///{(tmp_path / 'ready.db').as_posix()}")
+    response = await readiness(_FakeRequest(app))
     assert response.status_code == 200
-    body = response.json()
+    body = _json.loads(response.body)
     assert body["ready"] is True
     assert body["components"]["database"]["status"] == "healthy"
     # 单机模式无队列：非必需组件自动通过
@@ -57,36 +67,33 @@ async def test_ready_503_when_db_unreachable(tmp_path, monkeypatch):
 
     from backend.app.api.v1.health import readiness
 
-    class FakeRequest:
-        pass
-
-    request = FakeRequest()
-    request.app = app
+    request = _FakeRequest(app)
     response = await readiness(request)
     assert response.status_code == 503
-    import json as _json
-
     body = _json.loads(response.body)
     assert body["ready"] is False
     assert body["components"]["database"]["status"] == "unavailable"
 
 
-def test_ready_503_on_daily_token_ceiling(tmp_path, monkeypatch):
+async def test_ready_503_on_daily_token_ceiling(tmp_path, monkeypatch):
     import deepresearch_agent.config.settings as settings_mod
     import backend.app.api.v1.health as health_mod
+
+    from backend.app.api.v1.health import readiness
 
     db_url = f"sqlite+aiosqlite:///{(tmp_path / 'cost.db').as_posix()}"
     monkeypatch.setattr(settings_mod, "LLM_DAILY_TOKEN_CEILING", 100)
     app = create_app(database_url=db_url)
-    with TestClient(app) as client:
-        monkeypatch.setattr(health_mod, "_tokens_since_midnight", _async_return(500))
-        response = client.get("/api/v1/ready")
-        assert response.status_code == 503
-        gate = response.json()["components"]["llm_cost_gate"]
-        assert gate["exhausted"] is True and gate["spent_tokens"] == 500
-        # 低于阈值恢复
-        monkeypatch.setattr(health_mod, "_tokens_since_midnight", _async_return(50))
-        assert client.get("/api/v1/ready").status_code == 200
+    request = _FakeRequest(app)
+    monkeypatch.setattr(health_mod, "_tokens_since_midnight", _async_return(500))
+    response = await readiness(request)
+    assert response.status_code == 503
+    gate = _json.loads(response.body)["components"]["llm_cost_gate"]
+    assert gate["exhausted"] is True and gate["spent_tokens"] == 500
+    # 低于阈值恢复
+    monkeypatch.setattr(health_mod, "_tokens_since_midnight", _async_return(50))
+    response2 = await readiness(request)
+    assert response2.status_code == 200
 
 
 def _async_return(value):
@@ -130,9 +137,10 @@ async def test_send_rejected_when_daily_ceiling_exhausted(tmp_path, monkeypatch)
 
 def test_alert_rules_reference_registered_metrics():
     """告警规则引用的指标名必须已在 metrics.py 注册（防漂移）。"""
-    import importlib
-
     import prometheus_client
+
+    # 显式导入以确保所有 collector 已注册（否则 registry 为空）
+    import deepresearch_agent.observability.metrics  # noqa: F401
 
     rules = yaml.safe_load(Path("observability/alert-rules.yml").read_text(encoding="utf-8"))
     assert rules["groups"], "至少一个告警组"

@@ -11,7 +11,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 import deepresearch_agent.config.settings as settings_mod
 from backend.app.main import create_app
@@ -58,9 +57,14 @@ async def test_lifespan_bootstrap_false_skips_ddl(tmp_db, tmp_path, monkeypatch)
         "SCHEMA_BOOTSTRAP_ON_STARTUP=false 时启动不得建表"
 
 
-def test_lifespan_bootstrap_true_keeps_local_behavior(tmp_db, tmp_path, monkeypatch):
+async def test_lifespan_bootstrap_true_keeps_local_behavior(tmp_db, tmp_path, monkeypatch):
+    """本地默认（bootstrap=true）：lifespan 建表，行为不变。
+
+    同样不走 TestClient portal——CI 上其事件循环与 pytest-asyncio 冲突，
+    teardown 抛 "Event loop is closed" 并污染后续测试。
+    """
     app = _build_app(tmp_db, bootstrap=True, monkeypatch=monkeypatch)
-    with TestClient(app):
+    async with app.router.lifespan_context(app):
         pass
     assert _table_exists(Path(tmp_db.removeprefix("sqlite+aiosqlite:///")), "sessions")
 

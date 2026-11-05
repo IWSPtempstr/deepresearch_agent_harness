@@ -111,6 +111,35 @@ asyncio.run(main())
 
 
 
+def _run_sync(coro):
+    """在独立事件循环里跑协程，且**不污染**全局 loop 状态。
+
+    asyncio.run() 会调用 set_event_loop(None)，在 pytest-asyncio + Python 3.11
+    下会让后续 TestClient 拿到已关闭的 loop（"Event loop is closed"）。
+    这里显式创建/关闭 loop，并在结束后恢复原有 loop 设置。
+    """
+    import asyncio as _asyncio
+
+    previous = None
+    try:
+        previous = _asyncio.get_event_loop_policy().get_event_loop()
+    except Exception:
+        previous = None
+    loop = _asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        try:
+            loop.close()
+        except Exception:
+            pass
+        if previous is not None:
+            try:
+                _asyncio.set_event_loop(previous)
+            except Exception:
+                pass
+
+
 @pytest.fixture
 def drained_env(tmp_path):
     db_path = tmp_path / "drain.db"
@@ -128,7 +157,7 @@ def drained_env(tmp_path):
         await database.create_schema()
         await database.close()
 
-    asyncio.run(seed())
+    _run_sync(seed())
     # seed run via sync sqlite for simplicity of cross-process visibility
     async def seed_run():
         database = Database(db_url)
@@ -142,7 +171,7 @@ def drained_env(tmp_path):
         await database.close()
         return run.run_id
 
-    run_id = asyncio.run(seed_run())
+    run_id = _run_sync(seed_run())
     yield db_url, run_id, tmp_path
 
 
