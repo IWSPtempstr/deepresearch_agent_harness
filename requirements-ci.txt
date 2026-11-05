@@ -32,6 +32,8 @@ tavily-python>=0.5,<1.0
 
 # 队列 / SSE / 可观测性
 redis>=5,<6
+# 可选 Kafka 传输层（T-010）：queueing.py 懒导入，单机/Redis 模式未安装时不受影响
+aiokafka>=0.10,<0.13
 sse-starlette>=2.1,<3.0
 prometheus-client>=0.20,<1.0
 opentelemetry-api>=1.20,<2.0

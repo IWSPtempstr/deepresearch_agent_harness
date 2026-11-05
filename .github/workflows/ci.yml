@@ -69,3 +69,119 @@ jobs:
         run: PYTHONPATH=src:. python -m alembic upgrade head
       - name: 方言一致性 + 全量回归（PG 后端）
         run: python -m pytest tests/ -q
+
+  kafka-compat:
+    # T-010：可选 Kafka 传输层；真实 broker 由 service 容器提供（本机无 Docker 需求）。
+    # 官方 apache/kafka KRaft 单节点；runner 通过映射端口 9092 连接
+    runs-on: ubuntu-latest
+    services:
+      kafka:
+        # apache/kafka 官方镜像（KRaft 单节点）；bitnami 镜像已迁出 Docker Hub
+        image: apache/kafka:3.9.2
+        env:
+          KAFKA_NODE_ID: "1"
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+          # runner 通过映射端口连接：advertised 必须是 localhost（容器内解析不到 kafka 主机名）
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+          KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+          KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+          KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+        ports: ["9092:9092"]
+        # 不依赖镜像内脚本路径：用 nc 探测端口（apache/kafka 镜像的
+        # kafka-broker-api-versions.sh 位置随版本变化，易失效）
+        options: >-
+          --health-cmd "nc -z 127.0.0.1 9092 || exit 1"
+          --health-interval 10s --health-timeout 5s --health-retries 30
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-dummy' }}
+      TEST_KAFKA_BOOTSTRAP: localhost:9092
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-ci.txt
+      - name: 等待 broker 就绪（客户端探针，非 healthcheck）
+        run: |
+          python - <<'PY'
+          import asyncio, time
+          from aiokafka import AIOKafkaProducer
+
+          async def main():
+              deadline = time.monotonic() + 180
+              last = None
+              while time.monotonic() < deadline:
+                  try:
+                      producer = AIOKafkaProducer(bootstrap_servers="localhost:9092")
+                      await producer.start()
+                      await producer.send_and_wait("dra-probe-topic", value=b"probe")
+                      await producer.stop()
+                      print("kafka ready")
+                      return
+                  except Exception as exc:
+                      last = exc
+                      await asyncio.sleep(3)
+              raise SystemExit(f"kafka 未在 180s 内就绪: {last}")
+
+          asyncio.run(main())
+          PY
+      - name: Kafka 队列与事件流回归（真实 broker）
+        run: |
+          python -m pytest tests/harness/test_run_queue.py -q
+          python -m pytest tests/acceptance/test_events_kafka.py -q
+
+  backup-restore-drill:
+    # T-004：PG 备份演练 + 真实 pg_restore 到 scratch 库（恢复路径真实执行）
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: dra
+          POSTGRES_PASSWORD: dra
+          POSTGRES_DB: dra
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dra -d dra"
+          --health-interval 10s --health-timeout 5s --health-retries 20
+    env:
+      TEST_POSTGRES_URL: postgresql+asyncpg://dra:dra@127.0.0.1:5432/dra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      # runner 自带 client 为 PG16，pg_dump 无法导出 PG17 服务端 —— 安装 PG17 客户端
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          sudo sh -c 'wget -qO - https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor > /etc/apt/trusted.gpg.d/pgdg.gpg'
+          sudo apt-get update && sudo apt-get install -y postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+      - run: pip install -r requirements-ci.txt
+      - name: 迁移链（空库 upgrade head，为演练准备真实 schema）
+        run: PYTHONPATH=src:. python -m alembic upgrade head
+        env:
+          APP_DATABASE_URL: postgresql+asyncpg://dra:dra@127.0.0.1:5432/dra
+      - name: 备份恢复演练（真实 PG：dump → pg_restore 到 scratch 库 → verify）
+        run: |
+          PYTHONPATH=src:. python -m scripts.backup_drill --target postgres \
+            --dsn postgresql+asyncpg://dra:dra@127.0.0.1:5432/dra \
+            --restore-dsn postgresql+asyncpg://dra:dra@127.0.0.1:5432/dra_restore \
+            --output output/backup-drill.json
+      - name: 演练报告阈值门禁（RTO < 60m 且 PASS）
+        run: python scripts/backup_drill_gate.py output/backup-drill.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backup-drill-report
+          path: output/backup-drill.json

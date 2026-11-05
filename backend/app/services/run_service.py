@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -33,6 +34,8 @@ from deepresearch_agent.models.get_models import get_llm_model
 from deepresearch_agent.retrieval.router import create_default_router
 from deepresearch_agent.retrieval.base import TimeoutBoundProvider
 from backend.app.schemas import MessageCreate, RunCreate, SessionCreate
+
+logger = logging.getLogger("deepresearch.run_service")
 
 
 class RunService:
@@ -133,8 +136,11 @@ class RunService:
 
     def schedule(self, run_id: str) -> asyncio.Task:
         if self.queue is not None:
-            # 队列模式：仅投递唤醒信号；执行由 worker 进程消费（runs 表是事实源）
+            # 队列模式：仅投递唤醒信号；执行由 worker 进程消费（runs 表是事实源）。
+            # T-003：enqueue task 不再无观测——done-callback 捕获异常并计数，
+            # run 留在 queued，由租约扫描（≤15s）重建投递，不在请求路径同步重试
             task = asyncio.create_task(self.queue.enqueue(run_id), name=f"enqueue:{run_id}")
+            task.add_done_callback(self._observe_enqueue)
             return task
         existing = self._tasks.get(run_id)
         if existing is not None and not existing.done():
@@ -144,6 +150,25 @@ class RunService:
         self._tasks[run_id] = task
         task.add_done_callback(lambda _task: self._tasks.pop(run_id, None))
         return task
+
+    @staticmethod
+    def _observe_enqueue(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            return
+        from deepresearch_agent.observability import QUEUE_ENQUEUE_FAILURES
+
+        logger.error(
+            "唤醒信号入队失败（run_id=%s，run 留在 queued，等待租约扫描重建投递）",
+            task.get_name().removeprefix("enqueue:"),
+            exc_info=exc,
+        )
+        try:
+            QUEUE_ENQUEUE_FAILURES.inc()
+        except Exception:
+            pass
 
     async def execute_now(self, run_id: str) -> Any:
         """worker 进程入口：直接执行一个 Run（与 API 进程内调度共用同一执行体）。"""
@@ -169,7 +194,11 @@ class RunService:
                 timeout_seconds=context.budget_limits.tool_timeout_seconds,
             )
             if context.workflow_mode is WorkflowMode.DEEP_RESEARCH:
-                agent = DeepResearchAgent(use_deeper_tool=True, retrieval_provider=provider, run_id=context.run_id)
+                tier_model = self._tier_model_for(context)
+                agent = DeepResearchAgent(
+                    use_deeper_tool=True, retrieval_provider=provider, run_id=context.run_id,
+                    llm_model=tier_model,
+                )
                 agents.append(agent)
                 return DeepResearchDriver(context, agent, events=events)
             worker = WorkerCoordinator(
@@ -196,6 +225,9 @@ class RunService:
             for agent in agents:
                 if hasattr(agent, "close"):
                     agent.close()
+            # T-006：终态清除 per-run prefix 记账（防 worker 生命周期内无界增长）
+            clear_run_cancelled(run_id)
+            prefix_tracker.evict_run(run_id)
             run = await self.runs.get(run_id)
             config = json.loads(run.config_snapshot_json or "{}") if run else {}
             if not config.get("evaluation_run") and run and run.status not in {"paused", "pausing"}:
@@ -209,6 +241,15 @@ class RunService:
                         name=str(selected.get("name")), version=str(selected.get("version")),
                         succeeded=bool(run and run.status == "completed"), safety_violation=safety_violation,
                     )
+
+    def _tier_model_for(self, context) -> str | None:
+        """T-009：从 Run config_snapshot 解析分层模型 ID；路由关闭/未配置返回 None（旧行为）。"""
+        if not settings.LLM_TIER_ROUTING_ENABLED:
+            return None
+        from deepresearch_agent.models.model_tier import resolve_model_for
+
+        routing = resolve_model_for(context.config_snapshot or {})
+        return routing["model"] if routing["model"] != settings.OPENAI_LLM_MODEL else None
 
     async def run_evaluation_case(self, *, query: str, source_mode: str, workflow_mode: str, forced_skill=None) -> dict[str, Any]:
         """Execute one isolated real Harness Run for paired Skill evaluation."""
@@ -264,10 +305,15 @@ class RunService:
 
         多 worker 重复投递是安全的：执行侧以条件 UPDATE 抢租约，
         抢不到的实例直接让位（RunLeaseLost 语义），租约就是互斥量。
+
+        T-006：queue 模式（API/worker 队列传输）下返回待重投 run_ids 交由调用方
+        经队列投递——worker 内不再进程内 spawn 执行（旧行为绕过 WORKER_CONCURRENCY
+        信号量、且关停时被立即取消写 CANCELLED，违背 drain 语义）。
         """
         run_ids = await RecoveryManager(self.runs).scan(auto_resume=True)
-        for run_id in run_ids:
-            self.schedule(run_id)
+        if self.queue is None:
+            for run_id in run_ids:
+                self.schedule(run_id)
         return run_ids
 
     async def cancel(self, run_id: str) -> bool:
@@ -336,6 +382,12 @@ class RunService:
         return resumed
 
     async def shutdown(self) -> None:
+        # T-006：释放 router 内 provider 资源（scholar httpx 客户端等）
+        if self._router is not None:
+            try:
+                await self._router.aclose()
+            except Exception:
+                pass
         await self.skill_learning.shutdown()
         active = list(self._tasks.values())
         if not active:

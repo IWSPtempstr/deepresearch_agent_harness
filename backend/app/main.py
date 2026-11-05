@@ -6,6 +6,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import sqlalchemy.exc as sqlalchemy_exc
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,13 +33,28 @@ def _error(request: Request, *, status_code: int, code: str, message: str, retry
     )
 
 
+def _map_unexpected_status(exc: Exception) -> tuple[int, dict]:
+    """T-003：未预期异常的 HTTP 映射。DB 连接类故障映射为可重试的 503，
+    其余为 500。独立纯函数便于单测（不起真实 PG）。"""
+    if isinstance(exc, (sqlalchemy_exc.OperationalError, sqlalchemy_exc.InterfaceError)):
+        return 503, {
+            "error": {
+                "code": ErrorCode.DATABASE_UNAVAILABLE.value,
+                "message": "数据库暂不可用，请稍后重试",
+                "retryable": True,
+                "details": {},
+            }
+        }
+    return 500, {"error": {"code": "INTERNAL_ERROR", "message": "服务内部错误", "retryable": False, "details": {}}}
+
+
 def create_app(
     *, database_url: str | None = None, workflow_factory=None,
     artifact_root: str | Path | None = None, skills_root: str | Path | None = None,
     auto_resume: bool | None = None,
 ) -> FastAPI:
-    if not settings.LOCAL_MVP_SINGLE_WORKER and not settings.REDIS_URL:
-        raise AppError(ErrorCode.CONFIGURATION_INVALID, "单机模式必须设置 FASTAPI_WORKERS=1；多实例部署请配置 REDIS_URL 切换平台模式（Run 执行由独立 worker 消费）")
+    if not settings.LOCAL_MVP_SINGLE_WORKER and not (settings.REDIS_URL or settings.KAFKA_BOOTSTRAP_SERVERS):
+        raise AppError(ErrorCode.CONFIGURATION_INVALID, "单机模式必须设置 FASTAPI_WORKERS=1；多实例部署请配置 REDIS_URL 或 KAFKA_BOOTSTRAP_SERVERS 切换平台模式（Run 执行由独立 worker 消费）")
     database = Database(database_url or settings.APP_DATABASE_URL)
     # 平台模式共享一个 Redis 扇出：API 侧发布的控制事件与 worker 侧发布的
     # Run 事件都经它推给任意实例的 SSE 订阅者
@@ -47,14 +63,23 @@ def create_app(
         database, workflow_factory=workflow_factory,
         artifact_root=artifact_root or settings.ARTIFACT_ROOT,
         skills_root=skills_root or settings.SKILLS_ROOT,
-        # 平台模式：API 只投递唤醒信号，执行在 worker 进程（P0-2）
-        queue=create_run_queue(settings.REDIS_URL) if settings.REDIS_URL else None,
+        # 平台模式：API 只投递唤醒信号，执行在 worker 进程（P0-2）；
+        # KAFKA_BOOTSTRAP_SERVERS 非空时唤醒信号改走 Kafka（T-010 可选传输层）
+        queue=create_run_queue(
+            settings.REDIS_URL,
+            kafka_bootstrap=settings.KAFKA_BOOTSTRAP_SERVERS,
+            kafka_topic=settings.KAFKA_TOPIC,
+            kafka_group=settings.KAFKA_CONSUMER_GROUP,
+        ) if (settings.REDIS_URL or settings.KAFKA_BOOTSTRAP_SERVERS) else None,
         event_fanout=event_fanout,
     )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        await database.create_schema()
+        # T-005：生产部署（SCHEMA_BOOTSTRAP_ON_STARTUP=false）下启动不执行 DDL——
+        # schema 由单独的迁移步骤（alembic upgrade head）先行完成；本地/测试保持零配置引导
+        if settings.SCHEMA_BOOTSTRAP_ON_STARTUP:
+            await database.create_schema()
         from deepresearch_agent.llm_gateway import start_metering, stop_metering
         from deepresearch_agent.observability import setup_tracing
 
@@ -127,7 +152,12 @@ def create_app(
 
     @app.exception_handler(Exception)
     async def unexpected_error_handler(request: Request, exc: Exception):
-        return _error(request, status_code=500, code="INTERNAL_ERROR", message="服务内部错误")
+        # T-003：DB 连接类故障不再是裸 500——映射为可重试的 503 DATABASE_UNAVAILABLE
+        status_code, payload = _map_unexpected_status(exc)
+        return JSONResponse(
+            status_code=status_code,
+            content={**payload, "request_id": getattr(request.state, "request_id", "unknown")},
+        )
 
     app.include_router(api_router)
     return app

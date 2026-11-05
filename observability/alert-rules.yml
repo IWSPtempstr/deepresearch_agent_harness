@@ -1,0 +1,40 @@
+# T-007 告警规则：面向值班的第一响应（阈值保守，作品集级 SLO）
+groups:
+  - name: deepresearch-core
+    rules:
+      - alert: RunStuckQueued
+        expr: dra_waiting_runs > 0 for 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "存在 queued Run 超过 5 分钟未被消费"
+          action: "检查 worker 存活与队列连通（docs/runbooks/deploy-migrate-rollback.md）"
+      - alert: EnqueueFailures
+        expr: increase(dra_queue_enqueue_failures_total[10m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "唤醒信号入队失败（Redis/Kafka 不可用或重试耗尽）"
+          action: "Run 留在 queued 由租约扫描重建；恢复队列后自动收敛"
+      - alert: WorkerConsumeReconnects
+        expr: increase(dra_worker_consume_reconnects_total[15m]) > 3
+        labels: {severity: warning}
+        annotations:
+          summary: "worker 消费流频繁断连重连"
+          action: "检查 Redis/Kafka 稳定性"
+      - alert: EventFanoutFailures
+        expr: increase(dra_event_fanout_failures_total[10m]) > 0
+        labels: {severity: info}
+        annotations:
+          summary: "SSE 实时扇出失败（durable 落库不受影响）"
+          action: "前端依赖 DB 重放兜底；恢复 Redis 即可"
+      - alert: WorkerRunFailures
+        expr: increase(dra_worker_run_failures_total[15m]) > 3
+        labels: {severity: warning}
+        annotations:
+          summary: "worker 执行入口异常增多（Run 状态已落库）"
+          action: "查 run.failed 事件 error_code 与 LLM/检索 provider 健康"
+      - alert: LlmRateLimitedBurst
+        expr: increase(dra_llm_rate_limited_total[10m]) > 5
+        labels: {severity: info}
+        annotations:
+          summary: "LLM 并发槽排队超时增多"
+          action: "评估 LLM_MAX_CONCURRENT_CALLS 与 provider 容量"

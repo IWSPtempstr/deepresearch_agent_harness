@@ -1,4 +1,4 @@
-<h1 align="center">DeepReseach Agent Harness</h1>
+<h1 align="center">DeepResearch Agent Harness</h1>
 
 <p align="center">
   <strong>面向复杂研究任务的可恢复、多智能体、证据驱动 Agent Runtime</strong>
@@ -9,17 +9,20 @@
   <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white">
   <img alt="React" src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black">
   <img alt="Neo4j" src="https://img.shields.io/badge/Neo4j-5.22-4581C3?logo=neo4j&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-134%20passed-22A06B">
+  <img alt="Tests" src="https://img.shields.io/badge/CI-backend%20%2B%20frontend%20%2B%20PostgreSQL-22A06B">
   <img alt="Evidence" src="https://img.shields.io/badge/evidence%20coverage-100%25-7C3AED">
 </p>
 
 <p align="center">
+  <a href="frontend/portfolio.html">项目静态介绍</a> ·
   <a href="#核心亮点">核心亮点</a> ·
   <a href="#系统架构">系统架构</a> ·
   <a href="#快速启动">快速启动</a> ·
   <a href="#测试与评测">测试与评测</a> ·
   <a href="#常用-api">API</a>
 </p>
+
+> **GitHub 静态作品集**：公开展示页只呈现架构、设计和项目材料，不提供在线研究 API。需要体验完整系统，请按下方说明在本地配置运行；真实模型调用需要自行配置 provider 和密钥。
 
 > 以可恢复的 **Agent Harness** 为运行底座，驱动 **Context → Plan → Execute → Report → Verify → Replan** 闭环，统一接入私域 GraphRAG 与 Web 搜索，并提供全量证据上下文压缩、持久化执行、实时可观测、受控自进化和系统化 Agent 评测能力。
 
@@ -31,7 +34,7 @@
 
 ### 1. 可恢复 Agent Harness
 
-Harness Runtime 将 DeepResearch、Fusion 和多智能体 Plan–Execute–Report 工作流统一封装为持久化执行协议：
+Harness Runtime 将 **deep_research** 与 **plan_execute_report** 两种工作流统一封装为持久化执行协议：
 
 - Session / Run 状态机管理会话与单次研究任务；
 - Lease、版本化 Checkpoint 和幂等 ToolCall 防止重复副作用；
@@ -288,13 +291,14 @@ flowchart TB
 - **web**：Tavily 联网搜索；
 - Memory 与历史对话仅用于理解问题，不可充当本轮研究证据。
 
-支持三种工作流：
+Harness 实际支持两种工作流（`WorkflowMode` 成员，见 `src/deepresearch_agent/harness/contracts.py`）：
 
 | 工作流 | 适用场景 |
 |---|---|
 | deep_research | 多轮搜索、推理和答案生成 |
-| fusion | 多检索策略融合 |
 | plan_execute_report | DAG 规划、多 Agent 执行、长报告生成与完成验证 |
+
+> 代码中保留的 `FusionGraphRAGAgent` 是独立入口，其多检索策略与多 Agent 报告能力已由 `plan_execute_report` 覆盖，不属于当前 Harness 工作流。
 
 ## 技术栈
 
@@ -306,6 +310,18 @@ flowchart TB
 | Backend | FastAPI、SSE、SQLAlchemy、SQLite、Alembic |
 | Frontend | React 18、TypeScript、Vite、TanStack Query、Motion |
 | Deployment | Docker Compose、Nginx、Uvicorn |
+
+---
+
+## GitHub 静态项目介绍
+
+仓库包含一个基于 React/Vite 的静态作品集页面：[frontend/portfolio.html](frontend/portfolio.html)（源码在 `frontend/src/portfolio/`）。它展示架构、可靠性设计和证据工程，不连接后端、不提供在线研究 API，也不会在浏览器中调用模型。
+
+本地预览：在 `frontend/` 目录运行 `npm run build:portfolio`，产物输出到 `frontend/portfolio-dist/`（本地构建默认使用根 base，可用 `PORTFOLIO_BASE` 覆盖）。
+
+启用 GitHub Pages：在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。之后更新 `main` 分支上的作品集源码，`.github/workflows/pages.yml` 会以 `/<repo>/` 为 base 构建作品集入口并发布静态文件（构建产物同时提供 `index.html` 与 `portfolio.html`，站点根路径可直接访问）。发布地址由 GitHub Pages 设置页提供。静态页面只链接公开仓库内容，不包含 API key 或真实运行数据。
+
+运维 runbook 索引见 [docs/runbooks/README.md](docs/runbooks/README.md)(备份恢复/迁移发布/告警响应/成本天花板)。
 
 ---
 
@@ -399,6 +415,28 @@ npm run dev
 .\scripts\stop-local.ps1
 ~~~
 
+### 5. 可选 Kafka 传输层（T-010）
+
+Run 的唤醒信号队列支持两种可替换实现，由环境变量选择（Kafka 优先于 Redis）：
+
+| 后端 | 触发条件 | 消费语义 |
+|---|---|---|
+| Redis Streams（默认平台模式） | `REDIS_URL` 非空 | 读出即 ACK（at-most-once） |
+| Kafka（可选） | `KAFKA_BOOTSTRAP_SERVERS` 非空 | **执行后提交 offset（at-least-once）** |
+
+两种后端下可靠性语义一致：数据库是事实源，租约条件 UPDATE 是唯一互斥量，重复投递/信号丢失由过期租约扫描兜底。Kafka 侧的实现细节：分区键 = `run_id`（同 Run 信号保序）、幂等 producer（`acks=all` + `enable_idempotence`）、按分区水位线单调提交 offset（乱序完成的任务不会越位提交）、rebalance 时清理本地水位线并接受重投。
+
+启用（Compose 演示，需先遵守项目 Docker 使用约束）：
+
+~~~bash
+# .env 中设置 KAFKA_BOOTSTRAP_SERVERS=kafka:9092（REDIS_URL 可保留用于 SSE 实时扇出）
+docker compose --profile kafka up -d --build
+~~~
+
+事件流分发（T-011）：`dra-events` topic 以 key=run_id 承载全量事件（durable-first 语义不变——事件先落库），`FanoutChain` 组合 Redis（per-Run 实时）+ Kafka（全量流）双通道，单通道失败只计数；`AuditEventConsumer` 演示独立消费组（审计/评测/数仓场景）。
+
+定位说明：这是**传输层可替换性的能力验证**，不是生产必选项——是否引入 Kafka 取决于流量与消费者规模，取舍记录见 `docs/specs/production-readiness/design.md`。CI 的 `kafka-compat` 作业用真实 broker 跑队列回归（`tests/harness/test_run_queue.py`，本地无 broker 时自动跳过）。
+
 ---
 
 ## 测试与评测
@@ -411,7 +449,7 @@ cd frontend
 npm run build
 ~~~
 
-当前完整后端回归：**134 passed**；前端 TypeScript 类型检查与生产构建通过。
+当前完整后端回归：**218 个用例**（`python -m pytest tests/ --collect-only -q | tail -1` 统计口径；实际通过数以最近一次 CI 运行为准）；前端 TypeScript 类型检查与生产构建通过。
 
 ### 系统量化评测
 

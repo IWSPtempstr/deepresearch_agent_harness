@@ -5,7 +5,9 @@ import re
 from sqlalchemy import select
 
 from backend.app.schemas import MessageCreate, MessageSend, RunAccepted, RunCreate
+from deepresearch_agent.config import settings
 from deepresearch_agent.config.settings import HARNESS_BUDGETS, LEARNING_REVIEW_MODEL, OPENAI_LLM_MODEL
+from deepresearch_agent.models.model_tier import resolve_model_for
 from deepresearch_agent.harness.errors import AppError, ErrorCode
 from deepresearch_agent.persistence.repositories import MessageRepository, RunRepository, SessionRepository
 
@@ -33,6 +35,26 @@ class ChatService:
         self.runs = runs
         self.messages = messages
         self.run_service = run_service
+    async def _tokens_spent_today(self) -> int:
+        """当日 llm_calls output_tokens 总和（T-007 成本天花板口径）。"""
+        from datetime import datetime, timezone
+
+        from sqlalchemy import func, select
+
+        from deepresearch_agent.persistence.models import LlmCallModel
+
+        midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        try:
+            async with self.runs.database.engine.connect() as connection:
+                row = await connection.execute(
+                    select(func.coalesce(func.sum(LlmCallModel.output_tokens), 0)).where(
+                        LlmCallModel.created_at >= midnight.isoformat()
+                    )
+                )
+                return int(row.scalar() or 0)
+        except Exception:
+            return 0  # 计量不可读按未超限（readiness 会另行暴露）
+
 
     async def send(self, session_id: str, request: MessageSend) -> RunAccepted:
         session = await self.sessions.get(session_id)
@@ -44,6 +66,17 @@ class ChatService:
             raise AppError(ErrorCode.NOT_FOUND, "Session 不存在")
         if session.status != "active":
             raise AppError(ErrorCode.CONFLICT, "已归档 Session 不能发送消息")
+        # T-007：平台级 LLM 成本天花板（当日 output_tokens；0=不启用）。
+        # 超限 = 诚实失败（明确 429 语义），不悄悄启动注定无预算的任务
+        ceiling = settings.LLM_DAILY_TOKEN_CEILING
+        if ceiling > 0:
+            spent = await self._tokens_spent_today()
+            if spent >= ceiling:
+                raise AppError(
+                    ErrorCode.LLM_RATE_LIMITED,
+                    f"平台 LLM 日预算已耗尽（{spent}/{ceiling} tokens）；明日重置或由管理员调整 LLM_DAILY_TOKEN_CEILING",
+                    retryable=True,
+                )
 
         existing = await self.messages.get_by_client_id(session_id, request.client_message_id)
         if existing is not None and existing.run_id:
@@ -93,6 +126,21 @@ class ChatService:
             import json as _json
 
             budget = {**budget, **(_json.loads(tenant_row.budget_json or "{}") or {})}
+        # T-009：按任务难度解析模型层级（纯函数、可审计；留痕进 model_snapshot）
+        snapshot = {
+            # A single weakly-related chunk may be enough for a concise
+            # answer, but must never unlock a user-requested detailed report.
+            "min_evidence": 3 if detailed_request else 1,
+            "report_type": "long_document" if detailed_request else request.report_type,
+            "deep_research_max_iterations": 1 if request.source_mode.value == "graphrag" else 2,
+            "schema_version": 1,
+        }
+        routing = (
+            resolve_model_for(snapshot, content=request.content, settings=settings)
+            if settings.LLM_TIER_ROUTING_ENABLED
+            else {"model": OPENAI_LLM_MODEL, "tier": "standard", "reason": "routing disabled"}
+        )
+        snapshot["model_tier"] = routing["tier"]
         message, run, created = await self.runs.create_for_user_message(
             MessageCreate(
                 session_id=session_id, role="user", content=request.content,
@@ -102,20 +150,15 @@ class ChatService:
             RunCreate(
                 session_id=session_id, trigger_message_id="assigned-atomically",
                 source_mode=request.source_mode, workflow_mode=request.workflow_mode,
-                config_snapshot={
-                    # A single weakly-related chunk may be enough for a concise
-                    # answer, but must never unlock a user-requested detailed report.
-                    "min_evidence": 3 if detailed_request else 1,
-                    "report_type": "long_document" if detailed_request else request.report_type,
-                    "deep_research_max_iterations": 1 if request.source_mode.value == "graphrag" else 2,
-                    "schema_version": 1,
-                },
+                config_snapshot=snapshot,
                 budget=budget,
             ),
         )
         if created:
             await self.runs.update_model_snapshot(run.run_id, {
-                "llm_model": OPENAI_LLM_MODEL,
+                "llm_model": routing["model"],
+                "llm_model_tier": routing["tier"],
+                "llm_model_routing_reason": routing["reason"],
                 "learning_review_model": LEARNING_REVIEW_MODEL,
             })
             if session.title.strip() in {"新对话", "New conversation", "Untitled"}:

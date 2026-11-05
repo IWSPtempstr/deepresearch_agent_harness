@@ -182,6 +182,11 @@ class PrefixCacheTracker:
             "hit_rate": (totals.hit_tokens / totals.input_tokens) if totals.input_tokens else 0.0,
         }
 
+    def evict_run(self, run_id: str) -> None:
+        """T-006：终态后清除 per-run 记账，防止 _runs 随 worker 生命周期无界增长。"""
+        with self._lock:
+            self._runs.pop(run_id, None)
+
     def reset(self) -> None:
         with self._lock:
             self._global.clear()

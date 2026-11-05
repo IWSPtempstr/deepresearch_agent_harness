@@ -89,6 +89,11 @@ APP_DATABASE_URL = os.getenv(
 ).strip()
 # 平台模式（P0-2）：非空时 Run 执行经 Redis 队列交给独立 worker 进程
 REDIS_URL = (os.getenv("REDIS_URL") or "").strip()
+# 可选 Kafka 传输层（T-010）：非空时唤醒信号改走 Kafka（优先于 REDIS_URL）；
+# 纯能力展示/传输层可替换性验证，非生产必选项——DB 事实源 + 租约 + 扫描兜底语义不变
+KAFKA_BOOTSTRAP_SERVERS = (os.getenv("KAFKA_BOOTSTRAP_SERVERS") or "").strip()
+KAFKA_TOPIC = (os.getenv("KAFKA_TOPIC") or "dra-runs-queue").strip()
+KAFKA_CONSUMER_GROUP = (os.getenv("KAFKA_CONSUMER_GROUP") or "dra-workers").strip()
 # worker 进程同时在跑的 Run 数上限（API 进程内模式不设此限）
 WORKER_CONCURRENCY = _get_env_int("WORKER_CONCURRENCY", 4) or 4
 # 租约 TTL（秒）；心跳按 TTL/3 续约。接管窗口上界 ≈ TTL + 扫描间隔
@@ -111,6 +116,13 @@ OPENALEX_MAILTO = (os.getenv("OPENALEX_MAILTO") or "").strip()
 ARTIFACT_ROOT = Path(os.getenv("ARTIFACT_ROOT", PROJECT_ROOT / "data" / "artifacts")).expanduser()
 SKILLS_ROOT = Path(os.getenv("SKILLS_ROOT", PROJECT_ROOT / "skills")).expanduser()
 AUTO_RESUME_RUNS = _get_env_bool("AUTO_RESUME_RUNS", True)
+# T-007：平台级 LLM 成本天花板（当日 output_tokens 总和；0=不启用）。
+# 超限后 /ready 返回 503、新 Run 创建被拒——作品集保护阈值，非云账单保证
+LLM_DAILY_TOKEN_CEILING = _get_env_int("LLM_DAILY_TOKEN_CEILING", 0) or 0
+# T-005：启动期 schema 引导开关。true（默认）= 进程内 create_schema（本地零配置可跑）；
+# false = 生产部署语义——DDL 只经单独的 `alembic upgrade head` 迁移步骤执行，
+# API/worker 启动不执行任何竞争性 DDL（多副本安全）
+SCHEMA_BOOTSTRAP_ON_STARTUP = _get_env_bool("SCHEMA_BOOTSTRAP_ON_STARTUP", True)
 CONTEXT_MAX_CHARS = _require_positive("CONTEXT_MAX_CHARS", _get_env_int("CONTEXT_MAX_CHARS", 16000) or 16000)
 CONTEXT_RECENT_TURNS = _require_positive("CONTEXT_RECENT_TURNS", _get_env_int("CONTEXT_RECENT_TURNS", 8) or 8)
 CONTEXT_MAX_TOKENS = _require_positive("CONTEXT_MAX_TOKENS", _get_env_int("CONTEXT_MAX_TOKENS", 12000) or 12000)
@@ -350,6 +362,11 @@ OPENAI_EMBEDDING_BATCH_SIZE = _require_positive(
     _get_env_int("OPENAI_EMBEDDING_BATCH_SIZE", 10) or 10,
 )
 OPENAI_LLM_MODEL = os.getenv("OPENAI_LLM_MODEL") or None
+# T-009：按任务难度分层的模型路由（空=回落 OPENAI_LLM_MODEL；模型 ID 全配置化）
+LLM_TIER_ROUTING_ENABLED = _get_env_bool("LLM_TIER_ROUTING_ENABLED", True)
+LLM_TIER_SIMPLE_MODEL = (os.getenv("LLM_TIER_SIMPLE_MODEL") or "").strip()
+LLM_TIER_STANDARD_MODEL = (os.getenv("LLM_TIER_STANDARD_MODEL") or "").strip()
+LLM_TIER_COMPLEX_MODEL = (os.getenv("LLM_TIER_COMPLEX_MODEL") or "").strip()
 MEMORY_LLM_MODEL = os.getenv("MEMORY_LLM_MODEL") or OPENAI_LLM_MODEL
 MEMORY_LLM_MIN_CONFIDENCE = _get_env_float("MEMORY_LLM_MIN_CONFIDENCE", 0.75) or 0.75
 if not 0.0 <= MEMORY_LLM_MIN_CONFIDENCE <= 1.0:

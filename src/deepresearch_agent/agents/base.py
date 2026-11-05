@@ -21,16 +21,16 @@ from deepresearch_agent.config.settings import AGENT_SETTINGS
 class BaseAgent(ABC):
     """Agent 基类，定义通用功能和接口"""
     
-    def __init__(self, cache_dir="./cache", memory_only=False, *, enable_vector_cache=None):
+    def __init__(self, cache_dir="./cache", memory_only=False, *, enable_vector_cache=None, llm_model: str | None = None):
         """
         初始化搜索工具
         
         参数:
             cache_dir: 缓存目录，用于存储搜索结果
         """
-        # 初始化普通 LLM 和流式 LLM
-        self.llm = get_llm_model()
-        self.stream_llm = get_stream_llm_model()
+        # 初始化普通 LLM 和流式 LLM（T-009：llm_model 支持按任务难度注入分层模型）
+        self.llm = get_llm_model(model=llm_model) if llm_model else get_llm_model()
+        self.stream_llm = get_stream_llm_model() if not llm_model else get_llm_model(model=llm_model)
         self.embeddings = get_embeddings_model()
         self.default_recursion_limit = AGENT_SETTINGS["default_recursion_limit"]
         self.stream_flush_threshold = AGENT_SETTINGS["stream_flush_threshold"]
