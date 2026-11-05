@@ -39,3 +39,4 @@ evals/**/results.md
 .github/skills/
 .zcode/
 scripts/typesafe_smoke.py
+.zcode-site/

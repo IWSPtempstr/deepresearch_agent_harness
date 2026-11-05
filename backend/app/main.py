@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -160,6 +161,29 @@ def create_app(
         )
 
     app.include_router(api_router)
+
+    # T-013：可选的单进程部署模式——同一端口同时服务 API 与构建后的前端
+    # （ZCode Sites 等单服务云端）。默认关闭；compose/本地部署不受影响。
+    if os.getenv("SERVE_FRONTEND") == "1":
+        from pathlib import Path
+
+        from fastapi.responses import FileResponse
+        from fastapi.staticfiles import StaticFiles
+
+        frontend_dist = Path(os.getenv("FRONTEND_DIST", "frontend_dist"))
+        if frontend_dist.is_dir():
+            assets_dir = frontend_dist / "assets"
+            if assets_dir.is_dir():
+                app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
+            @app.get("/{full_path:path}", include_in_schema=False)
+            async def spa_fallback(full_path: str):
+                # API 与已注册路由优先匹配；其余路径回退到 SPA 入口
+                candidate = (frontend_dist / full_path).resolve()
+                if full_path and candidate.is_file() and frontend_dist.resolve() in candidate.parents:
+                    return FileResponse(candidate)
+                return FileResponse(frontend_dist / "index.html")
+
     return app
 
 
