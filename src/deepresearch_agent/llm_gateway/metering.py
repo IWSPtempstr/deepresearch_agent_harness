@@ -11,6 +11,15 @@ from sqlalchemy import insert
 from deepresearch_agent.persistence.models import LlmCallModel
 
 
+def _task_loop_is_open(task: "asyncio.Task") -> bool:
+    """任务所在 event loop 是否仍可用（loop 关闭后 await/gather 会抛 RuntimeError）。"""
+    try:
+        loop = task.get_loop()
+    except Exception:
+        return False
+    return not loop.is_closed()
+
+
 class LlmCallRecorder:
     """进程内计量缓冲；start() 后由后台任务每秒批量写入 llm_calls。"""
 
@@ -65,15 +74,25 @@ class LlmCallRecorder:
 
     def start(self, database) -> None:
         if self._flush_task is not None:
-            return
+            # 任务绑定在创建时的 event loop 上；若该 loop 已关闭（如进程内
+            # 多 loop / 热重载 / 测试连续启停），旧 task 无法再被 await——
+            # 直接丢弃并重建，避免后续 stop() 在已关闭 loop 上 gather 报错
+            if not self._flush_task.done() and self._task_loop_is_open(self._flush_task):
+                return
+            self._flush_task = None
         self._database = database
         self._flush_task = asyncio.create_task(self._flush_loop(), name="llm-calls-recorder")
 
     async def stop(self) -> None:
         if self._flush_task is not None:
-            self._flush_task.cancel()
-            await asyncio.gather(self._flush_task, return_exceptions=True)
-            self._flush_task = None
+            task, self._flush_task = self._flush_task, None
+            task.cancel()
+            if _task_loop_is_open(task):
+                try:
+                    await asyncio.gather(task, return_exceptions=True)
+                except RuntimeError:
+                    # 目标 loop 已关闭：无法等待，直接放弃（flush 仍有 best-effort 路径）
+                    pass
         try:
             await self.flush()
         except Exception:
