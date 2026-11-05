@@ -127,8 +127,8 @@
 - 回归：`npm run build`（交互式应用）通过；`npm test` → 9 passed。
 - 静态隔离：bundle 扫描 `api/v1|API_BASE|api\.sessions|localStorage|sessionStorage|fetch\(` 仅命中 Vite modulepreload polyfill（唯一 fetch），无 API client/凭据存储/动态服务调用。
 - 内容核对（对实现逐条比对）：F1 的"7 项检查"与 F2 的"8 项检查"——`contracts.py` 7 项基础检查 + 条件性 `evidence_card_coverage`，且 `DeepResearchDriver.evidence_card_coverage()` 返回 None（workflow.py:722-723）而 PlanExecuteReportDriver 可返回覆盖数据（:520-524）；预算兜底 `reserved_budget_fallback`（workflow.py:347）与紧凑报告 `_uses_compact_report`（:371）存在；worker 常量 `SHUTDOWN_GRACE_SECONDS=30`、消费退避 1→30s（worker.py:30/150/193）、租约 TTL 30s 与扫描 15s（settings.py:100/102）与页面描述一致。
-- 内容完整性：5 个流程 anchor、#run-flows 导航与 7 条源码路径引用均在 bundle 中命中。
-- review 记录（两轮）：首轮 FAIL 提 2 Major——① F4 把 coverage 说成"五集合精确相等"，实际 `EvidenceCardPipeline.coverage()` 的 cards 缺失集由卡片自身算出（恒空），verifier 仅替换 ledger_ids 不重算该集合；② F5 的 SIGTERM 描述承诺"自然完成"，实际 30s 仅为等待上限。次轮再提 1 Major（successExit 仍写"自然完成"）→ 三处措辞按实现改正后复审 PASS。修正要点：coverage 改为"账本 ID 与卡片/路由/正文/附录四集合比对"，SIGTERM 改为"最多等待 30s，超时不取消不写终态"。
+- 内容完整性：5 个流程 anchor、#run-flows 导航与 19 条源码路径均在 bundle 中命中且路径存在。
+- review 记录（两轮）：首轮 FAIL 提 2 Major——① F4 把 coverage 说成"五集合精确相等"，实际 `EvidenceCardPipeline.coverage()` 的 cards 缺失集由卡片自身算出（恒空），verifier 仅替换 ledger_ids 不重算该集合；② F5 的 SIGTERM 描述承诺"自然完成"，实际 30s 仅为等待上限。次轮再提 1 Major（successExit 仍写"自然完成"）→ 三处措辞按实现改正后复审 PASS。 最终内容审计又发现 F2 有一处相同的"五集合精确相等"残留，已改为精确描述：不可变账本 ID 对比 cards/routed/processed/annex 覆盖，card 构建完整性由 Report 阶段保证。修正要点：coverage 改为"账本 ID 与卡片/路由/正文/附录四集合比对"，SIGTERM 改为"最多等待 30s，超时不取消不写终态"。
 
 ## 当前阶段记录：T-010 可选 Kafka 传输层
 

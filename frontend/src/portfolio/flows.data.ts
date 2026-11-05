@@ -71,7 +71,7 @@ export const RUN_FLOWS: RunFlow[] = [
       { title: "并行执行 Execute", detail: "WorkerCoordinator 按依赖调度：每个任务在深拷贝状态上隔离执行，协调者按计划顺序合并；事件实时发布 task.started / tool.completed。" },
       { title: "反思 Reflect", detail: "Reflector 对目标任务做缺口分析与答案验证；needs_retry 时定向重试目标任务（受次数上限约束）。" },
       { title: "报告 Report", detail: "OutlineBuilder 生成章节大纲；每节 SectionWriter 基于路由到该章的 Evidence Cards 写作并加内联引用；组装后做一致性检查。" },
-      { title: "Completion Contract", detail: "8 项确定性检查，其中 evidence_card_coverage 要求账本↔卡片↔路由↔正文↔附录五个证据集合精确相等。" },
+      { title: "Completion Contract", detail: "8 项确定性检查，其中 evidence_card_coverage 使用不可变账本的真实 ID，对比卡片集合及其路由/正文/附录覆盖；注意：账本→卡片构建完整性由 Report 阶段保证，verifier 本身不重新核算 card 缺失集。" },
     ],
     branches: [
       { label: "Token 告急 → 预算兜底报告", detail: "剩余 Token 低于报告+验证预留时：零模型调用，用已路由卡片确定性生成证据报告（reserved_budget_fallback）。", tone: "warn" },
