@@ -94,9 +94,11 @@ jobs:
           KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
           KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
         ports: ["9092:9092"]
+        # 不依赖镜像内脚本路径：用 nc 探测端口（apache/kafka 镜像的
+        # kafka-broker-api-versions.sh 位置随版本变化，易失效）
         options: >-
-          --health-cmd "kafka-broker-api-versions.sh --bootstrap-server localhost:9092"
-          --health-interval 10s --health-timeout 10s --health-retries 24
+          --health-cmd "nc -z 127.0.0.1 9092 || exit 1"
+          --health-interval 10s --health-timeout 5s --health-retries 30
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-dummy' }}
       TEST_KAFKA_BOOTSTRAP: localhost:9092
@@ -107,6 +109,30 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements-ci.txt
+      - name: 等待 broker 就绪（客户端探针，非 healthcheck）
+        run: |
+          python - <<'PY'
+          import asyncio, time
+          from aiokafka import AIOKafkaProducer
+
+          async def main():
+              deadline = time.monotonic() + 180
+              last = None
+              while time.monotonic() < deadline:
+                  try:
+                      producer = AIOKafkaProducer(bootstrap_servers="localhost:9092")
+                      await producer.start()
+                      await producer.send_and_wait("dra-probe-topic", value=b"probe")
+                      await producer.stop()
+                      print("kafka ready")
+                      return
+                  except Exception as exc:
+                      last = exc
+                      await asyncio.sleep(3)
+              raise SystemExit(f"kafka 未在 180s 内就绪: {last}")
+
+          asyncio.run(main())
+          PY
       - name: Kafka 队列与事件流回归（真实 broker）
         run: |
           python -m pytest tests/harness/test_run_queue.py -q
