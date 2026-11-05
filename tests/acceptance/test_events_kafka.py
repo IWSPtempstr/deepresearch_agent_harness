@@ -25,7 +25,8 @@ from deepresearch_agent.observability import EVENT_FANOUT_FAILURES
 
 class FakeKafkaMessage:
     def __init__(self, value, key=None, topic=EVENTS_TOPIC_DEFAULT, partition=0, offset=0):
-        self.value = value
+        # 真实 aiokafka 的 value 是 bytes（消费侧必须解码）
+        self.value = value.encode("utf-8") if isinstance(value, str) else value
         self.key = key.encode() if isinstance(key, str) else key
         self.topic = topic
         self.partition = partition

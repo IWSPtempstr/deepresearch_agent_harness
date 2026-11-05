@@ -99,7 +99,8 @@ class KafkaEventFanout:
         async for message in self._consumer:
             if message.key and message.key.decode("utf-8", "replace") != run_id:
                 continue
-            yield json.loads(message.value)
+            raw = message.value
+            yield json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
 
     async def close(self) -> None:
         if not self._started:
@@ -149,7 +150,8 @@ class AuditEventConsumer:
     async def _run(self) -> None:
         await self._fanout._ensure_started()
         async for message in self._fanout._consumer:
-            event = json.loads(message.value)
+            raw = message.value
+            event = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
             if self._run_id is not None and message.key and message.key.decode("utf-8", "replace") != self._run_id:
                 continue
             if self._output_path:

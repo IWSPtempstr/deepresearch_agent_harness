@@ -261,7 +261,9 @@ class KafkaRunQueue:
             batch = await self._consumer.getmany(timeout_ms=500)
             for _tp, messages in batch.items():
                 for message in messages:
-                    run_id = message.value
+                    # value 是 bytes（aiokafka 要求），解码为 str
+                    raw = message.value
+                    run_id = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw
                     tp = self._tp_factory(message.topic, message.partition)
                     generation = self._assignment_generation
                     # 水位线基点 = 本会话（本次分配）首个交付 offset；

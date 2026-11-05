@@ -49,7 +49,8 @@ class RecordingQueue:
 
 class FakeKafkaMessage:
     def __init__(self, value: str, topic: str = "dra-runs-queue", partition: int = 0, offset: int = 0):
-        self.value = value
+        # 真实 aiokafka 的 value 是 bytes（消费侧必须解码）
+        self.value = value.encode("utf-8") if isinstance(value, str) else value
         self.topic = topic
         self.partition = partition
         self.offset = offset
