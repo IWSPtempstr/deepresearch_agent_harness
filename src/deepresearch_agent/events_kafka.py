@@ -62,7 +62,9 @@ class KafkaEventFanout:
         from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
         producer = AIOKafkaProducer(bootstrap_servers=bootstrap_servers, acks="all", enable_idempotence=True)
+        # 必须带 topic：consumer 需订阅才能收到消息
         consumer = AIOKafkaConsumer(
+            topic,
             bootstrap_servers=bootstrap_servers, group_id=group_id,
             client_id=f"{group_id}-{id(cls)}", enable_auto_commit=False,
         )

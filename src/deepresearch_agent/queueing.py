@@ -196,7 +196,9 @@ class KafkaRunQueue:
         producer = AIOKafkaProducer(
             bootstrap_servers=bootstrap_servers, acks="all", enable_idempotence=True,
         )
+        # 必须带 topic：aiokafka 的 getmany 只返回已订阅 topic 的消息
         consumer = AIOKafkaConsumer(
+            topic,
             bootstrap_servers=bootstrap_servers,
             group_id=group_id,
             client_id=client_id,

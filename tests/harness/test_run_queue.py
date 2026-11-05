@@ -297,3 +297,18 @@ async def test_kafka_queue_roundtrip():
     assert run_id == "run-kafka-real"
     await ack()
     await queue.close()
+
+
+def test_kafka_consumer_subscribes_topic():
+    """回归防线：aiokafka consumer 必须带 topic 订阅，否则 getmany 永远无数据
+    （真实 broker 才会暴露；stub 测试无法覆盖）。"""
+    import inspect
+
+    from deepresearch_agent import queueing as queueing_mod
+
+    source = inspect.getsource(queueing_mod.KafkaRunQueue.from_bootstrap)
+    assert "AIOKafkaConsumer(" in source
+    consumer_call = source[source.index("AIOKafkaConsumer("):]
+    # 第一个位置参数应为 topic（订阅），而非仅 keyword 参数
+    first_arg = consumer_call.split("(", 1)[1].split(",")[0].split(")")[0].strip()
+    assert first_arg == "topic", f"consumer 首个位置参数应为 topic（订阅），当前为 {first_arg!r}"
