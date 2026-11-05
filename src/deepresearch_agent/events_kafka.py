@@ -63,10 +63,12 @@ class KafkaEventFanout:
 
         producer = AIOKafkaProducer(bootstrap_servers=bootstrap_servers, acks="all", enable_idempotence=True)
         # 必须带 topic：consumer 需订阅才能收到消息
+        # auto_offset_reset=earliest：审计消费组从最早位点回溯（审计语义需要全量）
         consumer = AIOKafkaConsumer(
             topic,
             bootstrap_servers=bootstrap_servers, group_id=group_id,
             client_id=f"{group_id}-{id(cls)}", enable_auto_commit=False,
+            auto_offset_reset="earliest",
         )
         return cls(producer, consumer, topic=topic, group_id=group_id)
 

@@ -313,3 +313,7 @@ def test_kafka_consumer_subscribes_topic():
     # 第一个位置参数应为 topic（订阅），而非仅 keyword 参数
     first_arg = consumer_call.split("(", 1)[1].split(",")[0].split(")")[0].strip()
     assert first_arg == "topic", f"consumer 首个位置参数应为 topic（订阅），当前为 {first_arg!r}"
+    # aiokafka 默认 auto_offset_reset=latest：consumer 启动前的信号会被跳过，
+    # 与"至少一次 + 执行后提交 offset"语义冲突（真实 broker 才暴露）
+    assert "auto_offset_reset" in source and "earliest" in source, \
+        "consumer 必须显式 auto_offset_reset=earliest（否则丢入队前的信号）"

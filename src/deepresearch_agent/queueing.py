@@ -197,12 +197,16 @@ class KafkaRunQueue:
             bootstrap_servers=bootstrap_servers, acks="all", enable_idempotence=True,
         )
         # 必须带 topic：aiokafka 的 getmany 只返回已订阅 topic 的消息
+        # auto_offset_reset=earliest：与"执行后提交 offset"的至少一次语义一致——
+        # 新 group 或重启后从最早未提交位点继续，不丢唤醒信号
+        # （aiokafka 默认 latest 会跳过 consumer 启动前已入队的信号）
         consumer = AIOKafkaConsumer(
             topic,
             bootstrap_servers=bootstrap_servers,
             group_id=group_id,
             client_id=client_id,
             enable_auto_commit=False,
+            auto_offset_reset="earliest",
             max_poll_records=100,
         )
         return cls(producer, consumer, topic=topic)
