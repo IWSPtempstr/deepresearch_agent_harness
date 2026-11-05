@@ -1,18 +1,20 @@
 import { Fragment } from "react";
+import { RunFlows } from "./RunFlows";
 
 const REPO_BASE = "https://github.com/IWSPtempstr/deepresearch_agent_harness";
 
 const NAV_ITEMS: Array<{ href: string; label: string }> = [
   { href: "#architecture", label: "架构" },
+  { href: "#run-flows", label: "运行流程" },
   { href: "#reliability", label: "可靠性" },
   { href: "#evidence", label: "证据工程" },
   { href: "#engineering", label: "工程实践" },
 ];
 
 const METRICS: Array<{ value: string; label: string }> = [
+  { value: "5", label: "完整运行流程" },
   { value: "16", label: "Run 生命周期状态" },
   { value: "8", label: "Completion Contract 检查" },
-  { value: "2", label: "Harness 工作流" },
   { value: "1", label: "不可变 Evidence Ledger" },
 ];
 
@@ -213,6 +215,8 @@ export function PortfolioApp() {
             <span>验证后完成</span>
           </div>
         </section>
+
+        <RunFlows />
 
         <section className="pf-section pf-section-dark" id="reliability">
           <div className="pf-shell">

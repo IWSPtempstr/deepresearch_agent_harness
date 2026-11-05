@@ -133,6 +133,17 @@
 - Docker 门禁：本阶段本地未使用 Docker；真实 broker 验证经 CI services 容器完成。
 - 日期：2026-11-04
 
+### T-012 — GitHub Pages 多运行流程展示
+
+- 状态：`done`（两轮 review 后 PASS，随本阶段提交）
+- 目标：在静态作品集页新增 5 个彼此独立的完整运行流程章节（deep_research、plan_execute_report、平台消息生命周期、Evidence 到报告验收、worker 故障恢复与 drain），每个章节展示触发条件、逐步流程、关键持久化、成功出口、失败/恢复分支与代码入口链接。
+- 前置依赖：`T-002`
+- 实现方式：复用 React/Vite 静态入口（PortfolioApp/portfolio.css + 新增 flows.data.ts/RunFlows.tsx），纯静态数据描述组件；不新增依赖、不请求后端。
+- 验收：构建通过（含子路径 base）；5 个流程章节 anchor/代码链接完整；bundle 无 API client/fetch/credential storage；独立 review 通过后单独提交。
+- review 记录：首轮 FAIL 提 2 Major（F4 夸大 coverage 为"五集合精确相等"——实际 coverage 的 cards 缺失集恒空、verifier 只替换 ledger_ids 不重算；F5 "自然完成"承诺——实际 30s 只是等待上限）；次轮再提 1 Major（successExit 仍写"自然完成"）→ 三处措辞均按实现改正后 PASS。
+- Docker 门禁：本阶段不需要 Docker。
+- 日期：2026-11-05
+
 ### T-011 — Kafka 事件流分发
 
 - 状态：`done`（随本阶段提交）
@@ -144,9 +155,9 @@
 
 ## 进度摘要
 
-- 已完成：10
+- 已完成：11
 - 进行中：0
 - 阻塞：0
-- 待执行：0（T-002/003/004/005/006/007/008/009/010/011 全部完成；T-001 为决策基线）
+- 待执行：0
 - 下一步：全部任务完成；后续可选 = 用户同意 Docker 后的本机真实容器演练
 - 最后更新：2026-11-04
