@@ -64,6 +64,11 @@ class FakeKafkaProducer:
         self.started = True
 
     async def send_and_wait(self, topic, value=None, key=None):
+        # aiokafka 要求 value/key 为 bytes；str 会让真实 partitioner 崩溃
+        if key is not None and not isinstance(key, (bytes, bytearray)):
+            raise TypeError(f"key 必须是 bytes，收到 {type(key).__name__}")
+        if value is not None and not isinstance(value, (bytes, bytearray)):
+            raise TypeError(f"value 必须是 bytes，收到 {type(value).__name__}")
         self.sent.append((topic, value, key))
 
     async def stop(self):
@@ -184,7 +189,7 @@ async def test_kafka_enqueue_keys_by_run_id_and_starts_lazily():
     assert not producer.started  # 懒启动：构造不触达 broker
     await queue.enqueue("run-k-1")
     assert producer.started
-    assert producer.sent == [("dra-runs-queue", "run-k-1", "run-k-1")]
+    assert producer.sent == [("dra-runs-queue", b"run-k-1", b"run-k-1")]
 
 
 async def test_kafka_consume_with_ack_commits_only_after_ack():

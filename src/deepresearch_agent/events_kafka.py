@@ -84,7 +84,10 @@ class KafkaEventFanout:
     async def publish(self, run_id: str, event: dict[str, Any]) -> None:
         await self._ensure_started()
         payload = json.dumps(event, ensure_ascii=False)
-        await self._producer.send_and_wait(self.topic, value=payload, key=run_id)
+        # aiokafka 的 key 必须是 bytes（partitioner 按 key 计算分区）
+        await self._producer.send_and_wait(
+            self.topic, value=payload.encode("utf-8"), key=run_id.encode("utf-8"),
+        )
 
     async def subscribe(self, run_id: str) -> AsyncIterator[dict[str, Any]]:
         """per-Run 订阅在 Kafka 语义下退化为「从当前位点跟随整个 topic，

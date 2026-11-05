@@ -229,8 +229,11 @@ class KafkaRunQueue:
         # start 纳入重试：broker 不可用时的首连失败与后续 send 同等对待（T-003）
         await _enqueue_with_retry(self._ensure_started)
         # key=run_id：同 Run 信号保序；str 由 aiokafka 按 utf-8 编码
+        # aiokafka 的 key 必须是 bytes（partitioner 内部按 key 计算分区）
         await _enqueue_with_retry(
-            lambda: self._producer.send_and_wait(self.topic, value=run_id, key=run_id),
+            lambda: self._producer.send_and_wait(
+                self.topic, value=run_id.encode("utf-8"), key=run_id.encode("utf-8"),
+            ),
         )
 
     def consume(self) -> AsyncIterator[str]:

@@ -41,6 +41,11 @@ class FakeKafkaProducer:
         self.started = True
 
     async def send_and_wait(self, topic, value=None, key=None):
+        # aiokafka 要求 value/key 为 bytes
+        if key is not None and not isinstance(key, (bytes, bytearray)):
+            raise TypeError(f"key 必须是 bytes，收到 {type(key).__name__}")
+        if value is not None and not isinstance(value, (bytes, bytearray)):
+            raise TypeError(f"value 必须是 bytes，收到 {type(value).__name__}")
         self.sent.append((topic, value, key))
 
     async def stop(self):
@@ -86,8 +91,8 @@ async def test_publish_sends_keyed_json():
     await fanout.publish("run-1", {"event_type": "run.started", "stage": "context_building"})
     assert producer.started  # 懒启动
     topic, value, key = producer.sent[0]
-    assert topic == EVENTS_TOPIC_DEFAULT and key == "run-1"
-    assert json.loads(value)["event_type"] == "run.started"
+    assert topic == EVENTS_TOPIC_DEFAULT and key == b"run-1"
+    assert json.loads(value.decode("utf-8"))["event_type"] == "run.started"
 
 
 async def test_subscribe_filters_by_run_id():
