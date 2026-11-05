@@ -40,3 +40,4 @@ evals/**/results.md
 .zcode/
 scripts/typesafe_smoke.py
 .zcode-site/
+.zcode-site.json

@@ -1,11 +1,54 @@
-import faiss
 import pickle
 import os
 import threading
 from typing import List, Tuple, Dict, Any
+
+import numpy as np
+
 from .embeddings import EmbeddingProvider, get_cache_embedding_provider
 
 from deepresearch_agent.config.settings import similarity_threshold as st
+
+try:
+    import faiss
+except ImportError:
+    # 云端等无 faiss 环境：IndexFlatIP 本就是暴力精确内积，numpy 等价实现
+    faiss = None
+
+
+class _NumpyFlatIndex:
+    """faiss.IndexFlatIP 的纯 numpy 等价（内积精确检索，接口对齐 faiss）。"""
+
+    def __init__(self, dimension: int):
+        self.dimension = dimension
+        self._vectors = np.zeros((0, dimension), dtype="float32")
+
+    @property
+    def ntotal(self) -> int:
+        return int(self._vectors.shape[0])
+
+    def add(self, x) -> None:
+        self._vectors = np.vstack([self._vectors, np.asarray(x, dtype="float32")])
+
+    def reset(self) -> None:
+        self._vectors = np.zeros((0, self.dimension), dtype="float32")
+
+    def search(self, q, k):
+        if self.ntotal == 0:
+            empty_f = np.zeros((1, 0), dtype="float32")
+            empty_i = np.zeros((1, 0), dtype="int64")
+            return empty_f, empty_i
+        scores = self._vectors @ np.asarray(q, dtype="float32")[0]
+        order = np.argsort(-scores)[:k]
+        pad = k - len(order)
+        out_scores = np.concatenate([scores[order], np.full(pad, -np.inf, dtype="float32")])[:k]
+        out_idx = np.concatenate([order, np.full(pad, -1, dtype="int64")])[:k]
+        return out_scores.reshape(1, -1), out_idx.reshape(1, -1)
+
+
+def _new_flat_index(dimension: int):
+    """优先 faiss；不可用时 numpy 降级（行为等价）。"""
+    return faiss.IndexFlatIP(dimension) if faiss is not None else _NumpyFlatIndex(dimension)
 
 
 class VectorSimilarityMatcher:
@@ -32,7 +75,7 @@ class VectorSimilarityMatcher:
         
         # 初始化FAISS索引
         self.dimension = self.embedding_provider.get_dimension()
-        self.index = faiss.IndexFlatIP(self.dimension)
+        self.index = _new_flat_index(self.dimension)
         
         # 存储键到向量的映射
         self.key_to_index = {}
@@ -170,9 +213,11 @@ class VectorSimilarityMatcher:
                     'next_index': self._next_index
                 }
                 
-                # 保存FAISS索引
-                if self.index.ntotal > 0:
+                # 保存FAISS索引（numpy 降级模式：向量随 pkl 保存）
+                if faiss is not None and self.index.ntotal > 0:
                     faiss.write_index(self.index, f"{file_path}.faiss")
+                elif faiss is None and self.index.ntotal > 0:
+                    data["_numpy_vectors"] = self.index._vectors
                 
                 # 保存映射关系
                 with open(f"{file_path}.pkl", 'wb') as f:
@@ -193,8 +238,13 @@ class VectorSimilarityMatcher:
                 self._next_index = data.get('next_index', 0)
             
             # 加载FAISS索引
+            if faiss is None and "_numpy_vectors" in data:
+                index = _new_flat_index(self.dimension)
+                index._vectors = np.asarray(data["_numpy_vectors"], dtype="float32")
+                self.index = index
+                return
             faiss_file = f"{self.index_file}.faiss"
-            if os.path.exists(faiss_file):
+            if faiss is not None and os.path.exists(faiss_file):
                 self.index = faiss.read_index(faiss_file)
             else:
                 # 如果FAISS文件不存在，重建索引
@@ -202,7 +252,7 @@ class VectorSimilarityMatcher:
                 
         except Exception as e:
             print(f"加载向量索引失败: {e}")
-            self.index = faiss.IndexFlatIP(self.dimension)
+            self.index = _new_flat_index(self.dimension)
             self.key_to_index.clear()
             self.index_to_key.clear()
             self.key_to_context.clear()
@@ -215,7 +265,7 @@ class VectorSimilarityMatcher:
             return
         
         # 重新创建索引
-        self.index = faiss.IndexFlatIP(self.dimension)
+        self.index = _new_flat_index(self.dimension)
         
         # 重新添加所有向量
         for cache_key, query in self.key_to_query.items():
