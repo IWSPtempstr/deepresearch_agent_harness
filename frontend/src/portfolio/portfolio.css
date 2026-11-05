@@ -728,6 +728,212 @@ html:has(.pf-root) {
   color: #f0f6ff;
 }
 
+/* ---------- Run flows ---------- */
+
+.pf-flow-index {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.pf-flow-index-link {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  background: var(--pf-surface);
+  border: 1px solid var(--pf-line);
+  border-radius: 12px;
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+
+.pf-flow-index-link:hover {
+  border-color: var(--pf-accent);
+  transform: translateY(-2px);
+}
+
+.pf-flow-index-link span {
+  font: 10px var(--pf-font-mono);
+  color: var(--pf-accent-ink);
+}
+
+.pf-flow-index-link b {
+  font-size: 13px;
+}
+
+.pf-flow-index-link small {
+  font-size: 10.5px;
+  color: var(--pf-text-soft);
+  line-height: 1.5;
+}
+
+.pf-flow-section {
+  border-top: 1px solid var(--pf-line);
+  background: var(--pf-surface-sunken);
+}
+
+.pf-flow-head h2 {
+  font-size: clamp(28px, 3.6vw, 42px);
+  margin-bottom: 8px;
+}
+
+.pf-flow-tagline {
+  color: var(--pf-text-soft);
+  margin: 0 0 22px;
+  font-size: 14px;
+}
+
+.pf-flow-meta {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 26px;
+}
+
+.pf-meta-item {
+  background: var(--pf-surface);
+  border: 1px solid var(--pf-line);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.pf-meta-label {
+  display: block;
+  font: 9px var(--pf-font-mono);
+  letter-spacing: 0.12em;
+  color: var(--pf-accent-ink);
+  margin-bottom: 8px;
+}
+
+.pf-meta-item p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--pf-text-soft);
+}
+
+.pf-track {
+  list-style: none;
+  margin: 0 0 26px;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.pf-track-step {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 16px;
+  background: var(--pf-surface);
+  border: 1px solid var(--pf-line);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+
+.pf-track-index {
+  font: 700 13px var(--pf-font-mono);
+  color: var(--pf-accent-ink);
+  border: 1px solid var(--pf-accent-soft);
+  background: var(--pf-accent-soft);
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  height: 40px;
+}
+
+.pf-track-body b {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.pf-track-body p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--pf-text-soft);
+}
+
+.pf-track-note {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--pf-accent-ink);
+}
+
+.pf-branches {
+  margin-bottom: 22px;
+}
+
+.pf-branches-label {
+  display: block;
+  font: 9px var(--pf-font-mono);
+  letter-spacing: 0.12em;
+  color: var(--pf-text-faint);
+  margin-bottom: 10px;
+}
+
+.pf-branches ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.pf-branch {
+  border-left: 3px solid var(--pf-line-strong);
+  background: var(--pf-surface);
+  border-radius: 0 12px 12px 0;
+  padding: 12px 16px;
+}
+
+.pf-branch b {
+  display: block;
+  font-size: 12.5px;
+  margin-bottom: 4px;
+}
+
+.pf-branch p {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--pf-text-soft);
+}
+
+.pf-branch-success {
+  border-left-color: var(--pf-success);
+}
+
+.pf-branch-warn {
+  border-left-color: #b45309;
+}
+
+.pf-branch-danger {
+  border-left-color: #b42318;
+}
+
+.pf-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pf-chip {
+  font: 11px var(--pf-font-mono);
+  color: var(--pf-accent-ink);
+  background: var(--pf-accent-soft);
+  border: 1px solid var(--pf-accent-soft);
+  padding: 7px 12px;
+  border-radius: 999px;
+}
+
+.pf-chip:hover {
+  border-color: var(--pf-accent);
+}
+
 /* ---------- Explore / repo links ---------- */
 
 .pf-explore {
@@ -806,6 +1012,14 @@ html:has(.pf-root) {
 @media (max-width: 900px) {
   .pf-topbar nav {
     gap: 14px;
+  }
+
+  .pf-flow-index {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .pf-flow-meta {
+    grid-template-columns: 1fr;
   }
 
   .pf-hero {
@@ -980,6 +1194,20 @@ html:has(.pf-root) {
 
   .pf-stack-list small {
     font-size: 9px;
+  }
+
+  .pf-flow-index {
+    grid-template-columns: 1fr;
+  }
+
+  .pf-track-step {
+    grid-template-columns: 36px 1fr;
+    gap: 12px;
+    padding: 13px 14px;
+  }
+
+  .pf-track-index {
+    height: 32px;
   }
 
   .pf-footer .pf-shell {
