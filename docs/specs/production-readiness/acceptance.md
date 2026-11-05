@@ -115,6 +115,20 @@
 - 测试隔离（记录给后续维护者）：worker `_consume` 用 settings 默认 DB 与自建 RunService——测试 monkeypatch 注入 fake queue（create_run_queue）、测试 RunService、REDIS_URL 占位符、**APP_DATABASE_URL→tmp sqlite**、RECOVERY_SCAN_SECONDS=1s。
 - 全量回归：`python -m pytest tests/ -q` → **227 passed, 4 skipped, 2 failed**（2 个失败为预存在 `docs/acceptance/` 交付文档缺失，与本阶段无关）。
 
+## 当前阶段记录：T-013 部署真实网站
+
+- 分支：`feat/replace-static-pages`
+- 状态：`done`（随本阶段提交）
+- 交付：SERVE_FRONTEND 单进程模式；ZCode Sites 云端部署（https://deepresearch-harness-qwzy.zai.site）；GitHub Pages 静态作品集下线，流程文档保留为 docs/RUN-FLOWS.md。
+
+### T-013 证据（本地+云端，2026-11-05）
+
+- 线上验证：GET / 200（交互式前端）；/api/v1/ready 200 ready:true；/api/v1/health 200（api/sqlite healthy，llm/neo4j 未配置如实标注）；SPA /memories 200；/api/v1/sessions 200 空列表。
+- 构建隔离：SPA fallback 经 TestClient 验证（/ 200、/api/v1/ready 200、/memories 200 含 root div）。
+- 依赖降级验证：sys.modules 屏蔽 faiss 后 matcher 全流程（add/find/remove/clear）正常；本地全量测试 98+ 项相关套件通过。
+- 诚实边界：公开实例无密钥——研究任务诚实失败；$DATA_DIR 临时；graphrag/web 源不可用（capabilities 如实返回）。
+- Cloud 数据：包 109,769,284 bytes / 8,417 files / 338,341,622 bytes unpacked（限制内）；warmup 通过（首次失败为 zstandard 误删，已修复）。
+
 ## 当前阶段记录：T-012 GitHub Pages 多运行流程展示
 
 - 分支：`feat/pages-run-flows`
@@ -188,6 +202,7 @@
 - [x] T-010 可选 Kafka 传输层（两轮 review 通过，证据见上方；本地提交于 `feat/github-static-portfolio`，未推送）
 - [x] T-012 GitHub Pages 多运行流程展示（5 章节；两轮 review 后 PASS；证据见上方）
 - [x] T-011 Kafka 事件流分发（FanoutChain+审计消费组；证据见上方）
+- [x] T-013 部署真实网站替代 GitHub 静态页（线上 https://deepresearch-harness-qwzy.zai.site）
 
 ## 证据记录格式
 
