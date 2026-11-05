@@ -106,7 +106,11 @@ def run_postgres_drill(project_root: Path, backup_dir: Path, dsn: str, restore_d
 
     backup(project_root, archive, app_database_url=dsn)
     restore_started = time.monotonic()
+    # 先解包落地（restore 校验哈希并把 dump 写回 data/），再做 pg_restore
+    restore(project_root, archive, confirm=True)
     dump_path = project_root / "data" / "postgres.dump"
+    if not dump_path.exists():
+        raise FileNotFoundError(f"备份解包后缺少 dump: {dump_path}")
     target_dsn = restore_dsn or _derive_restore_dsn(dsn)
     _ensure_postgres_db(target_dsn, dsn)
     restore_postgres(target_dsn, dump_path)

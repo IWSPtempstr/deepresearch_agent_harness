@@ -37,30 +37,38 @@ def test_ready_ok_single_machine(app_client):
     assert body["components"]["queue_redis"]["required"] is False
 
 
-def test_ready_503_when_db_unreachable(tmp_path, monkeypatch):
-    db_url = f"sqlite+aiosqlite:///{(tmp_path / 'gone.db').as_posix()}"
-    app = create_app(database_url=db_url)
-    # 模拟 DB 掉线：让 SELECT 1 抛 OperationalError
-    import backend.app.api.v1.health as health_mod
+async def test_ready_503_when_db_unreachable(tmp_path, monkeypatch):
+    """DB 不可达 → readiness 503。
 
-    class BrokenEngineHolder:
-        pass
-
+    不走 TestClient：lifespan 内抛异常会污染 portal 事件循环（后续测试报
+    "Event loop is closed"）；直接调用路由协程并检查返回。
+    """
     from unittest.mock import AsyncMock
 
+    db_url = f"sqlite+aiosqlite:///{(tmp_path / 'gone.db').as_posix()}"
+    app = create_app(database_url=db_url)
+    database = app.state.database
     broken_connect = AsyncMock(side_effect=OperationalError("stmt", {}, ConnectionError("db down")))
+    stub_engine = type(
+        "E", (),
+        {"connect": broken_connect, "dispose": AsyncMock(return_value=None)},
+    )()
+    monkeypatch.setattr(database, "engine", stub_engine)
 
-    with TestClient(app, raise_server_exceptions=False) as client:
-        database = client.app.state.database
-        stub_engine = type(
-            "E", (),
-            {"connect": broken_connect, "dispose": AsyncMock(return_value=None)},
-        )()
-        monkeypatch.setattr(database, "engine", stub_engine)
-        response = client.get("/api/v1/ready")
-        assert response.status_code == 503
-        assert response.json()["ready"] is False
-        assert response.json()["components"]["database"]["status"] == "unavailable"
+    from backend.app.api.v1.health import readiness
+
+    class FakeRequest:
+        pass
+
+    request = FakeRequest()
+    request.app = app
+    response = await readiness(request)
+    assert response.status_code == 503
+    import json as _json
+
+    body = _json.loads(response.body)
+    assert body["ready"] is False
+    assert body["components"]["database"]["status"] == "unavailable"
 
 
 def test_ready_503_on_daily_token_ceiling(tmp_path, monkeypatch):

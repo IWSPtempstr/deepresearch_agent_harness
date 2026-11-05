@@ -39,15 +39,20 @@ def _table_exists(db_path: Path, table: str) -> bool:
         connection.close()
 
 
-def test_lifespan_bootstrap_false_skips_ddl(tmp_db, tmp_path, monkeypatch):
+async def test_lifespan_bootstrap_false_skips_ddl(tmp_db, tmp_path, monkeypatch):
     """生产语义：开关关闭时 lifespan 不执行 DDL（表不被创建）；跳过迁移就启动
-    会在 startup_recovery 处 fail-fast（诚实失败，不静默带病运行）。"""
+    会在 startup_recovery 处 fail-fast（诚实失败，不静默带病运行）。
+
+    注意：不走 TestClient portal——lifespan 抛异常会污染其内部事件循环，
+    导致后续测试 "Event loop is closed"；这里直接在测试自身事件循环里驱动
+    lifespan 上下文。
+    """
     from sqlalchemy.exc import OperationalError
 
     app = _build_app(tmp_db, bootstrap=False, monkeypatch=monkeypatch)
     db_path = Path(tmp_db.removeprefix("sqlite+aiosqlite:///"))
     with pytest.raises(OperationalError):
-        with TestClient(app):
+        async with app.router.lifespan_context(app):
             pass
     assert not _table_exists(db_path, "sessions"), \
         "SCHEMA_BOOTSTRAP_ON_STARTUP=false 时启动不得建表"
