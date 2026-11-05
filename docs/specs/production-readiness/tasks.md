@@ -144,6 +144,19 @@
 - Docker 门禁：本阶段不需要 Docker。
 - 日期：2026-11-05
 
+### T-013 — 部署真实网站替代 GitHub 静态页
+
+- 状态：`done`（随本阶段提交）
+- 目标：把项目本身部署为可运行网站，替代 GitHub Pages 静态介绍页。
+- 前置依赖：`T-002`、`T-005`
+- 实现方式：
+  1. `SERVE_FRONTEND=1` 单进程模式：FastAPI 同端口服务 API 与构建后的前端（assets 挂载 + SPA 回退），默认关闭不影响 compose/本地
+  2. ZCode Sites 云端部署：单机模式（SQLite 落 $DATA_DIR、进程内 worker、无 Redis/Neo4j）；依赖裁剪至 396M/10.7k files 过包检查
+  3. 依赖降级：faiss 缺失时 VectorSimilarityMatcher 用 numpy 等价实现（IndexFlatIP 本为暴力内积）；jieba lac 模型与 zstandard CFFI 后备裁剪（运行时不需要）
+  4. 移除 GitHub Pages 静态作品集（pages.yml + portfolio 入口），五条流程文档保留为 `docs/RUN-FLOWS.md`；README 指向在线站点
+- 验收：线上 https://deepresearch-harness-qwzy.zai.site —— GET / 200（交互式前端）、/ready 200、SPA 回退 200、/api/v1/capabilities 正常；诚实边界：公开实例无密钥，研究任务诚实失败；$DATA_DIR 临时。
+- 日期：2026-11-05
+
 ### T-011 — Kafka 事件流分发
 
 - 状态：`done`（随本阶段提交）
@@ -155,9 +168,9 @@
 
 ## 进度摘要
 
-- 已完成：11
+- 已完成：12
 - 进行中：0
 - 阻塞：0
 - 待执行：0
-- 下一步：全部任务完成；后续可选 = 用户同意 Docker 后的本机真实容器演练
+- 下一步：全部任务完成（T-013 为部署替代）；后续可选 = 用户同意 Docker 后的本机真实容器演练
 - 最后更新：2026-11-04

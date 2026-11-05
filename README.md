@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="frontend/portfolio.html">项目静态介绍</a> ·
+  <a href="https://deepresearch-harness-qwzy.zai.site">在线演示</a> ·
   <a href="#核心亮点">核心亮点</a> ·
   <a href="#系统架构">系统架构</a> ·
   <a href="#快速启动">快速启动</a> ·
@@ -22,7 +22,7 @@
   <a href="#常用-api">API</a>
 </p>
 
-> **GitHub 静态作品集**：公开展示页只呈现架构、设计和项目材料，不提供在线研究 API。需要体验完整系统，请按下方说明在本地配置运行；真实模型调用需要自行配置 provider 和密钥。
+> **在线站点**：项目已部署为可运行网站（[deepresearch-harness-qwzy.zai.site](https://deepresearch-harness-qwzy.zai.site)）——单机模式运行真实前后端。公开实例未配置模型/检索密钥：界面与会话管理可用，发起研究任务会诚实失败；完整能力请按下方说明在本地部署并配置密钥。
 
 > 以可恢复的 **Agent Harness** 为运行底座，驱动 **Context → Plan → Execute → Report → Verify → Replan** 闭环，统一接入私域 GraphRAG 与 Web 搜索，并提供全量证据上下文压缩、持久化执行、实时可观测、受控自进化和系统化 Agent 评测能力。
 
@@ -313,13 +313,14 @@ Harness 实际支持两种工作流（`WorkflowMode` 成员，见 `src/deepresea
 
 ---
 
-## GitHub 静态项目介绍
+## 在线站点
 
-仓库包含一个基于 React/Vite 的静态作品集页面：[frontend/portfolio.html](frontend/portfolio.html)（源码在 `frontend/src/portfolio/`）。它展示架构、可靠性设计和证据工程，不连接后端、不提供在线研究 API，也不会在浏览器中调用模型。
+项目已部署为可运行网站：**https://deepresearch-harness-qwzy.zai.site**
 
-本地预览：在 `frontend/` 目录运行 `npm run build:portfolio`，产物输出到 `frontend/portfolio-dist/`（本地构建默认使用根 base，可用 `PORTFOLIO_BASE` 覆盖）。
-
-启用 GitHub Pages：在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。之后更新 `main` 分支上的作品集源码，`.github/workflows/pages.yml` 会以 `/<repo>/` 为 base 构建作品集入口并发布静态文件（构建产物同时提供 `index.html` 与 `portfolio.html`，站点根路径可直接访问）。发布地址由 GitHub Pages 设置页提供。静态页面只链接公开仓库内容，不包含 API key 或真实运行数据。
+- 单机模式运行真实前后端：React 研究画布 + FastAPI API + 进程内 worker + SQLite
+- 公开实例未配置模型/检索密钥——界面、会话与白板可用，发起研究任务会诚实失败；完整能力请本地部署并配置密钥
+- 云端存储为临时存储（实例重建即清空）；`/api/v1/ready` 暴露 readiness，`/api/v1/health` 暴露组件状态
+- 五条完整运行流程的文字版见 [docs/RUN-FLOWS.md](docs/RUN-FLOWS.md)
 
 运维 runbook 索引见 [docs/runbooks/README.md](docs/runbooks/README.md)(备份恢复/迁移发布/告警响应/成本天花板)。
 
