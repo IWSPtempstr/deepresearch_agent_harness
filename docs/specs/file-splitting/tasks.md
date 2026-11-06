@@ -48,9 +48,9 @@
 ## T-106 · base_reporter.py 拆分（1163 行）
 
 - **前置**: T-105
-- **涉及**: `agents/multi_agent/reporter/base_reporter.py` + 新增 `reporter/{report_pipeline,card_sections,mapreduce_sections,report_formatting}.py`
-- **约束**: pydantic schema（ReporterConfig/SectionContent/ReportResult）留在原文件。
-- **状态**: pending
+- **涉及**: `agents/multi_agent/reporter/base_reporter.py`（115 行骨架）+ 新增 `report_schemas.py`（schema 迁出+re-export）与 5 个 Mixin（report_pipeline/card_sections/mapreduce_sections/report_formatting/report_cache）
+- **验收**: pytest 全绿；ruff clean；36 块 verbatim；独立评审 PASS（含死代码副本修复复核）。
+- **状态**: done
 
 ## T-107 · incremental_graph_builder.py 拆分（964 行）
 

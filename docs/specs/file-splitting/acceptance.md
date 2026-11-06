@@ -58,3 +58,11 @@
 - 独立评审：**verdict PASS**；execute_task 内 7 处跨 Mixin self.* 调用逐一 MRO 解析通过；四组"only-in-orig 语句"均为空（无丢失）。
 - 评审修订（已同步 design.md）：execute_task 拆入 reflector_execute.py（留骨架将超 200 预算）；骨架保留原模块 docstring。
 - **评审发现的仓库既有问题（非本次引入，待用户决定）**：`reporter/evidence_cards.py:380` 存在遗留 F821（`json` 未导入，commit 5b84f30 引入），运行到该分支会 NameError——属潜在线上 bug，建议 T-014 完成后单独小提交修复。
+
+## T-106 · base_reporter.py 拆分（2026-11-07）
+
+- 改动：`base_reporter.py` 1163 → 115 行骨架（仅 __init__ 留守）；新增 `report_schemas.py`（74，三个 pydantic 类整体迁出 + 骨架 re-export 保旧路径）与 5 个 Mixin（report_pipeline 273 / card_sections 230 / mapreduce_sections 215 / report_formatting 177 / report_cache 200）。
+- 结构特例（均已验证）：模块级 schema 抽到叶子模块避免 Mixin↔骨架循环 import；模块级函数 `_extract_tracker_from_state` 随唯一调用方迁入 card_sections.py。
+- **过程发现并修复（第四条拆分库规则）**：`parse_methods` 对类最后一个方法默认取到 EOF，把文件尾部的模块级函数吞进方法块、随 report_cache 重复携带 → 类体止于首个非缩进行（评审代理的全文件行归属核算抓到，T-101~T-105 的原文尾部均为类方法、不受影响）。
+- 门禁：pytest **262 passed, 4 skipped（56s）**；ruff F821,F811 clean；36 个块 verbatim；MRO 实测 5 Mixin 归属正确；4 处外部 import 站点（workflow/orchestrator/factory/reporter__init__）零改动可用。
+- 独立评审：**verdict PASS**（死代码副本问题在提交前修复并复核）。

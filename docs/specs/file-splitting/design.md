@@ -107,12 +107,12 @@ class DeepThinkingMixin:
   - `coordinator_modes.py` — `CoordinatorModesMixin`：`_resolve_execution_mode`(123)、`_execute_sequential`(147)、`_execute_parallel`(185–320)。
   - `coordinator_tasks.py` — `CoordinatorTasksMixin`：`_execute_isolated_task`(320)、`_merge_isolated_state`(341)、`_execute_single_task`(398)、`_create_failure_record`(492)、`_check_dependencies`(540)、`_handle_reflection_retry`(607)。
 
-### T-106 `reporter/base_reporter.py`（1163 → 骨架 ~160）
-- `reporter/report_pipeline.py` — `ReportPipelineMixin`：`generate_report`(171–336)、`recheck_consistency`(336)、`_generate_sections_traditional`(535–597)、`_assemble_report`(792–807)。
-- `reporter/card_sections.py` — `CardSectionsMixin`：`_collect_evidence`(345)、`_build_plan_summary`(374)、`_build_evidence_summary`(386)、`_build_card_outline_summary`(411)、`_load/_save_evidence_card_cache`(420–447)、`_generate_sections_from_cards`(447–524)、`_collect_section_evidence`(688–702)。
-- `reporter/mapreduce_sections.py` — `MapReduceSectionsMixin`：`_should_use_mapreduce`(524)、`_generate_sections_mapreduce`(597–688)、`_map_evidence_batches`(702–757)、`_assemble_report_mapreduce`(757–780)、`_ensure_mapreduce_components`(780–792)。
-- `reporter/report_formatting.py` — `ReportFormattingMixin`：`_format_evidence_for_check`(807)、`_append_evidence_annex`(824–889)、`_normalize_heading_text`(889)、`_sanitize_section_text`(893)、`_normalize_section_references`(909)、`_format_references`(933)、`_resolve_report_id`(952)、`_build_evidence_fingerprint`(956)。
-- 原文件保留 pydantic schema（`ReporterConfig`/`SectionContent`/`ReportResult`，68–116）+ `BaseReporter(ReportPipelineMixin, CardSectionsMixin, MapReduceSectionsMixin, ReportFormattingMixin)` + `__init__`(121–171)。
+### T-106 `reporter/base_reporter.py`（1163 → 骨架 115）— 评审修订（2026-11-07）
+实现与原设计有两处偏差（原因见 acceptance）：
+- **schema 迁出**：`ReporterConfig`/`SectionContent`/`ReportResult` 抽到叶子模块 `report_schemas.py`（74 行），骨架 re-export 保旧路径（Mixin 引用 schema 若从骨架导入会成环）；`workflow.py`/`orchestrator.py`/`multi_agent_factory.py`/`reporter/__init__.py` 的旧导入零改动。
+- **补第 5 模块**：`report_cache.py`（200 行）承接原 design 漏列的 9 个缓存/检查点方法（`_load_cached_payload` 等），否则骨架超 200 预算。
+- 模块级函数 `_extract_tracker_from_state`（原文件末尾）随唯一调用方迁入 `card_sections.py`。
+- 最终 Mixin：`BaseReporter(ReportPipelineMixin, CardSectionsMixin, MapReduceSectionsMixin, ReportFormattingMixin, ReportCacheMixin)`，骨架仅留 `__init__`。
 
 ### T-107 `integrations/build/incremental_graph_builder.py`（964 → 骨架 ~90）
 - `incremental_file_changes.py` — `GraphFileChangesMixin`：`detect_changes`(91)、`process_new_files`(100–315)、`process_deleted_files`(572–677)。
