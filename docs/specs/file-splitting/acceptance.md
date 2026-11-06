@@ -66,3 +66,10 @@
 - **过程发现并修复（第四条拆分库规则）**：`parse_methods` 对类最后一个方法默认取到 EOF，把文件尾部的模块级函数吞进方法块、随 report_cache 重复携带 → 类体止于首个非缩进行（评审代理的全文件行归属核算抓到，T-101~T-105 的原文尾部均为类方法、不受影响）。
 - 门禁：pytest **262 passed, 4 skipped（56s）**；ruff F821,F811 clean；36 个块 verbatim；MRO 实测 5 Mixin 归属正确；4 处外部 import 站点（workflow/orchestrator/factory/reporter__init__）零改动可用。
 - 独立评审：**verdict PASS**（死代码副本问题在提交前修复并复核）。
+
+## T-107 · incremental_graph_builder.py 拆分（2026-11-07）
+
+- 改动：`incremental_graph_builder.py` 964 → 89 行骨架（仅 __init__）；新增同包 4 个 Mixin（incremental_file_changes 339 / incremental_merge 218 / incremental_io 181 / incremental_stats 171）。
+- 门禁：pytest **262 passed, 4 skipped（55s）**；ruff F821,F811 clean；13 方法 verbatim（AST 复核）；4 Mixin 均为普通类，单向依赖无环。
+- 独立评审：**verdict PASS**；全仓唯一 importer `incremental_update.py:10`（隐式相对导入，原有行为）路径未变；原文末行为 except 内 raise、无尾部模块代码（T-106 库 bug 在此无影响）。
+- 拆分库修正：骨架 MRO 样板注释仅在有 ABC 基类时输出。
