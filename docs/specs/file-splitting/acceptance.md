@@ -82,3 +82,25 @@
 - 门禁：pytest **262 passed, 4 skipped（56s）**；ruff F821,F811 clean；py_compile OK。
 - 独立评审：**verdict PASS**；评审后补回 4 个新文件的 `from __future__ import annotations`（与原文件保真）。
 - 决策记录：`_evidence_only_report` 全仓无外部引用 → 不加 workflow 兼容 re-export（design 已同步）。
+
+## 收尾汇总（2026-11-07）
+
+**目标达成核对（proposal §3）**
+- ✅ src/ 无 ≥600 行文件：现存最大 561（incremental_update.py，500–599 backlog 段，经确认不纳入本期）；14 个原长文件 → 27–177 行骨架。
+- ✅ 长方法拆解：T-101 两个 800+ 行 God 方法在原步骤接缝处阶段分解（阶段体逐行一致）；其余按方法组迁 Mixin。
+- ✅ import 兼容：全部既有 importer（tool_registry、run_service、bootstrap、30+ 处、全部测试）零改动；4 处 re-export 点（workflow 两 driver、report_schemas 三 schema）。
+- ✅ 行为不变：P0 基线 262 passed/4 skipped → 8 个阶段每阶段后均 262 passed/4 skipped；ruff F821/F811 每阶段 clean。
+
+**总量**：14 个文件 13,568 行 → 14 骨架 1,479 行 + 47 个新模块（最大 478 行）；新增结构性开销 +760 行（+1.7%）。
+
+**过程中发现并修复的四条拆分库规则（全部写入 design.md §2）**
+1. MRO：Mixin 在前、ABC 基类殿后（T-102，pytest 抓到）。
+2. 携带 @abstractmethod 的 Mixin 继承 ABC（T-105，抽象契约 4→2 缩水）。
+3. 模块 docstring 跳过解析 + 模块级赋值（_LOGGER 等）prologue 携带（T-105）。
+4. 类体止于首个非缩进行，防末方法吞掉文件尾模块代码（T-106，评审抓到）。
+
+**遗留与移交**
+- `reporter/evidence_cards.py:380` 遗留 F821（`json` 未导入，5b84f30 引入，先于本 spec）——潜在运行时 NameError，建议单独小提交修复（需用户确认，不属 T-014 范围）。
+- 新模块存在机械复制的未用 import（F401，惰性），如需清理另立任务。
+- 500–599 行 backlog（6 文件）与 tests/scripts 长文件维持"本期不做"决议。
+- 工作分支 `refactor/t014-file-split`（8 个阶段提交 3c869ba→c7a733b），未推送；推送/PR 待用户指示。
