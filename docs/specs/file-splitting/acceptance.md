@@ -73,3 +73,12 @@
 - 门禁：pytest **262 passed, 4 skipped（55s）**；ruff F821,F811 clean；13 方法 verbatim（AST 复核）；4 Mixin 均为普通类，单向依赖无环。
 - 独立评审：**verdict PASS**；全仓唯一 importer `incremental_update.py:10`（隐式相对导入，原有行为）路径未变；原文末行为 except 内 raise、无尾部模块代码（T-106 库 bug 在此无影响）。
 - 拆分库修正：骨架 MRO 样板注释仅在有 ABC 基类时输出。
+
+## T-108 · harness 主链拆分（2026-11-07）
+
+- 改动：`runtime.py` 718 → 174 行骨架 + runtime_execution.py（458，含 383 行状态机主循环整块）+ runtime_persistence.py（108）；`workflow.py` 731 → 27 行骨架（docstring + WorkflowDriver Protocol + 两 driver re-export）+ report_fallbacks.py（52）+ drivers_plan_execute.py（478）+ drivers_deep_research.py（209）。
+- 逐行校验：runtime 15 方法、workflow Protocol/函数/两 driver 类体全部 verbatim（评审方 AST get_source_segment 全量比对）。
+- 行为等价（评审核查）：`_execute_run_inner` 的 10 方法 + 11 属性 self.* 引用经 MRO 全部解析、无跨 Mixin 闭包捕获；导入图无环（drivers→report_fallbacks 叶子；runtime mixins→harness 兄弟模块无回边）；bootstrap.py:21 / run_service.py:19 / 两个测试文件的既有导入经 re-export 实测可用（`is` 同一对象）。
+- 门禁：pytest **262 passed, 4 skipped（56s）**；ruff F821,F811 clean；py_compile OK。
+- 独立评审：**verdict PASS**；评审后补回 4 个新文件的 `from __future__ import annotations`（与原文件保真）。
+- 决策记录：`_evidence_only_report` 全仓无外部引用 → 不加 workflow 兼容 re-export（design 已同步）。

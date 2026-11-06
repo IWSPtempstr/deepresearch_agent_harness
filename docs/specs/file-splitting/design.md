@@ -120,15 +120,16 @@ class DeepThinkingMixin:
 - `incremental_io.py` — `GraphIoMixin`：`update_changed_file_embeddings`(526–572)、`export_graph_structure`(677–733)、`import_graph_structure`(733–804)。
 - `incremental_stats.py` — `GraphStatsMixin`：`get_graph_statistics`(804)、`display_graph_statistics`(859)、`process_incremental_update`(886–964)。
 
-### T-108 `harness/`（主链，最后拆）
-- `workflow.py`(731)：
-  - `harness/report_fallbacks.py` — **模式 B**：`_evidence_only_report`(50–94) 整体移入（无状态纯函数）；`workflow.py` re-import 保持 `harness.workflow._evidence_only_report` 路径可用。
-  - `harness/drivers_plan_execute.py` — `PlanExecuteReportDriver`(94–537) 整类移入（含 `_build_reserved_budget_report`/`_build_compact_report`/`repair_report`）。
-  - `harness/drivers_deep_research.py` — `DeepResearchDriver`(537–731) 整类移入。
-  - `workflow.py` 保留 `WorkflowDriver` Protocol(36–48) + 两个类的 re-export（`run_service.py:19` 的 `from deepresearch_agent.harness.workflow import DeepResearchDriver, PlanExecuteReportDriver` 零改动）。
-- `runtime.py`(718)：`HarnessRuntime` 类骨架保留 `__init__`(35–75)、`_attach_prefix_usage`(75)、`_load_context`(497)、`_safe_stage_after`(536)、`_transition`(548)、`_pause_at_safe_boundary`(572)、`_assert_not_cancelled`(585)。
-  - `runtime_execution.py` — `RuntimeExecutionMixin`：`execute_run`(89)、`_execute_run_inner`(114–497，**383 行状态机主循环原样搬移，内部禁止再拆**)、`_run_with_heartbeat`(591–623)。
-  - `runtime_persistence.py` — `RuntimePersistMixin`：`_persist_plan`(623)、`_persist_execution`(633–685)、`_token_usage_total`(685)、`_save_report_artifact`(703)、`_apply_artifact_edit`(710)。
+### T-108 `harness/`（主链，最后拆）— 实现与验证一致，两处评审定稿修订
+- `workflow.py`(731→27 行骨架)：
+  - `harness/report_fallbacks.py`（52 行）— 模式 B：`_evidence_only_report` 整体移入；**评审定稿：该函数全仓无外部引用，不加 workflow 兼容 re-export**。
+  - `harness/drivers_plan_execute.py`（478 行）— `PlanExecuteReportDriver` 整类移入（含 `_build_reserved_budget_report`/`_build_compact_report`/`repair_report`），按需 import report_fallbacks。
+  - `harness/drivers_deep_research.py`（209 行）— `DeepResearchDriver` 整类移入，同上。
+  - `workflow.py` 保留模块 docstring + `WorkflowDriver` Protocol 原文 + 两个类的 re-export（`run_service.py:19`/`bootstrap.py:21`/两个测试文件零改动实测可用）。
+- `runtime.py`(718→174 行骨架)：`HarnessRuntime` 骨架保留 `__init__`、`_attach_prefix_usage`、`_load_context`、`_safe_stage_after`、`_transition`、`_pause_at_safe_boundary`、`_assert_not_cancelled`；模块级 `WorkflowFactory` 赋值随唯一消费者留在骨架。
+  - `runtime_execution.py`（458 行）— `RuntimeExecutionMixin`：`execute_run`、`_execute_run_inner`（**383 行状态机主循环原样搬移，内部禁止再拆 ✓**）、`_run_with_heartbeat`。
+  - `runtime_persistence.py`（108 行）— `RuntimePersistMixin`：`_persist_plan`、`_persist_execution`、`_token_usage_total`、`_save_report_artifact`、`_apply_artifact_edit`。
+  - 4 个新文件补回 `from __future__ import annotations`（评审 nit，与原文件保真）。
 
 ## 4. 兼容性策略
 

@@ -61,10 +61,10 @@
 ## T-108 · harness 主链拆分（workflow 731 / runtime 718）
 
 - **前置**: T-107（主链最后拆）
-- **涉及**: `harness/workflow.py` + 新增 `harness/{report_fallbacks,drivers_plan_execute,drivers_deep_research}.py`；`harness/runtime.py` + 新增 `harness/{runtime_execution,runtime_persistence}.py`
-- **特别约束**: `_execute_run_inner`（383 行）整块搬移禁止内部再拆；`workflow.py` re-export 两个 driver；`_evidence_only_report` 模式 B re-import。
-- **验收**: pytest 全绿（重点 tests/harness/）+ `from deepresearch_agent.harness.workflow import DeepResearchDriver, PlanExecuteReportDriver` 冒烟。
-- **状态**: pending
+- **涉及**: `harness/workflow.py`（27 行骨架：docstring + Protocol + 两 driver re-export）+ 新增 `harness/{report_fallbacks,drivers_plan_execute,drivers_deep_research}.py`；`harness/runtime.py`（174 行骨架）+ 新增 `harness/{runtime_execution,runtime_persistence}.py`
+- **特别约束**: `_execute_run_inner`（383 行）整块搬移禁止内部再拆 ✓；`_evidence_only_report` 全仓无外部引用，迁入 report_fallbacks.py 且不加兼容 re-export（design 已同步）。
+- **验收**: pytest 全绿；ruff clean；verbatim 断言；bootstrap/run_service/测试导入链实测可用；独立评审 PASS（含 `from __future__ import annotations` 补回 4 文件）。
+- **状态**: done
 
 ## 收尾
 
