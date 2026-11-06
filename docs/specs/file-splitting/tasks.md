@@ -27,8 +27,9 @@
 ## T-103 · hybrid_tool.py 拆分（661 行）
 
 - **前置**: T-102
-- **涉及**: `search/tool/hybrid_tool.py` + 新增 `search/tool/hybrid_retrieval.py`
-- **状态**: pending
+- **涉及**: `search/tool/hybrid_tool.py`（169 行骨架）+ 新增 `search/tool/hybrid_retrieval.py`（372）与 `hybrid_keywords.py`（149）
+- **验收**: pytest 全绿；ruff clean；12 个方法块 verbatim；独立评审 PASS。
+- **状态**: done
 
 ## T-104 · reasoning/ 三文件拆分（chain_of_exploration 808 / thinking 761 / evidence 710）
 

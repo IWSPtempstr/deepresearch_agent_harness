@@ -31,3 +31,10 @@
 - 门禁：pytest **262 passed, 4 skipped（55s，与基线一致）**；ruff F821,F811,E722 clean；py_compile 通过；5 模块 runtime import 成功。
 - 独立评审：**verdict PASS**；跨模块耦合核查——DeeperResearchTool 经 `self.deep_research.*` 的 6 处方法调用拆分后 MRO 全部可解析。
 - 非阻塞备忘：骨架保留原 typing 全量导入（4 个惰性未使用名，与原文件风格一致，不清理）。
+
+## T-103 · hybrid_tool.py 拆分（2026-11-07）
+
+- 改动：`hybrid_tool.py` 661 → 169 行骨架；新增同包 `hybrid_retrieval.py`（372）/`hybrid_keywords.py`（149）——评审修订：单模块会超 500 预算，故拆两个 Mixin，design.md 已同步。
+- 门禁：pytest **262 passed, 4 skipped（55s）**；ruff F821,F811,E722 clean；12 个方法块 verbatim；`HybridSearchTool.__abstractmethods__` 为空（MRO：两 Mixin 在前、BaseSearchTool 殿后）。
+- 独立评审：**verdict PASS**；耦合核查 8 处 importer 零改动，外部 `self.hybrid_tool.extract_keywords/.close()` 经 MRO 可解析。
+- 非阻塞备忘：新模块残留原文件机械复制的未用 import（F401，无运行时影响，留后续清理轮）。

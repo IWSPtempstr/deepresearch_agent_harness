@@ -64,9 +64,11 @@ class DeepThinkingMixin:
 
 原文件保留 `search`(738–808) 与 `close`(1309)。
 
-### T-103 `search/tool/hybrid_tool.py`（661 → 骨架 ~150）
-- 新模块 `search/tool/hybrid_retrieval.py` — `HybridRetrievalMixin`：`db_query`(168)、`_vector_search`(185)、`_fallback_text_search`(198)、`_retrieve_low_level_content`(232–440)、`_retrieve_high_level_content`(440–522)、`extract_keywords`(69–168)、`get_global_tool`(620–659)。
-- 原文件保留 `HybridSearchTool(HybridRetrievalMixin)` + `__init__`/`_setup_chains`/`structured_search`(522–607)/`search`/`close`。
+### T-103 `search/tool/hybrid_tool.py`（661 → 骨架 169）
+评审修订（2026-11-07）：`extract_keywords`(98 行)+`_retrieve_low_level_content`(207)+`_retrieve_high_level_content`(81) 合入单模块会超 500 行预算，故拆为两个同包模块：
+- `search/tool/hybrid_retrieval.py`（372 行）— `HybridRetrievalMixin`：`db_query`、`_vector_search`、`_fallback_text_search`、`_retrieve_low_level_content`、`_retrieve_high_level_content`。
+- `search/tool/hybrid_keywords.py`（149 行）— `HybridKeywordsMixin`：`extract_keywords`、`get_global_tool`。
+- 原文件保留 `HybridSearchTool(HybridRetrievalMixin, HybridKeywordsMixin, BaseSearchTool)` + `__init__`/`_setup_chains`/`structured_search`/`search`/`close`。
 
 ### T-104 `search/tool/reasoning/`（3 文件 2279 → 骨架 ~220）
 - `chain_of_exploration.py`(808) → 同级 4 模块：
