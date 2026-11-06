@@ -20,9 +20,9 @@
 ## T-102 · deep_research_tool.py 拆分（1320 行）
 
 - **前置**: T-101
-- **涉及**: `search/tool/deep_research_tool.py` + 新增 `search/tool/deep_research/{wiring,retrieval_funcs,thinking_pipeline,streaming,tool_factories}.py`
-- **验收**: 同 T-101 模式；pytest 全绿 + 行数门禁。
-- **状态**: pending
+- **涉及**: `search/tool/deep_research_tool.py`（108 行类骨架，search/close 留守）+ 新增 `search/tool/deep_research/{__init__,wiring,retrieval_funcs,thinking_pipeline,streaming,tool_factories}.py`
+- **验收**: pytest 全绿；ruff F821/F811 clean；25 个方法块 verbatim 断言；独立评审 PASS。
+- **状态**: done
 
 ## T-103 · hybrid_tool.py 拆分（661 行）
 

@@ -12,13 +12,13 @@
 ```python
 # 原文件（类骨架，≤200 行）
 from deepresearch_agent.search.tool.deep_research.pipeline import DeepThinkingMixin
-class DeepResearchTool(DeepResearchInitMixin, DeepRetrievalMixin, DeepThinkingMixin,
-                       DeepStreamingMixin, DeepToolFactoryMixin):
+class DeepResearchTool(DeepThinkingMixin, ..., BaseSearchTool):
     """docstring 不变"""
 # pipeline.py
 class DeepThinkingMixin:
     def thinking(self, query): ...  # 原样搬移，禁止改逻辑
 ```
+- **MRO 硬规则：Mixin 必须排在 ABC 基类之前**。`abc` 在类创建时沿 MRO `getattr` 检查抽象方法，基类在前会先命中抽象定义、忽略 Mixin 中的具体实现，导致类仍被判为 abstract（T-102 实测踩中，pytest 抓到）。
 - Mixin 之间不得定义同名属性/方法；`__init__` 只出现在一个 Mixin（或类骨架）中。
 - MRO 声明顺序按"初始化 → 检索 → 思考 → 流式 → 工厂"排列并在类骨架注释说明。
 
