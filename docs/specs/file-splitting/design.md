@@ -81,7 +81,7 @@ class DeepThinkingMixin:
   - `thinking_hypotheses.py` — `generate_initial_thinking`(58)、`generate_hypotheses`(71)、`_extract_hypotheses_fallback`(109)、`verify_hypothesis`(160)、`_assess_verification_status`(193)、`think_deeper`(223)、`update_thinking_based_on_verification`(266)、`integrate_thinking_process`(319)。
   - `thinking_branching.py` — `add_reasoning_step`(359)、`branch_reasoning`(377)、`switch_branch`(402)、`merge_branches`(417)、`counter_factual_analysis`(460)、`_extract_conclusion`(503)。
   - `thinking_state.py` — `generate_next_query`(576)、`add_ai_message`(632)、`add_human_message`(641)、`update_continue_message`(650)、`prepare_truncated_reasoning`(673)、`get_full_thinking`(725)、`has_executed_query`(742)、`add_executed_query`(754)。
-  - `thinking_text.py` — `remove_query_tags`(538)、`remove_result_tags`(551)、`extract_queries`(564)：**模式 B**，提为模块函数，thinking.py re-import（`deeper_research/branching.py` 等以 `self.remove_query_tags` 调用，Mixin 绑定同样生效）。
+  - `thinking_text.py` — `remove_query_tags`、`remove_result_tags`、`extract_queries`：评审修订（2026-11-07）——原定模式 B 模块函数，实现为 `ThinkingTextMixin`（3 方法），调用方 `self.remove_query_tags` 经 Mixin 绑定零改动，安全等价。
 - `evidence.py`(710)：骨架保留 `__init__`(15–26)、`start_new_query`(26–50)、`add_reasoning_step`(50–86)；移出：
   - `evidence_record.py` — `add_evidence`(86)、`add_evidence_with_confidence`(127)、`_update_citation_index`(166)、`_extract_key_phrases`(185)。
   - `evidence_contradiction.py` — `detect_contradictions`(229)、`_extract_numbers_with_context`(297)、`_context_similarity`(340)、`_detect_semantic_contradiction`(364)。

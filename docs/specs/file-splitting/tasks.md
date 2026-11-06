@@ -34,9 +34,10 @@
 ## T-104 · reasoning/ 三文件拆分（chain_of_exploration 808 / thinking 761 / evidence 710）
 
 - **前置**: T-103
-- **涉及**: `search/tool/reasoning/{chain_of_exploration,thinking,evidence}.py` + 新增 `chain_strategy/chain_scoring/chain_info/chain_explorer`、`thinking_hypotheses/thinking_branching/thinking_state/thinking_text`、`evidence_record/evidence_contradiction/evidence_citations/evidence_summary`
-- **特别约束**: `thinking_text.py` 用模式 B（模块函数 + re-import），`deeper_research/branching.py` 等调用方零改动。
-- **状态**: pending
+- **涉及**: `search/tool/reasoning/{chain_of_exploration,thinking,evidence}.py`（骨架 32/40/92 行）+ 新增 12 个同级 Mixin 模块（chain_strategy/scoring/info/explorer、thinking_hypotheses/branching/state/text、evidence_record/contradiction/citations/summary）
+- **特别约束**: `thinking_text.py` 评审修订为 ThinkingTextMixin（原定模式 B），调用方零改动。
+- **验收**: pytest 全绿；ruff F821/F811 clean；56 个方法块 verbatim（AST 复核）；独立评审 PASS。
+- **状态**: done
 
 ## T-105 · agents 层拆分（base 792 / deep_research_agent 640 / reflector 730 / worker_coordinator 703）
 

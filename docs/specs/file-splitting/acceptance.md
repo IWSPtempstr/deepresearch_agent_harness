@@ -38,3 +38,11 @@
 - 门禁：pytest **262 passed, 4 skipped（55s）**；ruff F821,F811,E722 clean；12 个方法块 verbatim；`HybridSearchTool.__abstractmethods__` 为空（MRO：两 Mixin 在前、BaseSearchTool 殿后）。
 - 独立评审：**verdict PASS**；耦合核查 8 处 importer 零改动，外部 `self.hybrid_tool.extract_keywords/.close()` 经 MRO 可解析。
 - 非阻塞备忘：新模块残留原文件机械复制的未用 import（F401，无运行时影响，留后续清理轮）。
+
+## T-104 · reasoning/ 三文件拆分（2026-11-07）
+
+- 改动：chain_of_exploration 808→32、thinking 761→40、evidence 711→92（骨架）；新增 12 个同级 Mixin 模块（60–323 行，全部 ≤500）。
+- 逐行校验：56 个方法块 verbatim（评审方 AST 逐方法复核全覆盖，唯一差异为 EOF 换行）。
+- 门禁：pytest **262 passed, 4 skipped（56s）**；ruff F821,F811 全目录 clean（E722 裸 except 系原代码既有风格，非本次引入，不在门禁）。
+- 独立评审：**verdict PASS**；耦合核查——branching/enhancer/streaming_loop 等对 `thinking_engine.*`/`evidence_tracker.*`/`chain_explorer.explore` 的调用点拆分后 MRO 全部可解析。
+- 评审修订（已同步 design.md）：thinking_text 由模式 B 模块函数改为 ThinkingTextMixin，调用方零改动。
