@@ -19,6 +19,8 @@ class DeepThinkingMixin:
     def thinking(self, query): ...  # 原样搬移，禁止改逻辑
 ```
 - **MRO 硬规则：Mixin 必须排在 ABC 基类之前**。`abc` 在类创建时沿 MRO `getattr` 检查抽象方法，基类在前会先命中抽象定义、忽略 Mixin 中的具体实现，导致类仍被判为 abstract（T-102 实测踩中，pytest 抓到）。
+- **抽象 Mixin 必须继承 ABC**：携带 `@abstractmethod` 的 Mixin 若是普通类，其抽象方法不会进入子类的 `__abstractmethods__`（ABCMeta 只汇总 ABC 基类的清单），抽象契约缩水（T-105 实测踩中：BaseAgent 4→2，修复后恢复 4）。
+- **docstring 与模块级赋值（如 `_LOGGER`）**：拆分库需跳过模块 docstring 再解析 import，并把被引用的模块级赋值作为 prologue 随模块携带（T-105 实测踩中 worker_coordinator/reflector）。
 - Mixin 之间不得定义同名属性/方法；`__init__` 只出现在一个 Mixin（或类骨架）中。
 - MRO 声明顺序按"初始化 → 检索 → 思考 → 流式 → 工厂"排列并在类骨架注释说明。
 
@@ -97,7 +99,7 @@ class DeepThinkingMixin:
   - `deep_research_agent_nodes.py` — `DeepResearchNodesMixin`：`_generate_node`(133–234)。
   - `deep_research_agent_asks.py` — `DeepResearchAskMixin`：`ask`(234)、`ask_with_thinking`(268)、`ask_stream`(306–399)。
   - `deep_research_agent_analysis.py` — `DeepResearchAnalysisMixin`：`explore_knowledge`(399)、`analyze_reasoning_chain`(486)、`detect_contradictions`(513–589)。
-- `executor/reflector.py`(730)：骨架保留 `__init__`(37–47)、`can_handle`(47)、`execute_task`(50–217)、`_update_state`(654)。
+- `executor/reflector.py`(730)：骨架保留 `__init__`(37–47)、`can_handle`(47)、`_update_state`(654)。评审修订（2026-11-07）：`execute_task`(167 行) 留骨架会超 200 预算，拆入 `reflector_execute.py`。
   - `reflector_answer.py` — `ReflectionAnswerMixin`：`_resolve_query_answer`(217)、`_lookup_answer_from_state`(255)、`_extract_answer_from_record`(286)、`_fallback_from_intermediate`(303)、`_extract_from_dict`(334)、`_extract_answer_content`(591)、`_extract_possible_text`(611)。
   - `reflector_keywords.py` — `ReflectionKeywordsMixin`：`_derive_keyword_suggestions`(354)、`_resolve_evaluation_text`(400)、`_build_reference_keywords`(437)、`_tokenize_reference_text`(486)、`_accumulate_keywords_from_entries`(512)、`_accumulate_keywords_from_strings`(531)、`_normalize_keyword_token`(627)、`_counter_to_list`(636)、`_contains_chinese`(651)。
   - `reflector_evidence.py` — `ReflectionEvidenceMixin`：`_collect_evidence_from_records`(546)、`_extract_evidence_text`(572)。

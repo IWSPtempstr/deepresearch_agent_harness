@@ -46,3 +46,15 @@
 - 门禁：pytest **262 passed, 4 skipped（56s）**；ruff F821,F811 全目录 clean（E722 裸 except 系原代码既有风格，非本次引入，不在门禁）。
 - 独立评审：**verdict PASS**；耦合核查——branching/enhancer/streaming_loop 等对 `thinking_engine.*`/`evidence_tracker.*`/`chain_explorer.explore` 的调用点拆分后 MRO 全部可解析。
 - 评审修订（已同步 design.md）：thinking_text 由模式 B 模块函数改为 ThinkingTextMixin，调用方零改动。
+
+## T-105 · agents 层四文件拆分（2026-11-07）
+
+- 改动：base 792→154、deep_research_agent 640→177、reflector 730→124、worker_coordinator 703→134（骨架）；新增 12 个 Mixin 模块（50–394 行，全部 ≤500）。
+- **过程发现并修复（三项，均已写入 design.md §2 硬规则）**：
+  1. 模块 docstring 导致 import 解析为零 → 解析器跳过 docstring；
+  2. `_LOGGER = logging.getLogger(...)` 模块级赋值未随模块携带 → prologue 机制（含其依赖的 import logging）；
+  3. 携带 @abstractmethod 的普通 Mixin 不被 ABCMeta 汇总，BaseAgent 抽象方法 4→2 → 该类 Mixin 继承 ABC，恢复 4。
+- 门禁：pytest **262 passed, 4 skipped（55s）**；ruff F821,F811 clean（71 方法块 verbatim）；`BaseAgent.__abstractmethods__` 恰为原 4 个；ReflectionExecutor 具象化；WorkerCoordinator 保持普通类。
+- 独立评审：**verdict PASS**；execute_task 内 7 处跨 Mixin self.* 调用逐一 MRO 解析通过；四组"only-in-orig 语句"均为空（无丢失）。
+- 评审修订（已同步 design.md）：execute_task 拆入 reflector_execute.py（留骨架将超 200 预算）；骨架保留原模块 docstring。
+- **评审发现的仓库既有问题（非本次引入，待用户决定）**：`reporter/evidence_cards.py:380` 存在遗留 F821（`json` 未导入，commit 5b84f30 引入），运行到该分支会 NameError——属潜在线上 bug，建议 T-014 完成后单独小提交修复。
