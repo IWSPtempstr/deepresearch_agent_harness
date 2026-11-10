@@ -1,7 +1,7 @@
 # 由 agents/deep_research_agent.py 拆分（T-014），方法体与原位置逐行一致。
 # 本文件保留类声明与导入路径；未拆出的方法：__init__, _setup_chains, _setup_tools, _add_retrieval_edges, _extract_keywords, is_deeper_tool, close。
 # MRO：Mixin 在前、ABC 基类殿后（abc 抽象检查沿 MRO getattr，基类在前会忽略 Mixin 中的具体实现）。
-from typing import List, Dict, AsyncGenerator, Optional
+from typing import List, Dict, Optional
 from deepresearch_agent.search.tool.deep_research_tool import DeepResearchTool 
 from deepresearch_agent.harness.contracts import SourceMode
 from deepresearch_agent.retrieval.base import RetrievalProvider

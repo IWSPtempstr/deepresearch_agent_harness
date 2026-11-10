@@ -1,7 +1,7 @@
 # 由 src/deepresearch_agent/graph/indexing/embedding_manager.py 拆分（T-016），方法体与原位置逐行一致。
 """待更新实体/Chunk 查询（原 get_*_needing_update）。"""
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 
 class EmbeddingQueriesMixin:

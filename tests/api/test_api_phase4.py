@@ -8,11 +8,11 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import create_app
 from backend.app.services.chat_service import is_resume_intent
-from backend.app.schemas import MessageCreate, RunCreate, SessionCreate
+from backend.app.schemas import MessageCreate, RunCreate
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionMetadata, ExecutionRecord, ToolCall
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalMetadata, RetrievalResult
 from deepresearch_agent.harness import SourceMode, WorkflowMode
-from deepresearch_agent.persistence.repositories import CheckpointRepository, LearningReviewRepository, RunRepository, SessionRepository
+from deepresearch_agent.persistence.repositories import CheckpointRepository, LearningReviewRepository, RunRepository
 from deepresearch_agent.context import ArtifactEditContextBuilder
 from deepresearch_agent.evolution import SkillSpec
 

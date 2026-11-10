@@ -1,5 +1,4 @@
 from langchain_community.graphs import Neo4jGraph
-from typing import Union
 from .base import BaseSummarizer
 from .leiden import LeidenSummarizer
 from .sllpa import SLLPASummarizer

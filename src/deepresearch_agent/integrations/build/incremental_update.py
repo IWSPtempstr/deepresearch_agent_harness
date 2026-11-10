@@ -6,7 +6,7 @@ from deepresearch_agent.graph.graph_consistency_validator import GraphConsistenc
 from deepresearch_agent.integrations.build.incremental.manual_edit_manager import ManualEditManager
 from deepresearch_agent.graph.indexing.embedding_manager import EmbeddingManager
 from deepresearch_agent.config.neo4jdb import get_db_manager
-from deepresearch_agent.config.settings import FILES_DIR, community_algorithm, MAX_WORKERS, BATCH_SIZE, NEO4J_CONFIG
+from deepresearch_agent.config.settings import FILES_DIR, MAX_WORKERS, BATCH_SIZE
 from deepresearch_agent.integrations.build.incremental.incremental_update_scheduler import IncrementalUpdateScheduler
 
 from deepresearch_agent.integrations.build.incremental_update_checks import UpdateChecksMixin

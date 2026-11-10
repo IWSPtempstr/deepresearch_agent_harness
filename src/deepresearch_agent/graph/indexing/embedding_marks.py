@@ -1,7 +1,7 @@
 # 由 src/deepresearch_agent/graph/indexing/embedding_manager.py 拆分（T-016），方法体与原位置逐行一致。
 """更新标记（原 mark_* 4 方法）。"""
 
-from typing import List, Dict, Any, Optional
+from typing import List
 
 
 class EmbeddingMarkMixin:

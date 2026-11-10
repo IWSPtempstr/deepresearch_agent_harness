@@ -1,12 +1,12 @@
 # 由 search/tool/deep_research_tool.py 拆分（T-014），方法体与原位置逐行一致。
 """检索结果解析与 KB/KG 检索函数构建（原 _parse_search_result 等 6 个检索辅助）。"""
 
-from typing import Dict, List, Any, Optional, AsyncGenerator
+from typing import Optional
 import re
 import logging
 import json
 import traceback
-from deepresearch_agent.retrieval.base import RetrievalProvider, SearchFilters, ToolCallContext, run_async_from_sync
+from deepresearch_agent.retrieval.base import run_async_from_sync
 
 
 class DeepRetrievalMixin:

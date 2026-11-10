@@ -7,7 +7,6 @@
 4. alert-rules.yml/prometheus.yml 可解析且规则引用的指标已注册。
 """
 
-import shutil
 from pathlib import Path
 
 import pytest
@@ -106,7 +105,7 @@ def _async_return(value):
 async def test_send_rejected_when_daily_ceiling_exhausted(tmp_path, monkeypatch):
     """成本门禁在请求路径：spent >= ceiling → LLM_RATE_LIMITED（429 语义）。"""
     import deepresearch_agent.config.settings as settings_mod
-    from backend.app.schemas import MessageCreate, MessageSend, SessionCreate
+    from backend.app.schemas import MessageSend, SessionCreate
     from backend.app.services import ChatService
     from backend.app.services.run_service import RunService
     from deepresearch_agent.harness.errors import AppError, ErrorCode

@@ -1,28 +1,19 @@
 # 由 agents/multi_agent/reporter/base_reporter.py 拆分（T-014），方法体与原位置逐行一致。
 """报告层 pydantic schema（原 base_reporter.py 模块级类，整体迁出）。"""
 
-from typing import List, Dict, Any, Optional, Iterable, Tuple
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from deepresearch_agent.agents.multi_agent.reporter.outline_builder import (
-    OutlineBuilder,
     ReportOutline,
-    SectionOutline,
 )
 from deepresearch_agent.agents.multi_agent.reporter.section_writer import (
-    SectionWriter,
     SectionWriterConfig,
-    SectionDraft,
 )
 from deepresearch_agent.agents.multi_agent.reporter.consistency_checker import (
-    ConsistencyChecker,
     ConsistencyCheckResult,
 )
 from deepresearch_agent.agents.multi_agent.reporter.mapreduce import (
-    EvidenceMapper,
-    EvidenceSummary,
-    SectionReducer,
     ReduceStrategy,
-    ReportAssembler,
 )
 
 

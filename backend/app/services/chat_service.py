@@ -114,7 +114,6 @@ class ChatService:
 
         tenant_row = None
         if current_tenant_id() != "default":
-            from backend.app.tenancy import TenantRegistry
 
             async with self.runs.database.sessions() as db_session:
                 from deepresearch_agent.persistence.models import TenantModel

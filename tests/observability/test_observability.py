@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from deepresearch_agent.observability import (
-    LLM_RATE_LIMITED_TOTAL, RUN_TOTAL, TraceIdLogFilter, current_trace_id,
+    LLM_RATE_LIMITED_TOTAL, TraceIdLogFilter, current_trace_id,
     get_tracer, observe_llm_call, setup_tracing, tracing_enabled,
 )
 from deepresearch_agent.llm_gateway.gateway import ProviderHealth, SlotLimiter

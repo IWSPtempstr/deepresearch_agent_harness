@@ -1,7 +1,6 @@
 # 由 search/tool/reasoning/chain_of_exploration.py 拆分（T-014），方法体与原位置逐行一致。
 """邻居打分与内容相关度排序（原 _score_neighbors_enhanced 等）。"""
 
-from typing import List, Dict, Any
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 import pandas as pd

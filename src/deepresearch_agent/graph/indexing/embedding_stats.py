@@ -2,8 +2,7 @@
 """统计与处理入口（原 display_stats/process）。"""
 
 import time
-from typing import List, Dict, Any, Optional
-from deepresearch_agent.config.settings import EMBEDDING_BATCH_SIZE, MAX_WORKERS as DEFAULT_MAX_WORKERS
+from typing import Dict, Any
 
 
 class EmbeddingStatsMixin:

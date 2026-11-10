@@ -1,7 +1,7 @@
 """
 引用格式化模块
 """
-from typing import Iterable, List
+from typing import Iterable
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage

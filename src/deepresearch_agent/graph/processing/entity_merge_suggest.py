@@ -5,8 +5,7 @@ import re
 import ast
 import time
 import concurrent.futures
-from typing import List, Dict, Any, Optional, Tuple
-from deepresearch_agent.config.settings import ENTITY_BATCH_SIZE, MAX_WORKERS as DEFAULT_MAX_WORKERS
+from typing import List, Any
 
 
 class EntityMergeSuggestMixin:

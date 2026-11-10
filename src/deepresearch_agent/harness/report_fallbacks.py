@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
-from .report_safety import add_inline_citations, citation_evidence_ids, has_internal_material, rank_evidence, sanitize_report
+from .report_safety import rank_evidence
 
 
 def _evidence_only_report(

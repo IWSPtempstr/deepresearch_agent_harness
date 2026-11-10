@@ -9,7 +9,7 @@ from langchain.prompts import (
 from deepresearch_agent.models.get_models import get_llm_model
 from deepresearch_agent.config.prompts import system_template_build_index, user_template_build_index
 from deepresearch_agent.config.settings import ENTITY_BATCH_SIZE, MAX_WORKERS as DEFAULT_MAX_WORKERS
-from deepresearch_agent.graph.core import connection_manager, timer, get_performance_stats, print_performance_stats
+from deepresearch_agent.graph.core import connection_manager
 
 from deepresearch_agent.graph.processing.entity_merge_suggest import EntityMergeSuggestMixin
 from deepresearch_agent.graph.processing.entity_merge_exec import EntityMergeExecMixin

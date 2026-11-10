@@ -5,7 +5,7 @@ import pytest_asyncio
 
 from backend.app.schemas import MessageCreate, RunCreate, RunEventCreate, SessionCreate
 from deepresearch_agent.evolution import (
-    PromotionPolicy, PromotionRejected, SkillEvaluator, SkillLinter, SkillLoader,
+    PromotionPolicy, PromotionRejected, SkillEvaluator, SkillLoader,
     SkillRegistry, SkillSpec, TrajectoryDistiller,
 )
 from deepresearch_agent.harness import SourceMode, WorkflowMode

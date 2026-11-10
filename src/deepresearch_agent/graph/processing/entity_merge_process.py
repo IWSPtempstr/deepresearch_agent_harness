@@ -2,8 +2,8 @@
 """重复候选处理入口（原 process_duplicates）。"""
 
 import time
-from typing import List, Dict, Any, Optional, Tuple
-from deepresearch_agent.graph.core import connection_manager, timer, get_performance_stats, print_performance_stats
+from typing import List, Dict, Any, Tuple
+from deepresearch_agent.graph.core import timer, get_performance_stats, print_performance_stats
 
 
 class EntityMergeProcessMixin:

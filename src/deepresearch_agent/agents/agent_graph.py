@@ -1,7 +1,7 @@
 # 由 agents/base.py 拆分（T-014），方法体与原位置逐行一致。
 """LangGraph 构图与节点/流式节点（原 _setup_graph 等 7 个方法，含抽象 _add_retrieval_edges/_generate_node）。"""
 
-from typing import Annotated, Sequence, TypedDict, List, Dict, Any, AsyncGenerator, Optional
+from typing import Annotated, Sequence, TypedDict, Dict, Any, AsyncGenerator
 from abc import ABC, abstractmethod
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph, START

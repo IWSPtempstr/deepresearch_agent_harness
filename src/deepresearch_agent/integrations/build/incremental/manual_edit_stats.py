@@ -3,7 +3,6 @@
 
 from typing import Dict, List, Any
 from rich.table import Table
-from deepresearch_agent.config.settings import MAX_WORKERS, BATCH_SIZE
 
 
 class ManualEditStatsMixin:

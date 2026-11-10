@@ -2,7 +2,7 @@
 """五类修复（原 repair_* 5 方法 + repair_graph）。"""
 
 import time
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any
 
 
 class ConsistencyRepairsMixin:

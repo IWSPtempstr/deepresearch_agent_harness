@@ -1,7 +1,6 @@
 # 由 src/deepresearch_agent/integrations/build/incremental/manual_edit_manager.py 拆分（T-016），方法体与原位置逐行一致。
 """手动编辑标记初始化与追踪（原 initialize_entity_properties/_setup_manual_edit_tracking）。"""
 
-from datetime import datetime
 
 
 class ManualEditTrackingMixin:

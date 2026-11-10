@@ -1,11 +1,9 @@
 # 由 search/tool/reasoning/chain_of_exploration.py 拆分（T-014），方法体与原位置逐行一致。
 """探索主循环：步进决策与异步探索（原 explore/explore_async）。"""
 
-from typing import List, Dict, Any
-import numpy as np
+from typing import List
 import time
 import asyncio
-import pandas as pd
 import re
 
 

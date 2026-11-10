@@ -1,16 +1,16 @@
 # 由 search/tool/deep_research_tool.py 拆分（T-014），方法体与原位置逐行一致。
 """组件装配、链式提示初始化与进度回调（原 __init__/_setup_chains/_progress）。"""
 
-from typing import Dict, List, Any, Optional, AsyncGenerator
+from typing import Optional
 import uuid
-from deepresearch_agent.config.prompts import BEGIN_SEARCH_QUERY, BEGIN_SEARCH_RESULT, END_SEARCH_RESULT, MAX_SEARCH_LIMIT, \
-    END_SEARCH_QUERY, RELEVANT_EXTRACTION_PROMPT, SUB_QUERY_PROMPT, FOLLOWUP_QUERY_PROMPT, FINAL_ANSWER_PROMPT
+from deepresearch_agent.config.prompts import MAX_SEARCH_LIMIT, \
+    SUB_QUERY_PROMPT, FOLLOWUP_QUERY_PROMPT
 from deepresearch_agent.search.tool.reasoning.thinking import ThinkingEngine
 from deepresearch_agent.search.tool.reasoning.validator import AnswerValidator
 from deepresearch_agent.search.tool.reasoning.search import DualPathSearcher, QueryGenerator
 from deepresearch_agent.config.settings import KB_NAME
 from deepresearch_agent.harness.contracts import SourceMode
-from deepresearch_agent.retrieval.base import RetrievalProvider, SearchFilters, ToolCallContext, run_async_from_sync
+from deepresearch_agent.retrieval.base import RetrievalProvider
 
 
 class DeepResearchInitMixin:

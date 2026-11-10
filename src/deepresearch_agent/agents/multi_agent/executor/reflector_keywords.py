@@ -1,7 +1,7 @@
 # 由 agents/reflector.py 拆分（T-014），方法体与原位置逐行一致。
 """关键词建议与文本分词归一（原 _derive_keyword_suggestions 等 9 个方法，含 3 个 @staticmethod）。"""
 
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional, List
 import re
 from collections import Counter
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState

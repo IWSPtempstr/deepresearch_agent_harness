@@ -8,10 +8,10 @@ from sqlalchemy import select
 
 from deepresearch_agent.persistence.models import (
     ContractCheckModel, EvidenceModel, MessageModel, RunEventModel, RunModel,
-    SkillVersionModel, TaskModel, ToolCallModel,
+    TaskModel, ToolCallModel,
 )
 
-from .review_schema import DecisionCard, FailureCard, ReviewPack, TrajectoryEpisode
+from .review_schema import DecisionCard, ReviewPack, TrajectoryEpisode
 
 
 def _json(value: str | None) -> dict:

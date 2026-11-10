@@ -1,8 +1,8 @@
 # 由 agents/base.py 拆分（T-014），方法体与原位置逐行一致。
 """问答入口三件套（原 ask_with_trace/ask/ask_stream）。"""
 
-from typing import Annotated, Sequence, TypedDict, List, Dict, Any, AsyncGenerator, Optional
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from typing import Dict, AsyncGenerator, Optional
+from langchain_core.messages import HumanMessage
 import pprint
 import time
 import asyncio

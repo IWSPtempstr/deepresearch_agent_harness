@@ -1,7 +1,7 @@
 # 由 agents/deep_research_agent.py 拆分（T-014），方法体与原位置逐行一致。
 """研究节点实现（原 _generate_node，覆盖 BaseAgent 抽象方法）。"""
 
-from typing import List, Dict, AsyncGenerator, Optional
+from typing import Dict, AsyncGenerator
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -9,8 +9,6 @@ import re
 from deepresearch_agent.config.prompts import (
     LC_SYSTEM_PROMPT,
     DEEP_RESEARCH_THINKING_SUMMARY_PROMPT,
-    EXPLORATION_SUMMARY_PROMPT,
-    CONTRADICTION_IMPACT_PROMPT,
 )
 from deepresearch_agent.config.settings import response_type
 

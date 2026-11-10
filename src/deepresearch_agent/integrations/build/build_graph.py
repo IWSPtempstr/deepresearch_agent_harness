@@ -1,7 +1,7 @@
 import time
 import os
 import psutil
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn

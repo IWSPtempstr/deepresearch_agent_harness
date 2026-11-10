@@ -17,7 +17,7 @@ from fake_driver import CompletedFakeDriver
 from deepresearch_agent.harness.runtime import HarnessRuntime
 from deepresearch_agent.persistence import Database
 from deepresearch_agent.persistence.repositories import (
-    ArtifactRepository, CheckpointRepository, ContractRepository, EventRepository,
+    CheckpointRepository, ContractRepository, EventRepository,
     EvidenceRepository, MessageRepository, PlanTaskToolRepository, RunRepository,
 )
 

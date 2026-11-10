@@ -2,23 +2,20 @@
 """Evidence Card 路径：证据收集/缓存/分节写作（原 _generate_sections_from_cards 等 8 个方法）。"""
 
 from typing import List, Dict, Any, Optional, Iterable, Tuple
-import json
 import logging
 from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionRecord
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.reporter.outline_builder import (
-    OutlineBuilder,
     ReportOutline,
     SectionOutline,
 )
 from deepresearch_agent.agents.multi_agent.reporter.evidence_cards import (
     EvidenceCard,
-    EvidenceCardPipeline,
 )
 from deepresearch_agent.agents.multi_agent.tools.evidence_tracker import EvidenceTracker
-from deepresearch_agent.harness.report_safety import add_inline_citations, has_internal_material
+from deepresearch_agent.harness.report_safety import add_inline_citations
 _LOGGER = logging.getLogger(__name__)
 from deepresearch_agent.agents.multi_agent.reporter.report_schemas import SectionContent
 

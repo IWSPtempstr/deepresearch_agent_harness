@@ -74,7 +74,7 @@ def test_tier_routing_disabled(monkeypatch):
 
 
 async def test_chat_service_routes_and_records_snapshot(tmp_path, tier_models, monkeypatch):
-    from backend.app.schemas import MessageCreate, MessageSend, RunCreate, SessionCreate
+    from backend.app.schemas import MessageSend, SessionCreate
     from backend.app.services import ChatService
     from backend.app.services.run_service import RunService
     from deepresearch_agent.persistence import Database

@@ -2,10 +2,9 @@
 """执行模式解析与串行/并行调度（原 _resolve_execution_mode 等 3 个方法）。"""
 
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional
 import logging
 from deepresearch_agent.agents.multi_agent.core.execution_record import (
-    ExecutionMetadata,
     ExecutionRecord,
 )
 from deepresearch_agent.agents.multi_agent.core.plan_spec import (

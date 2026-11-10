@@ -2,9 +2,6 @@
 """探索策略生成与复杂度/宽度自适应（原 _generate_exploration_strategy 等）。"""
 
 from typing import List, Dict, Any
-import numpy as np
-import pandas as pd
-import re
 
 
 class ChainStrategyMixin:

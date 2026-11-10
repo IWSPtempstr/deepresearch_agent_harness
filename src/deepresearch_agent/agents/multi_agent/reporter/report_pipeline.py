@@ -2,21 +2,17 @@
 """报告编排主流程（原 generate_report/recheck_consistency/_generate_sections_traditional/_assemble_report）。"""
 
 from typing import List, Dict, Any, Optional, Iterable, Tuple
-import json
 from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionRecord
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.reporter.outline_builder import (
-    OutlineBuilder,
     ReportOutline,
-    SectionOutline,
 )
 from deepresearch_agent.agents.multi_agent.reporter.consistency_checker import (
-    ConsistencyChecker,
     ConsistencyCheckResult,
 )
-from deepresearch_agent.harness.report_safety import add_inline_citations, has_internal_material
+from deepresearch_agent.harness.report_safety import has_internal_material
 from deepresearch_agent.agents.multi_agent.reporter.report_schemas import SectionContent, ReportResult
 
 

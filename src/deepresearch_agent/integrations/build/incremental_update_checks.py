@@ -3,7 +3,7 @@
 
 from deepresearch_agent.community import CommunityDetectorFactory, CommunitySummarizerFactory
 from deepresearch_agent.config.neo4jdb import get_db_manager
-from deepresearch_agent.config.settings import FILES_DIR, community_algorithm, MAX_WORKERS, BATCH_SIZE, NEO4J_CONFIG
+from deepresearch_agent.config.settings import community_algorithm, NEO4J_CONFIG
 
 
 class UpdateChecksMixin:

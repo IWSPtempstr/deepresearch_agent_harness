@@ -7,22 +7,17 @@
 # 由 agents/reflector.py 拆分（T-014），方法体与原位置逐行一致。
 # 本文件保留类声明与导入路径；未拆出的方法：__init__, can_handle, _update_state。
 # MRO：Mixin 在前、ABC 基类殿后（abc 抽象检查沿 MRO getattr，基类在前会忽略 Mixin 中的具体实现）。
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Dict, Optional
 from deepresearch_agent.agents.multi_agent.core.execution_record import (
-    ExecutionMetadata,
     ExecutionRecord,
-    ReflectionResult,
-    ToolCall,
 )
 from deepresearch_agent.agents.multi_agent.core.plan_spec import (
-    PlanExecutionSignal,
     TaskNode,
 )
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.executor.base_executor import (
     BaseExecutor,
     ExecutorConfig,
-    TaskExecutionResult,
 )
 from deepresearch_agent.search.tool.validation_tool import AnswerValidationTool
 

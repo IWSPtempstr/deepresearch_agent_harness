@@ -1,7 +1,7 @@
 # 由 agents/worker_coordinator.py 拆分（T-014），方法体与原位置逐行一致。
 """单任务/隔离执行、状态合并、失败记录与重试（原 _execute_single_task 等 6 个方法）。"""
 
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import logging
 from deepresearch_agent.agents.multi_agent.core.execution_record import (
     ExecutionMetadata,
@@ -19,8 +19,6 @@ from deepresearch_agent.agents.multi_agent.executor.base_executor import (
 from deepresearch_agent.config.settings import (
     MULTI_AGENT_REFLECTION_ALLOW_RETRY,
     MULTI_AGENT_REFLECTION_MAX_RETRIES,
-    MULTI_AGENT_WORKER_EXECUTION_MODE,
-    MULTI_AGENT_WORKER_MAX_CONCURRENCY,
 )
 _LOGGER = logging.getLogger(__name__)
 

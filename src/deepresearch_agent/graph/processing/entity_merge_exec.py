@@ -2,8 +2,7 @@
 """合并执行与重复关系清理（原 _process_candidate_group/execute_merges/clean_duplicate_relationships）。"""
 
 import time
-from typing import List, Dict, Any, Optional, Tuple
-from deepresearch_agent.config.settings import ENTITY_BATCH_SIZE, MAX_WORKERS as DEFAULT_MAX_WORKERS
+from typing import List, Optional
 
 
 class EntityMergeExecMixin:

@@ -16,14 +16,13 @@ from sqlalchemy.exc import OperationalError
 import deepresearch_agent.queueing as queueing_module
 from backend.app.schemas import MessageCreate, RunCreate, SessionCreate
 from backend.app.services.run_service import RunService
-from deepresearch_agent.harness import RunStatus, SourceMode, WorkflowMode
+from deepresearch_agent.harness import SourceMode, WorkflowMode
 from deepresearch_agent.harness.budgets import BudgetLimits
 from deepresearch_agent.observability import QUEUE_ENQUEUE_FAILURES
 from deepresearch_agent.persistence import Database
 from deepresearch_agent.persistence.repositories import RunRepository, SessionRepository
 from deepresearch_agent.queueing import (
     ENQUEUE_MAX_ATTEMPTS,
-    InProcessRunQueue,
     QueueUnavailableError,
     RedisStreamRunQueue,
 )

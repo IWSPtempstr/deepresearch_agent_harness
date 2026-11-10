@@ -1,12 +1,9 @@
 # 由 agents/reflector.py 拆分（T-014），方法体与原位置逐行一致。
 """从状态/记录/中间产物解析答案（原 _resolve_query_answer 等 7 个方法）。"""
 
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional, Tuple
 from deepresearch_agent.agents.multi_agent.core.execution_record import (
-    ExecutionMetadata,
     ExecutionRecord,
-    ReflectionResult,
-    ToolCall,
 )
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 

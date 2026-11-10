@@ -2,9 +2,8 @@
 """编辑保护与冲突解决（原 preserve_manual_edits/resolve_conflicts）。"""
 
 import time
-from datetime import datetime
-from typing import Dict, List, Any
-from deepresearch_agent.config.settings import conflict_strategy, MAX_WORKERS, BATCH_SIZE
+from typing import List
+from deepresearch_agent.config.settings import conflict_strategy
 
 
 class ManualEditConflictMixin:

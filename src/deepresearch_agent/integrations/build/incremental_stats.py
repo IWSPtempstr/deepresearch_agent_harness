@@ -2,7 +2,7 @@
 """图统计、展示与增量更新总入口（原 get_graph_statistics 等 3 个方法）。"""
 
 import time
-from typing import Dict, List, Any
+from typing import Dict, Any
 from rich.table import Table
 
 

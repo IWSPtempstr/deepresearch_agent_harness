@@ -21,7 +21,6 @@ class EvidenceContradictionMixin:
         evidences = [self.evidence_items[eid] for eid in evidence_ids if eid in self.evidence_items]
         
         # 1. 检测数值类矛盾（通过正则表达式）
-        import re
         for i in range(len(evidences)):
             for j in range(i+1, len(evidences)):
                 # 提取第一个证据中的数值

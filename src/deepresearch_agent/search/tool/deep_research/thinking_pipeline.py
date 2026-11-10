@@ -1,17 +1,16 @@
 # 由 search/tool/deep_research_tool.py 拆分（T-014），方法体与原位置逐行一致。
 """关键词提取与多轮"思考-检索-推理"流水线（原 thinking 及其异步辅助）。"""
 
-from typing import Dict, List, Any, Optional, AsyncGenerator
+from typing import Dict, List
 import uuid
 import re
 from langchain_core.messages import SystemMessage, HumanMessage
 import asyncio
-from deepresearch_agent.config.prompts import BEGIN_SEARCH_QUERY, BEGIN_SEARCH_RESULT, END_SEARCH_RESULT, MAX_SEARCH_LIMIT, \
-    END_SEARCH_QUERY, RELEVANT_EXTRACTION_PROMPT, SUB_QUERY_PROMPT, FOLLOWUP_QUERY_PROMPT, FINAL_ANSWER_PROMPT
+from deepresearch_agent.config.prompts import BEGIN_SEARCH_QUERY, BEGIN_SEARCH_RESULT, END_SEARCH_RESULT, END_SEARCH_QUERY, RELEVANT_EXTRACTION_PROMPT, FINAL_ANSWER_PROMPT
 from deepresearch_agent.search.tool.reasoning.prompts import kb_prompt
-from deepresearch_agent.search.tool.reasoning.search import DualPathSearcher, QueryGenerator
+from deepresearch_agent.search.tool.reasoning.search import QueryGenerator
 from deepresearch_agent.harness.contracts import SourceMode
-from deepresearch_agent.retrieval.base import RetrievalProvider, SearchFilters, ToolCallContext, run_async_from_sync
+from deepresearch_agent.retrieval.base import SearchFilters, ToolCallContext
 
 
 class DeepThinkingMixin:

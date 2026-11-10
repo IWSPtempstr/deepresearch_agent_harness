@@ -2,7 +2,7 @@
 # 本文件保留类声明与导入路径；未拆出的方法：__init__。
 from rich.console import Console
 from deepresearch_agent.config.neo4jdb import get_db_manager
-from deepresearch_agent.config.settings import conflict_strategy, MAX_WORKERS, BATCH_SIZE
+from deepresearch_agent.config.settings import MAX_WORKERS, BATCH_SIZE
 
 from deepresearch_agent.integrations.build.incremental.manual_edit_tracking import ManualEditTrackingMixin
 from deepresearch_agent.integrations.build.incremental.manual_edit_detect import ManualEditDetectMixin

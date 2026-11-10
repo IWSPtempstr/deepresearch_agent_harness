@@ -1,7 +1,7 @@
 # 由 src/deepresearch_agent/graph/graph_consistency_validator.py 拆分（T-016），方法体与原位置逐行一致。
 """统计与处理入口（原 display_graph_stats/process）。"""
 
-from typing import Dict, List, Any, Tuple
+from typing import Dict, Any
 from rich.table import Table
 
 
