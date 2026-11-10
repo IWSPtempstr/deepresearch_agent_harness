@@ -518,6 +518,15 @@ REPORT_MAX_SECTIONS = _get_env_int("REPORT_MAX_SECTIONS", 6) or 6
 REPORT_MAX_MODEL_CALLS = _get_env_int("REPORT_MAX_MODEL_CALLS", 15) or 15
 REPORT_RESERVED_TOKENS = _get_env_int("REPORT_RESERVED_TOKENS", 60000) or 60000
 VERIFICATION_RESERVED_TOKENS = _get_env_int("VERIFICATION_RESERVED_TOKENS", 15000) or 15000
+# T-015：plan_execute_report 编排实现版本（coreact_v1=步级验证控制，staged_v1=整批）。
+# 写入 Run config_snapshot["orchestration"]；缺省 staged_v1 保证存量 Run 兼容。
+RESEARCH_ORCHESTRATION = _get_env_choice(
+    "RESEARCH_ORCHESTRATION",
+    {"coreact_v1", "staged_v1"},
+    "coreact_v1",
+)
+# coreact 步级循环的决策总上限（含初始决策与重试决策），超出即进入报告。
+COREACT_MAX_DECISIONS_FLOOR = _get_env_int("COREACT_MAX_DECISIONS_FLOOR", 2) or 2
 MULTI_AGENT_REFLECTION_ALLOW_RETRY = _get_env_bool(
     "MA_REFLECTION_ALLOW_RETRY", False
 )

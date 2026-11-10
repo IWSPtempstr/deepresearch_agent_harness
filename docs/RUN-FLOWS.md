@@ -33,29 +33,39 @@
 
 ## F2 · plan_execute_report 工作流
 
-多智能体 DAG：Clarifier/Planner → Worker → Reflector → Reporter。
+T-015 起：编排实现按 Run 的 `config_snapshot["orchestration"]` 分派——**`coreact_v1`（默认，新建 Run）为步级验证控制循环**；`staged_v1`（存量 Run）保留原整批管线。
 
-- **触发**：用户消息选择 `workflow_mode=plan_execute_report`。
-- **持久化**：PlanSpec/TaskGraph、每任务 ExecutionRecord、ToolCall、Evidence、分节草稿与 Evidence Card 全部入库；每次计划修订 plan_version+1。
-- **成功出口**：8 项检查（含 evidence_card_coverage）全部通过 → completed。
+### coreact_v1 · 步级验证控制（新 Run 默认）
+
+- **触发**：`workflow_mode=plan_execute_report` 且 `orchestration=coreact_v1`（由 `RESEARCH_ORCHESTRATION` 环境变量控制，默认 coreact_v1）。
+- **持久化**：候选计划/任务、每动作 ExecutionRecord、ToolCall、Evidence、rubric 与 verdict（写入 record 元数据）入库；**每个动作完成后持久提交一次**（幂等 upsert + EXECUTING checkpoint 携带循环游标），恢复粒度为"单个已提交动作之后"。
+- **成功出口**：9 项检查（含 rubric_coverage——报告已引用的账本证据须覆盖步级 rubric 的 required 判词，关键词子串确定性代理）全部通过 → completed。
 
 流程：
 
-1. **澄清 Clarify** — Clarifier 识别歧义；不可消解时抛 NeedsUserInput，Run 进入 needs_user_input 等待用户补充。
-2. **规划 Plan** — TaskDecomposer 拆解为任务 DAG（local/global/hybrid/deep 等类型），PlanReviewer 审校顺序与参数。
-3. **并行执行 Execute** — WorkerCoordinator 按依赖调度：每个任务在深拷贝状态上隔离执行，协调者按计划顺序合并；事件实时发布 task.started / tool.completed。
-4. **反思 Reflect** — Reflector 对目标任务做缺口分析与答案验证；needs_retry 时定向重试目标任务（受次数上限约束）。
-5. **报告 Report** — OutlineBuilder 生成章节大纲；每节 SectionWriter 基于路由到该章的 Evidence Cards 写作并加内联引用；组装后做一致性检查。
-6. **Completion Contract** — 8 项确定性检查，其中 evidence_card_coverage 使用不可变账本的真实 ID，对比卡片集合及其路由/正文/附录覆盖；注意：账本→卡片构建完整性由 Report 阶段保证，verifier 本身不重新核算 card 缺失集。
+1. **澄清 Clarify** — 同 staged：歧义不可消解时进 needs_user_input。
+2. **候选规划 Plan** — TaskDecomposer 产出候选任务图（仅作为 controller 的建议池），rubric 由任务描述+验收标准确定性生成。
+3. **步级循环 Execute（串行）** — 每步：Controller 观察（目标+轨迹摘要+证据缺口+预算）选择下一动作（候选图任务或自行提出）→ 单动作执行（WorkerCoordinator.execute_action，过 SourcePolicy）→ CoreActVerifier 确定性验证（账本证据计数/工具白名单/输出存在/判词覆盖/查询去重）→ 未通过则**至多一次定向重试**（反馈注入，重试动作替换失败动作）→ 步级提交。
+4. **报告 Report** — 与 staged 共用管线（大纲/分节/卡片/内联引用/一致性检查）。
+5. **Completion Contract** — 9 项确定性检查；`rubric_coverage` 失败路由 repair（确定性重建，max_task_retries 上限，无死循环）。
 
 分支与恢复：
 
-- **Token 告急 → 预算兜底报告**（warn）：剩余 Token 低于报告+验证预留时：零模型调用，用已路由卡片确定性生成证据报告（reserved_budget_fallback）。
-- **单任务摘要 → 紧凑报告**（warn）：单节点计划且查询为摘要型：走紧凑确定性报告路径。
-- **证据缺口 → replan**（danger）：min_evidence/claim_support/source_match 失败：清空先前结果回 planning，受 max_replans=2 约束。
-- **卡片覆盖失败 → 修稿**（warn）：修复报告后用 LLM 复查一致性再回验证。
+- **观察驱动**（核心差异）：动作 N+1 的选择依赖动作 N 的验证结果与证据缺口——验证失败的 rubric 反馈进入下一轮决策上下文。
+- **有界性**（danger）：连续 2 次无证据进展 / 重复查询 2 次 / 决策总数超上限（2×max_plan_tasks）/ 预算触及报告预留 → 停止探索进报告；controller 决策畸形 2 次 → 确定性兜底。
+- **崩溃恢复**（warn）：EXECUTING checkpoint 携带未完成循环游标 → 从下一动作续跑（不重放整批）；legacy 快照无游标 → 原 REPORTING 跳转。
+- **暂停/取消**（warn）：动作边界探测 pause；DB cancel 优先于 pause（仲裁不丢取消）。
+- **已知限制**（danger，如实）：外部工具调用与预算计数非 exactly-once（步提交窗口内崩溃重做 ≤1 动作）；v1 串行；租约 fencing 为后续硬化项。
 
-代码入口：`src/deepresearch_agent/agents/multi_agent/orchestrator.py`、`executor/worker_coordinator.py`、`reporter/base_reporter.py`、`harness/workflow.py`（PlanExecuteReportDriver）
+### staged_v1 · 整批管线（存量 Run）
+
+1. **澄清 Clarify** — Clarifier 识别歧义；不可消解时抛 NeedsUserInput。
+2. **规划 Plan** — TaskDecomposer 拆解为任务 DAG，PlanReviewer 审校。
+3. **整批执行 Execute** — WorkerCoordinator 按依赖调度（每任务深拷贝隔离），事件实时发布。
+4. **反思 Reflect** — Reflector 验证与定向重试（次数上限）。
+5. **报告 Report / Completion Contract** — 同 coreact 的 4-5 步（无 rubric_coverage）。
+
+代码入口：`harness/drivers_plan_execute.py`（PlanExecuteReportDriver，orchestration 分派）、`harness/coreact_{controller,verifier,state}.py`、`agents/multi_agent/core/rubric.py`、`executor/worker_coordinator.py`（execute_action）、`harness/runtime.py`（continuation 恢复）、`harness/contracts.py`（rubric_coverage）
 
 ---
 
