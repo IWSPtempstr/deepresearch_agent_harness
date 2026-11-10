@@ -22,14 +22,16 @@
 - **前置**: T-201
 - **涉及**: 新增 `harness/coreact_verifier.py`；测试 `tests/harness/test_coreact_verifier.py`
 - **动作**: 确定性检查（SourcePolicy、账本内 evidence_id、证据计数、查询去重、输出存在）+ 预算门控语义检查（严格 JSON，畸形/异常降级为确定性判定，永不与确定性 fail 相矛盾）。
-- **状态**: pending
+- **状态**: done
+- **备注**: restore 侧同步强化——pending task/rubric 逐一校验，版本偏斜 pending 清空并回退 decide（评审发现原注释声称的围栏不存在，已实际补齐）。
 
 ## T-203 · coreact_controller 步级决策
 
 - **前置**: T-201
 - **涉及**: 新增 `harness/coreact_controller.py`；测试 `tests/harness/test_coreact_controller.py`
-- **动作**: ControllerDecision（下一动作/ready_to_report/reason）；LLM 结构化决策畸形 ×2 后兜底；确定性兜底（候选图可执行任务→下一个，否则 ready_to_report）；no_progress 有界；产出 TaskNode 过 SourcePolicy/依赖校验。
-- **状态**: pending
+- **动作**: ControllerDecision（下一动作/ready_to_report/reason）；每步总尝试 2 次（畸形 JSON / 非法 TaskNode / 调用异常合并计数）后兜底；LLM 内容 ≤20k 字符；多围栏按序解析；确定性兜底（候选图可执行任务→下一个，否则 ready_to_report）；产出 TaskNode 过结构校验（SourcePolicy 于派发层权威执行）。
+- **验收**: focused 19 passed；全量 313 passed/4 skipped；ruff F821/F811/F401 clean；独立评审 PASS（硬化补丁复评）。
+- **状态**: done
 
 ## T-204 · driver 集成：版本分派 + 步循环 + 单动作适配
 

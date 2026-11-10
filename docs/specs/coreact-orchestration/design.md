@@ -40,7 +40,7 @@ report():  既有管线 + 全局 rubric_coverage 契约检查（T-206）
 | `agents/multi_agent/core/rubric.py`（新） | — | `RubricCriterion`/`TaskRubric`/`RubricVerdict`/`StepVerdict` 模型 + `build_task_rubric(task, *, min_evidence, source_mode)` 确定性生成 | 纯新增 |
 | `harness/coreact_state.py`（新） | — | `PendingAction`/`CoreActLoopState`（engine/version/phase/step_index/pending_action/stop_reason/done/no_progress_count） | 纯新增 |
 | `harness/coreact_verifier.py`（新） | — | `CoreActVerifier.verify(rubric, task, records, ledger_view, *, semantic_allowed) -> StepVerdict`；确定性检查：动作工具过 SourcePolicy、evidence_id 在账本、证据计数≥要求、查询非重复、输出存在；语义检查：严格 JSON、畸形/异常→确定性判定 | 纯新增 |
-| `harness/coreact_controller.py`（新） | — | `CoreActController.decide(...) -> ControllerDecision`（TaskNode/ready_to_report/reason）；LLM 结构化输出，畸形 JSON 最多 2 次重试；确定性兜底：候选图还有可执行任务→取下一个，否则 ready_to_report | 纯新增 |
+| `harness/coreact_controller.py`（新） | — | `CoreActController.decide(...) -> ControllerDecision`（TaskNode/ready_to_report/reason）；LLM 结构化输出，每步总尝试 2 次（畸形 JSON / 非法 TaskNode / 调用异常合并计数），随后确定性兜底：候选图还有可执行任务→取下一个，否则 ready_to_report；回传内容长度上限防资源耗尽 | 纯新增 |
 | `harness/drivers_plan_execute.py` | staged 编排 | `__init__` 读 `config_snapshot.orchestration`（缺省 staged_v1）；coreact 路径：`plan()` 产候选图+LoopState，`execute()` 跑步循环（串行）；`step_commit: Callable\|None = None` 属性供 runtime 注入；`_uses_compact_report`/`_build_reserved_budget_report` 启发式适配动作账本；legacy staged 路径原样保留 | 类名/构造签名/协议方法不变；`test_builtin_learning_loop.py:260` 直构兼容 |
 | `agents/multi_agent/executor/worker_coordinator.py` | execute_plan 批量 | 新增公共 `execute_action(task, state, signal)`——薄封装现有 `_execute_single_task` | 纯新增方法 |
 | `harness/runtime_execution.py` | 创建 driver、执行阶段 | 构造后对声明 `supports_step_commit=True` 的 driver 注入 `driver.step_commit = self._commit_coreact_step`；恢复重放覆盖 continuation checkpoint | F1/fake driver 无该类属性，零影响 |
@@ -58,7 +58,7 @@ report():  既有管线 + 全局 rubric_coverage 契约检查（T-206）
 - **决策 schema**：`ControllerDecision{action: TaskNode|null, ready_to_report: bool, reason}`；动作工具/来源创建后过 `SourcePolicy` 校验，拒绝即计入 no_progress。
 - **verdict**：`StepVerdict{rubric_id, task_id, passed, weighted_score, criteria:[{criterion_id,passed,reason,evidence_ids}], retry_reason}`；持久化进 record metadata + workflow_state。
 - **持久化/幂等**：步提交复用 `_persist_plan/_persist_execution`（stable task_id/record_id/evidence_id upsert 天然去重）；checkpoint SHA-256 校验不变。
-- **错误分类**：动作异常 → 失败 record（既有 `_create_failure_record`）；verifier LLM 异常 → 确定性判定；决策 LLM 畸形 ×2 → 兜底；`RunLeaseLost` → 静默让位（不写状态）；取消/暂停 → 步间检查点生效（当前动作无法硬停，等同 F2 既有限制，文档注明）。
+- **错误分类**：动作异常 → 失败 record（既有 `_create_failure_record`）；verifier LLM 异常 → 确定性判定；决策 LLM 畸形 ×2（总尝试上限）→ 兜底；`RunLeaseLost` → 静默让位（不写状态）；取消/暂停 → 步间检查点生效（当前动作无法硬停，等同 F2 既有限制，文档注明）。
 - **崩溃窗口语义**：提交=动作完成后；窗口内崩溃丢失该动作（≤1），恢复后重做该动作（外部调用可能重复一次）；相比原整批丢失是严格改进。pre-invoke intent 行列为已知限制（§7）。
 - **终态**：只有 Contract 通过才 completed（持久层门禁不变）；controller 的 ready_to_report 仅意味着"进入报告"，不是完成。
 

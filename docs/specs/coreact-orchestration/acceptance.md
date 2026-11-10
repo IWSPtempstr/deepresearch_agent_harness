@@ -12,6 +12,18 @@
 - 2026-11-10 侦察结论（三路 Explore）：EXECUTING checkpoint 现行语义 = 批次完成→REPORTING（恢复规则须版本感知）；工具/证据持久化在整批返回后（需步级提交）；parallel 分支缺 stop_predicate（v1 串行）；状态机 EXECUTING→EXECUTING 已存在（循环 phase 不进 RunStatus）；契约 kind 列为字符串（rubric_coverage 可代码级扩展）。
 - 外部来源（论文/仓库）仅吸收推理时机制，不引入运行时/训练依赖：Co-ReAct（步级 rubric+verify+单次重试）、MiroThinker-H1（局部/全局验证分层）、Marco（预算内候选验证、退化重启思想→no_progress 有界）、QUEST（trusted/untrusted/uncertain 记为后续 ContextState 硬化项，本期不做）。
 
+## T-203（2026-11-10）
+
+- 改动：新增 `harness/coreact_controller.py`（结构化 LLM 决策 + 每步总尝试 2 次 + 确定性候选/ready 兜底 + 20k 字符长度上限 + 多围栏按序解析）。
+- 门禁：focused 19 passed；全量 **313 passed, 4 skipped（50s）**；ruff F821,F811,F401 clean。
+- 独立评审：**PASS**；非阻断建议已落地：异常调用恰为 2 次断言、裸 response 分支、超长响应、多个 fenced block、ready 优先、query 回退、非 dict 拒绝；规范改成“每步总尝试 2 次”。
+- 提示注入边界：goal/recent_queries/rubric feedback 拼入 user prompt，可能诱导低质量/提前 report/预算浪费；产物仍受 TaskNode/source policy/Budget/Completion Contract 门禁，不新增权限提升。
+
+- 改动：新增 `harness/coreact_verifier.py`（五类确定性 criterion + 预算门控语义惩罚）；`coreact_state.restore` 强化 pending 校验（版本偏斜清空→decide）。
+- 门禁：focused 32 passed；全量 **294 passed, 4 skipped（54s）**；ruff F821,F811 clean。
+- 独立评审：首轮 BLOCK（restore 围栏注释失实——`pending_action.rubric` 实为裸 dict 未校验；预算门控测试假阳性；边界用例缺口）→ 修复 + 补 8 用例 → 复评 **PASS**。
+- 备注（供 T-204）：restore 清 pending 后 phase 已同步回退 decide；语义 ValueError 由 driver 捕获转失败记录。
+
 ## T-201（2026-11-10）
 
 - 改动：新增 `agents/multi_agent/core/rubric.py`（TaskRubric/StepVerdict + 确定性生成 + 4 字滑窗判词抽取）、`harness/coreact_state.py`（CoreActLoopState/PendingAction + 安全还原）；新增 13 个单测。
