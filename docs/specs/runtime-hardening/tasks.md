@@ -81,8 +81,11 @@
 ## T-310 · 收尾
 
 - **前置**: T-309
-- **涉及**: acceptance.md 汇总；wc -l 复核；全量测试。
-- **状态**: pending
+- **涉及**: acceptance.md 汇总；wc -l 复核；全量测试；drivers_plan_execute.py（967 行，T-015 期间增长）与 runtime_execution.py（584 行）补拆。
+- **结果**: drivers_plan_execute → {coreact_loop 356, coreact_support 88, report_pipeline 281, driver_adapters 99} + 骨架 123；runtime_execution → runtime_step_hooks 103 + 主体 491。settings_sections.py（575）为纯配置常量分组、无逻辑，豁免并记录。F401 全仓归零（含 T-015 期间新增测试的 8 处）。
+- **教训**: ruff F401 --fix 会误删拆分模块的必要 import 与 facade re-export——拆分后禁用 --fix，改用 splitlib 生成 import + F821 门禁；`_skip_docstring` 需支持 docstring 前的注释行（drivers 文件踩中）。
+- **门禁**: 全量 372 passed/4 skipped；F821/F811/F401 clean；e2e 2 passed。
+- **状态**: done
 
 ## 进度摘要
 

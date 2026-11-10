@@ -1,10 +1,8 @@
 """T-308: ContextState 可信度分层测试。"""
-from deepresearch_agent.agents.multi_agent.core.rubric import build_task_rubric
 from deepresearch_agent.harness.coreact_state import ContextState
 from deepresearch_agent.harness.drivers_plan_execute import PlanExecuteReportDriver
-from deepresearch_agent.harness.run_context import RunContext
 
-from test_coreact_driver import FakeOrchestrator, ScriptedLLM, action, make_context, plan_spec, ready
+from test_coreact_driver import FakeOrchestrator, ScriptedLLM, action, make_context, ready
 
 
 def test_context_state_updates_from_verdicts():

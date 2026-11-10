@@ -1,11 +1,7 @@
-# 由 harness/runtime.py 拆分（T-014），方法体与原位置逐行一致。
-"""Run 执行主循环与心跳（原 execute_run/_execute_run_inner/_run_with_heartbeat；状态机主循环整块搬移）。"""
-from __future__ import annotations
-
-
+# 由 harness/runtime_execution.py 拆分（T-016），方法体与原位置逐行一致。
+# 本文件保留类声明与导入路径；未拆出的方法：execute_run, _execute_run_inner, _run_with_heartbeat。
 import asyncio
 import inspect
-import json
 import time
 import uuid
 from typing import Any
@@ -19,8 +15,11 @@ from deepresearch_agent.config.settings import REPORT_RESERVED_TOKENS, VERIFICAT
 from deepresearch_agent.models.prefix_cache import set_current_run
 from deepresearch_agent.harness.report_safety import sanitize_report
 
+from deepresearch_agent.harness.runtime_step_hooks import RuntimeStepHooksMixin
 
-class RuntimeExecutionMixin:
+class RuntimeExecutionMixin(RuntimeStepHooksMixin):
+
+
     async def execute_run(self, run_id: str) -> RunContext:
         """观测外壳：span + 指标；真正的执行语义在 _execute_run_inner。"""
         from deepresearch_agent.observability import ACTIVE_RUNS, RUN_DURATION_SECONDS, RUN_TOTAL, get_tracer
@@ -45,98 +44,6 @@ class RuntimeExecutionMixin:
             finally:
                 ACTIVE_RUNS.dec()
                 RUN_DURATION_SECONDS.observe(max(0.0, time.monotonic() - started_at))
-
-    def _make_intent_persist(self, context: RunContext, driver: Any, *, owner: str = ""):
-        """T-016 intent：动作派发前持久化 plan/task 行（running）与游标 checkpoint。"""
-
-        async def _persist_intent(current_driver: Any) -> None:
-            if self.trajectory is None:
-                return
-            if owner:
-                run = await self.runs.get(context.run_id)
-                if run is None or run.lease_owner != owner:
-                    from deepresearch_agent.harness.errors import RunLeaseLost
-
-                    raise RunLeaseLost("租约已易主，放弃 intent 写入")
-            await self._persist_plan(context, current_driver)
-            current_driver.context.budget_usage = budget_holder_usage(context)
-            context.workflow_state = current_driver.snapshot()
-            await self.checkpoints.save(context, "executing")
-
-        def budget_holder_usage(ctx):
-            return ctx.budget_usage
-
-        return _persist_intent
-
-    def _make_lease_probe(self, context: RunContext, owner: str):
-        """T-016 fencing：动作边界校验租约仍归属本实例；失效即让位。"""
-
-        async def _lease_held() -> bool:
-            run = await self.runs.get(context.run_id)
-            return run is not None and run.lease_owner == owner
-
-        return _lease_held
-
-    def _make_step_commit(self, context: RunContext, driver: Any, budget: BudgetManager, *, owner: str = ""):
-        """Build the per-action persistence callback for step-driven drivers."""
-        last_published_step = {"value": -1}
-
-        async def _step_commit(current_driver: Any) -> None:
-            # 闭包捕获 owner 供 _commit_coreact_step 做 fencing 校验
-            # Budget accounting is owned by the runtime; the driver only records
-            # what it consumed so far.
-            current_driver.context.budget_usage = budget.usage
-            await self._commit_coreact_step(context, current_driver, budget, owner=owner)
-            loop = getattr(current_driver, "coreact_loop", None)
-            step_index = getattr(loop, "step_index", 0)
-            if step_index != last_published_step["value"]:
-                # 同一 step 的崩溃重放（重放走 _persist_execution，不经此回调）
-                # 不会重复发布；这里再按 step_index 防御一次。
-                last_published_step["value"] = step_index
-                await self.events.publish(
-                    context.run_id,
-                    "coreact.step_committed",
-                    stage="executing",
-                    payload={
-                        "step_index": step_index,
-                        "decisions_used": getattr(loop, "decisions_used", 0),
-                        "remaining_tokens": budget.remaining_tokens(),
-                    },
-                )
-
-        return _step_commit
-
-    def _make_pause_probe(self, context: RunContext):
-        """Build the pause probe used at action boundaries by step drivers."""
-
-        async def _pause_requested() -> bool:
-            run = await self.runs.get(context.run_id)
-            if run is None:
-                return False
-            if run.status == "pausing":
-                return True
-            snapshot = json.loads(run.config_snapshot_json or "{}")
-            return bool(snapshot.get("pause_requested"))
-
-        return _pause_requested
-
-    async def _resolve_coreact_pause(self, context: RunContext) -> RunStatus:
-        """Arbitrate pause vs a DB-level cancel: cancellation wins, otherwise pause.
-
-        Returns the terminal/boundary status the run landed in. Resume would
-        clear pause/cancel flags, so a lost cancellation here would be final.
-        """
-        run = await self.runs.get(context.run_id)
-        if run is not None and run.cancellation_requested:
-            context.cancellation_requested = True
-            if context.status is not RunStatus.CANCELLING:
-                await self._transition(context, RunStatus.CANCELLING, event_type="run.cancelling")
-            await self._transition(context, RunStatus.CANCELLED, event_type="run.cancelled")
-            return RunStatus.CANCELLED
-        context.resume_from_status = RunStatus.EXECUTING
-        await self._transition(context, RunStatus.PAUSED, event_type="run.paused")
-        await self.runs.clear_pause_request(context.run_id)
-        return RunStatus.PAUSED
 
     async def _execute_run_inner(self, run_id: str) -> RunContext:
         owner = f"harness-{uuid.uuid4().hex}"

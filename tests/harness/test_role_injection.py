@@ -1,5 +1,4 @@
 """T-305: 角色模型注入与归因一致性（recorded == actual）。"""
-import asyncio
 
 from deepresearch_agent.agents.multi_agent.integration.multi_agent_factory import MultiAgentFactory
 from deepresearch_agent.harness.contracts import RunStatus, SourceMode, WorkflowMode

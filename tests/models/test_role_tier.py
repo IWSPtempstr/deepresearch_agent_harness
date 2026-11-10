@@ -1,5 +1,4 @@
 """T-304: 角色级模型解析单测。"""
-import pytest
 
 from deepresearch_agent.models.model_tier import (
     resolve_model_for,

@@ -27,6 +27,14 @@
 | AC-C2 | src/tests 非 facade F401=0 | 待实现（T-303） |
 | AC-10 | 每阶段全量 pytest 与基线一致（新增除外） | 每阶段 |
 
+## T-310 · 收尾验收（2026-11-11）
+
+- 全量：**372 passed, 4 skipped**（基线 355 + 新增 17）；F821/F811/F401 clean（changed-scope 与全仓）。
+- 行数门禁：src/ 最大 575（settings_sections.py，纯配置常量、无逻辑，豁免）；6 个点名文件全部 ≤500。
+- F401：299 处（T-014/T-301 机械复制）+ 8 处（T-015/T-016 新增测试）全清；facade 以 `__all__`/显式 noqa 豁免。
+- **过程教训（两条）**：ruff F401 --fix 误删拆分模块必要 import（base_reporter re-export 被全量测试抓回）——拆分后改用 splitlib 生成 import + F821 门禁；`_skip_docstring` 不支持 docstring 前注释行导致 import 为空——drivers 文件踩中后修复 splitlib。
+- e2e：2 passed（happy path + pause/resume，真实 Runtime + SQLite）。
+
 ## 已知限制（随实现更新）
 
 - fencing 为 check-then-write（TOCTOU 窗口缩小非消除）；全量条件 UPDATE 留后续。
