@@ -21,9 +21,11 @@
 ## T-302 · Track C：settings.py facade 化拆分
 
 - **前置**: T-301
-- **涉及**: `config/settings.py` + 新 `config/settings_core.py`、`config/settings_sections.py`
-- **动作**: 依赖单向化拆分；验收 = `dir(settings)` 公开名字集合前后一致 + 全量测试 + `RESEARCH_ORCHESTRATION` 等关键配置读取冒烟。
-- **状态**: pending
+- **涉及**: `config/settings.py`（18 行 facade）+ 新 `config/settings_core.py`（166 行：helpers/路径/基础设施）+ `config/settings_sections.py`（570 行：业务分组）
+- **动作**: AST 验证依赖单向（core 引用 sections 名字=空）；sections 显式 import core 名字与 os/Path 模块；facade star re-export + 私有 helper/顶层 import（os/Path/Optional/load_dotenv）显式 re-export。
+- **结果**: `dir(settings)` 公开名字集合拆分前后 **173 个名字完全一致**；config reload 测试按依赖顺序修正（core→sections→facade）。
+- **门禁**: 全量 355 passed/4 skipped；F821/F811 clean。
+- **状态**: done
 
 ## T-303 · Track C：F401 清理
 
