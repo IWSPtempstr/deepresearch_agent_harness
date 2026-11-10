@@ -182,6 +182,17 @@ class CoreActController:
                 task = TaskNode.model_validate(matched)
             except ValidationError:
                 return None
+            requested_type = task_payload.get("task_type")
+            if requested_type and requested_type != task.task_type:
+                return None
+            # Candidate identity/source/type are frozen by the planner; the
+            # controller may refine only the query/description for a targeted retry.
+            query = task_payload.get("query")
+            if isinstance(query, str) and query.strip():
+                task.parameters = {**task.parameters, "query": query.strip()}
+            description = task_payload.get("description")
+            if isinstance(description, str) and description.strip():
+                task.description = description.strip()
             if task.source_mode != context.source_mode or not self._task_type_allowed(
                 context.source_mode, str(task.task_type)
             ):

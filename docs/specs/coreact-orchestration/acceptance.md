@@ -73,3 +73,22 @@
 - **预算计数非 exactly-once**（T-205 评审定稿）：`_persist_execution` 的"已存在行重复提交不计费"仅覆盖正常重复提交；consume→prepare 之间崩溃（行不存在）重放会再次计费；usage 持久化与心跳写库也非原子。崩溃恢复不保证预算计数 exactly-once，只保证行级不重复。
 - v1 串行执行；租约 fencing generation、pre-invoke intent 行、ContextState(trusted/untrusted/uncertain)、语义 rubric 富化均为已记录后续硬化项。
 - 暂停顺序差异：coreact 暂停路径先 clear pause 再写 paused checkpoint（legacy 相反）；因 checkpoint 包含完整 context（含 resume_from_status=EXECUTING），语义等价，但顺序不逐字一致（T-205 评审记录）。
+
+
+## T-208 · e2e 正确性与收尾（2026-11-10）
+
+- 新增 `tests/harness/test_coreact_e2e.py` 两条真实 HarnessRuntime + SQLite + scripted LLM e2e：
+  1. happy path：2 个 controller 动作 → 每步 step_commit → 报告 → Contract（rubric_coverage/min_evidence）→ completed；断言计划/任务/tool_call/evidence/step event 行数与状态。
+  2. pause/resume：第一动作提交后请求 pause，Run 落 PAUSED；新 Runtime/driver 从 checkpoint 恢复，只执行 plan_2（不重跑 plan_1）；断言 stable tool_call、evidence 共 2 行、step_index 事件 [1,2]、pause 标志已清、终验通过。
+- e2e 首次运行发现真实恢复 bug：`ExecutionRecord.evidence: List[Any]` checkpoint JSON 还原后仍是 dict，`evidence_results()` 访问 `.result_id` 崩溃；已在 `PlanExecuteReportDriver._restore()` 按需调用 `RetrievalResult.from_dict` 修复，恢复 e2e 验证覆盖该路径。
+- T-204 随 e2e review 加固：候选 task_id 命中计划项时只允许 refine query/description，冻结 task_type/source_mode/候选身份；controller retry 重复 query 在派发前拒绝。相关回归测试已补。
+- 门禁：e2e **2 passed**；全量 `PYTHONPATH=src:. .venv/bin/python -m pytest tests/ -q` → **355 passed, 4 skipped, 8 warnings in 56.60s**；changed-scope Ruff F821/F811 clean；新增测试 Ruff F401 clean；`git diff --check` clean；无 debug print、无 Docker、无真实 LLM。
+- 独立评审：首次找到 debug print（BLOCK）→ 删除；最终复评环境缺 `langchain_core`，无法独立重跑，但检查磁盘确认 print 已删除；此前独立 e2e review 对数据库行/合同/恢复逻辑为 PASS。测试通过数字是实现方本地项目 `.venv` 的真实输出，不冒充评审方复跑。
+
+## 最终验收汇总（T-015）
+
+- P0 + T-201..T-208 全部 done；每阶段有独立 code review（T-208 的最终评审受 reviewer 环境依赖缺失限制，已如实记录）。
+- 最终全量：**355 passed, 4 skipped, 8 warnings**（Python 3.12 项目 `.venv`；不使用 Docker）。
+- 外部接口/DB workflow_mode 不变；新 Run 以 `config_snapshot.orchestration=coreact_v1`；缺 marker 的旧 Run 走 staged_v1。
+- 实际实现是“真实 HarnessRuntime + SQLite + scripted LLM” e2e 与单元/恢复测试；不声称完成真实 provider/真实模型、多节点服务、进程 SIGKILL 故障注入或离线训练实验。
+- 已知限制：预算计数非 exactly-once（T-205 §已知限制）；外部动作崩溃窗口可能重做 ≤1 动作；v1 串行；rubric_coverage 是关键词子串代理、不是语义蕴含；暂停/租约 fencing 仍有后续硬化空间。

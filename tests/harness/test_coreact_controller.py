@@ -186,3 +186,20 @@ class TestHardening:
         controller = CoreActController(llm=FakeLLM(["[1,2,3]", "[1,2,3]"]))
         decision = controller.decide(make_context())
         assert decision.source == "fallback_candidate"
+
+
+def test_existing_candidate_id_allows_query_refinement_but_freezes_type_and_source():
+    task = {"task_id": "plan_1", "task_type": "web_search", "description": "初始检索", "source_mode": "web", "parameters": {"query": "旧查询", "top_k": 3}}
+    context = make_context(eligible_tasks=[task])
+    payload = {
+        "ready_to_report": False,
+        "task": {"task_id": "plan_1", "task_type": "web_search", "description": "补充一手来源", "query": "新查询"},
+        "reason": "重试修正",
+    }
+    controller = CoreActController(llm=FakeLLM([llm_json(payload)]))
+    decision = controller.decide(context)
+    assert decision.action is not None
+    assert decision.action.task_id == "plan_1"
+    assert decision.action.task_type == "web_search" and decision.action.source_mode == "web"
+    assert decision.action.description == "补充一手来源"
+    assert decision.action.parameters == {"query": "新查询", "top_k": 3}

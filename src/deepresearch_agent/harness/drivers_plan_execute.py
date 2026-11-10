@@ -91,6 +91,14 @@ class PlanExecuteReportDriver:
                 item if isinstance(item, ExecutionRecord) else ExecutionRecord.model_validate(item)
                 for item in self.state.execution_records
             ]
+            # ExecutionRecord.evidence is List[Any] for circular-import reasons;
+            # checkpoint JSON restore therefore leaves dicts that downstream
+            # evidence/report adapters expect to be RetrievalResult instances.
+            for record in self.state.execution_records:
+                record.evidence = [
+                    evidence if isinstance(evidence, RetrievalResult) else RetrievalResult.from_dict(evidence)
+                    for evidence in record.evidence
+                ]
         if payload.get("planner_result"):
             self.planner_result = PlannerResult.model_validate(payload["planner_result"])
         if payload.get("report_result"):
@@ -420,7 +428,13 @@ class PlanExecuteReportDriver:
             return None
         existing = next((node for node in plan.task_graph.nodes if node.task_id == action.task_id), None)
         if existing is not None:
-            return existing if existing.status == "pending" else None
+            if existing.status != "pending" or existing.source_mode != action.source_mode or existing.task_type != action.task_type:
+                return None
+            # Candidate identity/source/type are frozen by the planner, but the
+            # controller may refine query/description for a targeted retry.
+            existing.description = action.description
+            existing.parameters = dict(action.parameters)
+            return existing
         if len(plan.task_graph.nodes) >= self.context.budget_limits.max_plan_tasks:
             return None
         if action.source_mode != self.context.source_mode.value:

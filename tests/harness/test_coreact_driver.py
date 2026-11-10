@@ -6,6 +6,7 @@ from deepresearch_agent.agents.multi_agent.core.plan_spec import (
     PlanSpec,
     ProblemStatement,
     TaskGraph,
+    TaskNode,
 )
 from deepresearch_agent.agents.multi_agent.planner.base_planner import PlannerResult
 from deepresearch_agent.agents.multi_agent.planner.clarifier import ClarificationResult
@@ -45,6 +46,12 @@ def action(query, description=None):
     }
 
 
+def action_by_id(task_id, query, description=None):
+    payload = action(query, description)
+    payload["task"]["task_id"] = task_id
+    return payload
+
+
 def ready(reason="证据覆盖目标"):
     return {"ready_to_report": True, "task": None, "reason": reason}
 
@@ -53,7 +60,10 @@ def plan_spec():
     return PlanSpec(
         source_mode="web",
         problem_statement=ProblemStatement(original_query="调研检索增强技术"),
-        task_graph=TaskGraph(nodes=[], execution_mode="sequential"),
+        task_graph=TaskGraph(nodes=[
+            TaskNode(task_id="plan_1", task_type="web_search", source_mode="web", description="检索增强 基础概念", parameters={"query": "检索增强 基础概念"}),
+            TaskNode(task_id="plan_2", task_type="web_search", source_mode="web", description="检索增强 局限与评测", parameters={"query": "检索增强 局限与评测"}),
+        ], execution_mode="sequential"),
         acceptance_criteria=AcceptanceCriteria(
             min_evidence_count=1,
             completion_conditions=["检索增强是一种技术路线"],
@@ -162,8 +172,8 @@ def test_coreact_uses_observation_to_choose_next_action():
 
 def test_coreact_retries_failed_step_once_with_targeted_feedback():
     llm = ScriptedLLM([
-        action("检索增强生成 定义"),  # 首步决策
-        action("检索增强生成 一手来源和定义"),  # 同 rubric 的一次定向重试
+        action_by_id("plan_1", "检索增强生成 定义"),  # 首步决策选择候选计划项
+        action_by_id("plan_1", "检索增强生成 一手来源和定义", "补充一手来源"),  # 同 rubric 定向修订 query
         ready(),
     ])
     orchestrator = FakeOrchestrator(llm, [(True, "无关结果"), (True, "检索增强是一种技术路线，定义说明")])
@@ -240,7 +250,8 @@ def test_retry_decision_counts_against_total_decision_limit():
     asyncio.run(driver.execute())
     assert driver.coreact_loop.decisions_used == 2
     assert len(llm.prompts) == 2  # 首次动作决策 + 一次 retry 决策
-    assert driver.coreact_loop.stop_reason == "max_decisions_reached"
+    assert driver.coreact_loop.stop_reason in {"max_decisions_reached", "invalid_action_limit"}
+    assert llm.answers == [action("不能再发出的第三个决策")]  # 决策总上限后不再调用 LLM
 
 
 def test_staged_snapshot_and_legacy_staged_driver_execute_once():

@@ -3,9 +3,7 @@ from types import SimpleNamespace
 
 import asyncio
 
-import pytest
-
-from deepresearch_agent.harness.contracts import ContractCheckData, ContractEvaluator
+from deepresearch_agent.harness.contracts import ContractEvaluator
 from deepresearch_agent.harness.contracts import RunStatus, SourceMode, WorkflowMode
 from deepresearch_agent.agents.multi_agent.core.execution_record import (
     ExecutionMetadata,
@@ -119,7 +117,6 @@ class TestRepairRouting:
             ReportResult,
         )
         from deepresearch_agent.harness.drivers_plan_execute import PlanExecuteReportDriver
-        from deepresearch_agent.harness.report_fallbacks import _evidence_only_report
 
         context = RunContext(
             run_id="run-repair2", session_id="s2", trigger_message_id="m2",
@@ -187,7 +184,7 @@ class TestEvaluatorRouting:
         from deepresearch_agent.persistence import Database
         from deepresearch_agent.persistence.repositories import ContractRepository
         from backend.app.schemas import MessageCreate, RunCreate, SessionCreate
-        from deepresearch_agent.persistence.repositories import MessageRepository, RunRepository, SessionRepository
+        from deepresearch_agent.persistence.repositories import RunRepository, SessionRepository
 
         db = Database(f"sqlite+aiosqlite:///{(tmp_path / 'contract.db').as_posix()}")
         await db.create_schema()

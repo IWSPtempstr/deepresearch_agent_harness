@@ -66,15 +66,16 @@
 ## T-208 · e2e 正确性与收尾
 
 - **前置**: T-206、T-207
-- **涉及**: `tests/harness/test_coreact_e2e.py`（或并入 recovery 测试）；acceptance.md 汇总
-- **动作**: 通过 runtime 的完整 e2e（scripted LLM）：happy path 全链 + 步间崩溃恢复 + 预算耗尽 reserved fallback；全仓测试绿；验收汇总与已知限制清单。
-- **状态**: pending
+- **涉及**: `tests/harness/test_coreact_e2e.py` + T-205 `test_coreact_recovery.py`；acceptance.md 汇总
+- **动作**: 真实 HarnessRuntime + SQLite + scripted LLM e2e：步级执行→报告→Contract→completed；步间 pause→checkpoint→新 Runtime 恢复到下一动作；断言 plan/task/toolcall/evidence/step event 与 rubric_coverage 持久结果；全量测试、ruff、文档状态核对。
+- **验收**: e2e 2 passed；全量 355 passed/4 skipped；changed-scope F821/F811 clean、新增测试 F401 clean；`git diff --check` clean；T-208 independent reviewer 初次发现的 debug print 已删除。最终复评环境缺 langchain_core 无法重跑，但此前独立审查已核对 e2e 逻辑与数据库断言；实际测试由本地项目 .venv 执行。
+- **状态**: done
 
 ## 进度摘要
 
-- 已完成：1（P0）
+- 已完成：9（P0 + T-201..T-208）
 - 进行中：0
 - 阻塞：0
-- 待执行：8
-- 下一步：T-201
+- 待执行：0
+- 下一步：无
 - 最后更新：2026-11-10
