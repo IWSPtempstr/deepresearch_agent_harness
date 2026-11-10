@@ -52,13 +52,37 @@ class CoreActLoopState(BaseModel):
 def loop_state_from_workflow_state(
     workflow_state: Optional[Dict[str, Any]],
 ) -> Optional[CoreActLoopState]:
-    """从 RunContext.workflow_state 安全还原；无/畸形返回 None（按 legacy 处理）。"""
+    """从 RunContext.workflow_state 安全还原；无/畸形返回 None（按 legacy 处理）。
+
+    pending_action 内的 task/rubric 是原始 dict（跨版本写入），此处逐一
+    model_validate：无效的 pending（如版本偏斜的 rubric kind）不使整个
+    状态降级为 legacy，而是清空 pending——恢复后从 decide 重新决策，
+    丢失语义与崩溃窗口一致（≤1 个动作）。
+    """
     if not isinstance(workflow_state, dict):
         return None
     raw = workflow_state.get(COREACT_STATE_KEY)
     if not isinstance(raw, dict) or raw.get("engine") != COREACT_ENGINE:
         return None
     try:
-        return CoreActLoopState.model_validate(raw)
+        state = CoreActLoopState.model_validate(raw)
     except Exception:
         return None
+    if state.pending_action is not None:
+        if not _pending_action_valid(state.pending_action):
+            state.pending_action = None
+            # pending 被清空后循环必须重新决策，不能停留在 act/verify 中段
+            state.phase = "decide"
+    return state
+
+
+def _pending_action_valid(pending: PendingAction) -> bool:
+    from deepresearch_agent.agents.multi_agent.core.plan_spec import TaskNode
+    from deepresearch_agent.agents.multi_agent.core.rubric import TaskRubric
+
+    try:
+        TaskNode.model_validate(pending.task)
+        TaskRubric.model_validate(pending.rubric)
+        return True
+    except Exception:
+        return False

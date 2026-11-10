@@ -4,7 +4,6 @@ import pytest
 from pydantic import ValidationError
 
 from deepresearch_agent.agents.multi_agent.core.rubric import (
-    CriterionKind,
     RubricCriterion,
     StepVerdict,
     TaskRubric,
@@ -94,10 +93,17 @@ class TestCoreActLoopState:
         assert finished.continuation_pending() is False
 
     def test_workflow_state_roundtrip(self):
+        from deepresearch_agent.agents.multi_agent.core.rubric import build_task_rubric
+
+        rubric = build_task_rubric("t1", description="d", source_mode="web", min_evidence=1)
         state = CoreActLoopState(
             phase="verify",
             step_index=3,
-            pending_action=PendingAction(task={"task_id": "t1"}, rubric={"rubric_id": "r1"}, attempt=2),
+            pending_action=PendingAction(
+                task={"task_id": "t1", "task_type": "web_search", "description": "d", "source_mode": "web"},
+                rubric=rubric.model_dump(),
+                attempt=2,
+            ),
             no_progress_count=1,
         )
         raw = state.to_workflow_state()
@@ -155,3 +161,57 @@ class TestCoreActLoopState:
         assert state.step_index == 4 and isinstance(state.step_index, int)
         with pytest.raises(ValidationError):
             CoreActLoopState.model_validate({"engine": "coreact_v1", "step_index": "abc"})
+
+
+class TestPendingActionSanitization:
+    def test_version_skewed_rubric_clears_pending_keeps_loop(self):
+        # 版本偏斜：pending rubric 携带未知 kind（未来版本写入）。
+        # 恢复不得降级为 legacy，也不得把坏 pending 放行给 verifier——
+        # 清空 pending、保留循环状态（丢失语义 ≤1 动作，与崩溃窗口一致）。
+        raw = {
+            "coreact": {
+                "engine": "coreact_v1",
+                "phase": "verify",
+                "step_index": 2,
+                "done": False,
+                "pending_action": {
+                    "task": {"task_id": "t1", "task_type": "web_search", "description": "d"},
+                    "rubric": {
+                        "rubric_id": "r1", "task_id": "t1",
+                        "criteria": [
+                            {"criterion_id": "c1", "kind": "future_kind", "description": "x"}
+                        ],
+                    },
+                    "attempt": 1,
+                },
+            }
+        }
+        state = loop_state_from_workflow_state(raw)
+        assert state is not None and state.continuation_pending() is True
+        assert state.pending_action is None  # 坏 pending 被清空
+        assert state.step_index == 2
+
+    def test_valid_pending_survives_restore(self):
+        from deepresearch_agent.agents.multi_agent.core.rubric import build_task_rubric
+
+        rubric = build_task_rubric("t1", description="d", source_mode="web", min_evidence=1)
+        raw = {
+            "coreact": {
+                "engine": "coreact_v1",
+                "phase": "act",
+                "done": False,
+                "pending_action": {
+                    "task": {
+                        "task_id": "t1", "task_type": "web_search",
+                        "description": "d", "source_mode": "web",
+                    },
+                    "rubric": rubric.model_dump(),
+                    "attempt": 2,
+                    "retry_reason": "补充一手来源",
+                },
+            }
+        }
+        state = loop_state_from_workflow_state(raw)
+        assert state is not None
+        assert state.pending_action is not None
+        assert state.pending_action.attempt == 2
