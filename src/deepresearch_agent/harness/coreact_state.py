@@ -16,6 +16,10 @@ COREACT_STATE_VERSION = 1
 COREACT_STATE_KEY = "coreact"
 
 
+class CoreActPaused(RuntimeError):
+    """Raised when a pause is requested at an action boundary."""
+
+
 class PendingAction(BaseModel):
     """已决定、正在执行或等待验证的动作（含其 rubric 与重试计数）。"""
 

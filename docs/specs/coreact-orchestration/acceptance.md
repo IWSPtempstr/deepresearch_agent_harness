@@ -12,6 +12,13 @@
 - 2026-11-10 侦察结论（三路 Explore）：EXECUTING checkpoint 现行语义 = 批次完成→REPORTING（恢复规则须版本感知）；工具/证据持久化在整批返回后（需步级提交）；parallel 分支缺 stop_predicate（v1 串行）；状态机 EXECUTING→EXECUTING 已存在（循环 phase 不进 RunStatus）；契约 kind 列为字符串（rubric_coverage 可代码级扩展）。
 - 外部来源（论文/仓库）仅吸收推理时机制，不引入运行时/训练依赖：Co-ReAct（步级 rubric+verify+单次重试）、MiroThinker-H1（局部/全局验证分层）、Marco（预算内候选验证、退化重启思想→no_progress 有界）、QUEST（trusted/untrusted/uncertain 记为后续 ContextState 硬化项，本期不做）。
 
+## T-205（2026-11-10）
+
+- 改动：`_commit_coreact_step`（幂等步级持久化 + EXECUTING checkpoint）；step_commit/pause_probe 注入（`supports_step_commit` duck-typing，legacy/fake driver 零影响）；`_resolve_coreact_pause`（DB cancel 胜 pause，CANCELLED 不清标志、PAUSED 清 pause 并 resume=EXECUTING）；`_coreact_continuation_pending` 版本感知恢复（coreact EXECUTING+未完成→EXECUTING，legacy→REPORTING，malformed→legacy）；恢复重放补 EXECUTING+continuation 分支。
+- 门禁：focused **14 passed**；全量 **338 passed, 4 skipped（55s）**；ruff F821,F811 clean（F401 14 处为 T-014 既有债，改动前后相同）。
+- 独立评审：首轮 **BLOCK 3 项**（事件去重只覆盖最早 500 条、failed 调用重复计费、pause 抢先 cancel 导致取消丢失）→ 修复（全量分页去重、行存在即跳过计费、DB cancel 优先仲裁）；次轮 **BLOCK 1 项**（pause 测试断言空洞 + 计费窗口文档缺失）→ 落盘修复（request_pause=True/true→false 断言 + acceptance 已知限制）→ 终评 **PASS**。
+- 过程教训：python replace 静默失配一次（old_string 不匹配仍打印 patched）→ 后续补丁用 assert old in src 防呆。
+
 ## T-204（2026-11-10）
 
 - 改动：`drivers_plan_execute.py` 加 orchestration 分派 + coreact_v1 步循环（观察驱动、步级 rubric 验证、单次定向重试、失败反馈、重复查询拒绝、skipped 候选标记）；`worker_coordinator.execute_action` + `orchestrator.execute_action/controller_model` façade；TaskType/status 扩展（scholar_search、skipped）；retrieval_executor scholar 走 provider 路径；coreact_state 增 decisions_used/failure_reasons。
@@ -56,4 +63,6 @@
 ## 已知限制（随实现更新）
 
 - 外部工具调用无 exactly-once：步提交窗口内崩溃，恢复重做该动作（≤1 个），可能重复一次外部调用（严格优于原整批丢失/重复）。
+- **预算计数非 exactly-once**（T-205 评审定稿）：`_persist_execution` 的"已存在行重复提交不计费"仅覆盖正常重复提交；consume→prepare 之间崩溃（行不存在）重放会再次计费；usage 持久化与心跳写库也非原子。崩溃恢复不保证预算计数 exactly-once，只保证行级不重复。
 - v1 串行执行；租约 fencing generation、pre-invoke intent 行、ContextState(trusted/untrusted/uncertain)、语义 rubric 富化均为已记录后续硬化项。
+- 暂停顺序差异：coreact 暂停路径先 clear pause 再写 paused checkpoint（legacy 相反）；因 checkpoint 包含完整 context（含 resume_from_status=EXECUTING），语义等价，但顺序不逐字一致（T-205 评审记录）。

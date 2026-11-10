@@ -14,7 +14,12 @@ from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.orchestrator import MultiAgentOrchestrator
 from deepresearch_agent.agents.multi_agent.core.rubric import TaskRubric, build_task_rubric
 from deepresearch_agent.harness.coreact_controller import CoreActController, DecisionContext
-from deepresearch_agent.harness.coreact_state import CoreActLoopState, PendingAction, loop_state_from_workflow_state
+from deepresearch_agent.harness.coreact_state import (
+    CoreActLoopState,
+    CoreActPaused,
+    PendingAction,
+    loop_state_from_workflow_state,
+)
 from deepresearch_agent.harness.coreact_verifier import CoreActVerifier
 from deepresearch_agent.harness.errors import NeedsUserInput
 from deepresearch_agent.agents.multi_agent.planner.base_planner import PlannerResult
@@ -51,6 +56,8 @@ class PlanExecuteReportDriver:
         self._coreact_controller = CoreActController(llm=getattr(orchestrator, "controller_model", None))
         # Harness 注入；直接实例化 driver 的旧测试/离线工具无需提供
         self.step_commit = None
+        # 步间暂停探测（由 runtime 注入）；返回 True 时在动作边界暂停
+        self.pause_requested = None
         self.selected_skill = (context.context_snapshot or {}).get("selected_skill") or None
         self.skill_policy = compile_runtime_policy(self.selected_skill, source_mode=context.source_mode.value)
         runtime_snapshot = dict(context.context_snapshot or context.config_snapshot)
@@ -169,6 +176,12 @@ class PlanExecuteReportDriver:
         for _ in range(max_decisions + 1):
             if self.context.cancellation_requested:
                 raise RuntimeError("coreact 在动作边界检测到取消")
+            if self.pause_requested is not None and await self.pause_requested():
+                # Pause is honoured at an action boundary: the committed actions
+                # stay durable and the takeover/resume continues the loop.
+                self.coreact_loop.done = False
+                self.coreact_loop.phase = "decide"
+                raise CoreActPaused("coreact 在动作边界暂停")
             remaining = max(
                 0,
                 self.context.budget_limits.max_llm_tokens - self.context.budget_usage.llm_tokens,
