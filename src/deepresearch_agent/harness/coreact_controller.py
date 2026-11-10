@@ -56,6 +56,7 @@ class DecisionContext(BaseModel):
     evidence_count: int = 0
     recent_queries: List[str] = Field(default_factory=list)
     failed_rubric_reasons: List[str] = Field(default_factory=list)
+    context_state: Dict[str, Any] = Field(default_factory=dict)  # T-016 trusted/untrusted/uncertain
     remaining_tokens: int = 0
     decisions_used: int = 0
     max_decisions: int = 8
@@ -108,6 +109,14 @@ class CoreActController:
             "\n".join(f"- {reason}" for reason in context.failed_rubric_reasons[:3])
             or "-（暂无验证失败记录）"
         )
+        cs = context.context_state or {}
+        state_lines = []
+        if cs.get("trusted_ids"):
+            state_lines.append(f"- 已验证可信证据 {len(cs['trusted_ids'])} 条（可直接引用）")
+        if cs.get("untrusted_ids"):
+            state_lines.append(f"- 不可信证据 {len(cs['untrusted_ids'])} 条（勿依赖，需重新核验）")
+        for item in (cs.get("uncertain") or [])[:3]:
+            state_lines.append(f"- 存疑主张「{item.get('term', '')}」：{item.get('next_action', '')}")
         recent = "、".join(f"“{q}”" for q in context.recent_queries[:5]) or "（无）"
         candidates = (
             "\n".join(
@@ -129,6 +138,8 @@ class CoreActController:
 - 近期已执行查询：{recent}
 - 近期验证失败原因：
 {gap_lines}
+- 证据可信度状态：
+{chr(10).join(state_lines) if state_lines else "-（暂无）"}
 - {budget_line}
 
 # 候选计划中的可执行任务

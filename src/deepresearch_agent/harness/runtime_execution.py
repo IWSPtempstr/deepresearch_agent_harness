@@ -46,15 +46,47 @@ class RuntimeExecutionMixin:
                 ACTIVE_RUNS.dec()
                 RUN_DURATION_SECONDS.observe(max(0.0, time.monotonic() - started_at))
 
-    def _make_step_commit(self, context: RunContext, driver: Any, budget: BudgetManager):
+    def _make_intent_persist(self, context: RunContext, driver: Any, *, owner: str = ""):
+        """T-016 intent：动作派发前持久化 plan/task 行（running）与游标 checkpoint。"""
+
+        async def _persist_intent(current_driver: Any) -> None:
+            if self.trajectory is None:
+                return
+            if owner:
+                run = await self.runs.get(context.run_id)
+                if run is None or run.lease_owner != owner:
+                    from deepresearch_agent.harness.errors import RunLeaseLost
+
+                    raise RunLeaseLost("租约已易主，放弃 intent 写入")
+            await self._persist_plan(context, current_driver)
+            current_driver.context.budget_usage = budget_holder_usage(context)
+            context.workflow_state = current_driver.snapshot()
+            await self.checkpoints.save(context, "executing")
+
+        def budget_holder_usage(ctx):
+            return ctx.budget_usage
+
+        return _persist_intent
+
+    def _make_lease_probe(self, context: RunContext, owner: str):
+        """T-016 fencing：动作边界校验租约仍归属本实例；失效即让位。"""
+
+        async def _lease_held() -> bool:
+            run = await self.runs.get(context.run_id)
+            return run is not None and run.lease_owner == owner
+
+        return _lease_held
+
+    def _make_step_commit(self, context: RunContext, driver: Any, budget: BudgetManager, *, owner: str = ""):
         """Build the per-action persistence callback for step-driven drivers."""
         last_published_step = {"value": -1}
 
         async def _step_commit(current_driver: Any) -> None:
+            # 闭包捕获 owner 供 _commit_coreact_step 做 fencing 校验
             # Budget accounting is owned by the runtime; the driver only records
             # what it consumed so far.
             current_driver.context.budget_usage = budget.usage
-            await self._commit_coreact_step(context, current_driver, budget)
+            await self._commit_coreact_step(context, current_driver, budget, owner=owner)
             loop = getattr(current_driver, "coreact_loop", None)
             step_index = getattr(loop, "step_index", 0)
             if step_index != last_published_step["value"]:
@@ -171,8 +203,10 @@ class RuntimeExecutionMixin:
             # over this run's context/budget so every step is persisted and
             # snapshotted before the next action starts.
             if getattr(driver, "supports_step_commit", False):
-                driver.step_commit = self._make_step_commit(context, driver, budget)
+                driver.step_commit = self._make_step_commit(context, driver, budget, owner=owner)
                 driver.pause_requested = self._make_pause_probe(context)
+                driver.lease_probe = self._make_lease_probe(context, owner)
+                driver._intent_persist = self._make_intent_persist(context, driver, owner=owner)
             # A checkpoint and its relational side effects are normally written
             # in order, but a process can stop between those commits. Replaying
             # these idempotent persistence steps reconstructs missing rows from

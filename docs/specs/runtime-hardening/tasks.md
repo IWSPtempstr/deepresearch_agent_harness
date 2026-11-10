@@ -53,30 +53,30 @@
 ## T-306 · Track B1：coreact 步提交租约 fencing
 
 - **前置**: T-305
-- **涉及**: `harness/runtime_execution.py`（owner 闭包 + lease_probe）、`harness/runtime_persistence.py`（_commit_coreact_step 入口校验）
-- **动作**: check-then-write fencing；失效 → RunLeaseLost 让位；接管后无双写测试。
-- **状态**: pending
+- **涉及**: `harness/runtime_execution.py`（owner 闭包 + lease_probe + intent persist 共享 fencing）、`harness/runtime_persistence.py`（_commit_coreact_step 入口 owner 校验）
+- **结果**: check-then-write fencing；失效 → RunLeaseLost 静默让位；driver 动作边界 lease_probe 提前让位；接管后无双写测试通过。
+- **状态**: done
 
 ## T-307 · Track B2：pre-invoke intent 行
 
 - **前置**: T-306
-- **涉及**: `harness/drivers_plan_execute.py`（派发前 _persist_plan + checkpoint）
-- **动作**: intent = plan/task 行（status=running）+ 游标快照；崩溃恢复可见 in-flight；工具调用级 intent 不做（如实记录）。
-- **状态**: pending
+- **涉及**: `harness/drivers_plan_execute.py`（派发前 _persist_plan + checkpoint，intent 也过 fencing）、`harness/runtime_execution.py`（_make_intent_persist）
+- **结果**: intent = plan/task 行（status=running）+ 游标 checkpoint；崩溃恢复可见 in-flight；工具调用级 intent 不做（如实记录）。intent 测试 2 例（含 stale owner 拒绝）。
+- **状态**: done
 
 ## T-308 · Track B3：ContextState 可信度分层
 
 - **前置**: T-307
-- **涉及**: `harness/coreact_state.py`（ContextState 模型）、`harness/drivers_plan_execute.py`（步后更新 + controller prompt 分节）
-- **动作**: trusted/untrusted/uncertain 随步更新、随 checkpoint 持久化、进 controller 决策上下文；Ledger 仍是事实源；报告不语义强制（如实记录）。
-- **状态**: pending
+- **涉及**: `harness/coreact_state.py`（ContextState 模型，随 LoopState 持久化）、`harness/drivers_plan_execute.py`（_update_context_state 步后更新 + controller prompt 分节）、`harness/coreact_controller.py`（DecisionContext.context_state + prompt 渲染）
+- **结果**: trusted/untrusted/uncertain 随步更新、随 checkpoint 往返（roundtrip 测试）、controller prompt 含「已验证可信/不可信/存疑主张+建议动作」分节；Ledger 仍是事实源；报告不语义强制（如实记录）。4 用例。
+- **状态**: done
 
 ## T-309 · Track B4：coreact 有界并行
 
 - **前置**: T-308
-- **涉及**: `harness/drivers_plan_execute.py`（COREACT_MAX_PARALLEL + 批量 admit/执行/提交）、`config/settings.py`
-- **动作**: 默认 1（串行不变）；>1 时 controller 动作 + 确定性就绪补位并发执行、逐动作验证、批次一次提交、失败动作串行重试。
-- **状态**: pending
+- **涉及**: `harness/drivers_plan_execute.py`（COREACT_MAX_PARALLEL + 批量 admit（_admit_parallel_fillup）/gather 执行/逐动作验证/批次提交/失败动作串行定向重试）、`config/settings_sections.py`（COREACT_MAX_PARALLEL，默认 1）
+- **结果**: 默认 1 行为不变（既有测试全过）；>1 时 controller 动作 + 候选补位并发执行，逐动作 verify，批次一次 commit（step_index += 批大小）；失败动作串行定向重试（allow_llm 与派发前重复查询拒绝均已接通——首轮评审发现 allow_llm=False 写死与 recent 快照过期两个回归，已修）。
+- **状态**: done
 
 ## T-310 · 收尾
 
@@ -86,9 +86,8 @@
 
 ## 进度摘要
 
-- 已完成：1（P0）
+- 已完成：10（P0 + T-301..T-309）
 - 进行中：0
 - 阻塞：0
-- 待执行：10
-- 下一步：T-301
-- 最后更新：2026-11-10
+- 待执行：1（T-310 收尾）
+- 最后更新：2026-11-11

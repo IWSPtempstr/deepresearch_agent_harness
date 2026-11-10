@@ -30,6 +30,21 @@ class PendingAction(BaseModel):
     retry_reason: Optional[str] = None
 
 
+class ContextState(BaseModel):
+    """T-016：可信度分层的上下文状态（QUEST 思想）。
+
+    - trusted：通过步级验证动作的账本证据 ID；
+    - untrusted：source_policy/重复查询违规动作的证据 ID（不主动复用）；
+    - uncertain：claim_support 未覆盖的主张词 + 建议下一步动作。
+    Evidence Ledger 仍是唯一事实源；本状态只存 id 与元信息。
+    """
+
+    trusted_ids: list[str] = Field(default_factory=list)
+    untrusted_ids: list[str] = Field(default_factory=list)
+    uncertain: list[dict[str, str]] = Field(default_factory=list)  # {term, reason, next_action}
+    updated_step: int = 0
+
+
 class CoreActLoopState(BaseModel):
     """步级循环游标。checkpoint_version 不作游标（它计 checkpoint 写次数）。"""
 
@@ -47,6 +62,7 @@ class CoreActLoopState(BaseModel):
     # 连续无进展计数（验证失败且无新增证据）：达到上限即 ready_to_report
     no_progress_count: int = 0
     failure_reasons: list[str] = Field(default_factory=list)
+    context_state: ContextState = Field(default_factory=ContextState)
 
     def continuation_pending(self) -> bool:
         """是否为"执行中断"型 continuation checkpoint 的判据。"""
