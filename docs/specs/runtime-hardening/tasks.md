@@ -14,7 +14,9 @@
 - **前置**: P0
 - **涉及**: `integrations/build/incremental_update.py`、`integrations/build/incremental/manual_edit_manager.py`、`graph/indexing/embedding_manager.py`、`graph/processing/entity_merger.py`、`graph/graph_consistency_validator.py`
 - **动作**: splitlib Mixin 拆分（骨架 ≤200、模块 ≤500、verbatim 断言）。
-- **状态**: pending
+- **结果**: 5 文件 → 17 个 Mixin 模块 + 骨架（骨架 39–87 行、模块 62–264 行）；verbatim 全过；拆分后清理 stats 模块多余的 conflict_strategy 导入（F811）。
+- **门禁**: 全量 355 passed/4 skipped（与基线一致）；F821/F811 clean。
+- **状态**: done
 
 ## T-302 · Track C：settings.py facade 化拆分
 
