@@ -12,6 +12,13 @@
 - 2026-11-10 侦察结论（三路 Explore）：EXECUTING checkpoint 现行语义 = 批次完成→REPORTING（恢复规则须版本感知）；工具/证据持久化在整批返回后（需步级提交）；parallel 分支缺 stop_predicate（v1 串行）；状态机 EXECUTING→EXECUTING 已存在（循环 phase 不进 RunStatus）；契约 kind 列为字符串（rubric_coverage 可代码级扩展）。
 - 外部来源（论文/仓库）仅吸收推理时机制，不引入运行时/训练依赖：Co-ReAct（步级 rubric+verify+单次重试）、MiroThinker-H1（局部/全局验证分层）、Marco（预算内候选验证、退化重启思想→no_progress 有界）、QUEST（trusted/untrusted/uncertain 记为后续 ContextState 硬化项，本期不做）。
 
+## T-204（2026-11-10）
+
+- 改动：`drivers_plan_execute.py` 加 orchestration 分派 + coreact_v1 步循环（观察驱动、步级 rubric 验证、单次定向重试、失败反馈、重复查询拒绝、skipped 候选标记）；`worker_coordinator.execute_action` + `orchestrator.execute_action/controller_model` façade；TaskType/status 扩展（scholar_search、skipped）；retrieval_executor scholar 走 provider 路径；coreact_state 增 decisions_used/failure_reasons。
+- 门禁：focused **11 passed**（driver 10 + scholar 1）；全量 **324 passed, 4 skipped（51s）**；ruff F821,F811,F401 clean。
+- 独立评审：首轮 **BLOCK 6 项**（legacy staged 被执行两次、scholar 路由未闭合、retry 用旧查询集导致重复查询通过、第二次失败未反馈下一轮、max_decisions 非累计、snapshot marker 未被 restore 读取）→ 全部修复并补 7 个回归用例 → 复评 **PASS**。
+- 已知限制（不计入本阶段完成）：步级 durability（step_commit 注入、continuation checkpoint 恢复）属 T-205；当前 `step_commit` 默认 None，逐动作持久化尚未接线。
+
 ## T-203（2026-11-10）
 
 - 改动：新增 `harness/coreact_controller.py`（结构化 LLM 决策 + 每步总尝试 2 次 + 确定性候选/ready 兜底 + 20k 字符长度上限 + 多围栏按序解析）。

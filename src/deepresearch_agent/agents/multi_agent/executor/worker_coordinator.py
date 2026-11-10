@@ -7,10 +7,9 @@
 # 由 agents/worker_coordinator.py 拆分（T-014），方法体与原位置逐行一致。
 # 本文件保留类声明与导入路径；未拆出的方法：__init__, register_executor, execute_plan, _prepare_tasks, _select_executor。
 # MRO：Mixin 在前、ABC 基类殿后（abc 抽象检查沿 MRO getattr，基类在前会忽略 Mixin 中的具体实现）。
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional
 import logging
 from deepresearch_agent.agents.multi_agent.core.execution_record import (
-    ExecutionMetadata,
     ExecutionRecord,
 )
 from deepresearch_agent.agents.multi_agent.core.plan_spec import (
@@ -18,16 +17,11 @@ from deepresearch_agent.agents.multi_agent.core.plan_spec import (
     TaskNode,
 )
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
-from deepresearch_agent.agents.multi_agent.executor.base_executor import (
-    BaseExecutor,
-    TaskExecutionResult,
-)
+from deepresearch_agent.agents.multi_agent.executor.base_executor import BaseExecutor
 from deepresearch_agent.agents.multi_agent.executor.research_executor import ResearchExecutor
 from deepresearch_agent.agents.multi_agent.executor.retrieval_executor import RetrievalExecutor
 from deepresearch_agent.agents.multi_agent.executor.reflector import ReflectionExecutor
 from deepresearch_agent.config.settings import (
-    MULTI_AGENT_REFLECTION_ALLOW_RETRY,
-    MULTI_AGENT_REFLECTION_MAX_RETRIES,
     MULTI_AGENT_WORKER_EXECUTION_MODE,
     MULTI_AGENT_WORKER_MAX_CONCURRENCY,
 )
@@ -80,6 +74,41 @@ class WorkerCoordinator(CoordinatorModesMixin, CoordinatorTasksMixin):
     def register_executor(self, executor: BaseExecutor) -> None:
         """注册额外的执行器"""
         self.executors.append(executor)
+
+    def execute_action(
+        self,
+        state: PlanExecuteState,
+        task: TaskNode,
+        *,
+        progress_callback: Optional[Callable[[str, TaskNode, Optional[ExecutionRecord]], None]] = None,
+    ) -> tuple[bool, Optional[str], Optional[ExecutionRecord]]:
+        """Execute exactly one task action; the caller owns the controller loop."""
+        if state.plan is None:
+            return False, "missing_plan", None
+        task_map = {
+            node.task_id: node
+            for node in state.plan.task_graph.nodes
+        }
+        task_map[task.task_id] = task
+        signal = state.plan.to_execution_signal()
+        signal.execution_mode = "sequential"
+        signal.tasks = [task.model_dump()]
+        signal.execution_sequence = [task.task_id]
+        if progress_callback is not None:
+            progress_callback("task.started", task, None)
+        records: List[ExecutionRecord] = []
+        success, reason = self._execute_single_task(
+            state=state,
+            signal=signal,
+            task=task,
+            task_map=task_map,
+            results=records,
+            skip_dependency_check=False,
+        )
+        record = records[-1] if records else None
+        if progress_callback is not None and record is not None:
+            progress_callback("task.completed", task, record)
+        return success, reason, record
 
     def execute_plan(
         self,

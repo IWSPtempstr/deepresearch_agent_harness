@@ -6,12 +6,16 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import Any, Protocol
+from typing import Any
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionRecord
-from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec
+from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec, TaskNode
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.orchestrator import MultiAgentOrchestrator
+from deepresearch_agent.agents.multi_agent.core.rubric import TaskRubric, build_task_rubric
+from deepresearch_agent.harness.coreact_controller import CoreActController, DecisionContext
+from deepresearch_agent.harness.coreact_state import CoreActLoopState, PendingAction, loop_state_from_workflow_state
+from deepresearch_agent.harness.coreact_verifier import CoreActVerifier
 from deepresearch_agent.harness.errors import NeedsUserInput
 from deepresearch_agent.agents.multi_agent.planner.base_planner import PlannerResult
 from deepresearch_agent.agents.multi_agent.reporter.base_reporter import ReportResult, SectionContent
@@ -34,12 +38,19 @@ from deepresearch_agent.harness.report_fallbacks import _evidence_only_report
 
 
 class PlanExecuteReportDriver:
-    """Thin staged wrapper around the existing Planner/Worker/Reporter components."""
+    """plan_execute_report 外壳；按 Run 戳记分派 staged_v1 或 coreact_v1。"""
+
+    supports_step_commit = True
 
     def __init__(self, context: RunContext, orchestrator: MultiAgentOrchestrator, *, events=None):
         self.context = context
         self.orchestrator = orchestrator
         self.events = events
+        self.orchestration = str((context.config_snapshot or {}).get("orchestration") or "staged_v1")
+        self.coreact_loop: CoreActLoopState | None = None
+        self._coreact_controller = CoreActController(llm=getattr(orchestrator, "controller_model", None))
+        # Harness 注入；直接实例化 driver 的旧测试/离线工具无需提供
+        self.step_commit = None
         self.selected_skill = (context.context_snapshot or {}).get("selected_skill") or None
         self.skill_policy = compile_runtime_policy(self.selected_skill, source_mode=context.source_mode.value)
         runtime_snapshot = dict(context.context_snapshot or context.config_snapshot)
@@ -62,6 +73,8 @@ class PlanExecuteReportDriver:
     def _restore(self, payload: dict[str, Any]) -> None:
         if not payload:
             return
+        # Snapshot implementation marker is authoritative; missing marker means legacy staged_v1.
+        self.orchestration = str(payload.get("orchestration") or "staged_v1")
         raw_state = payload.get("state")
         if raw_state:
             self.state = PlanExecuteState.model_validate(raw_state)
@@ -76,6 +89,7 @@ class PlanExecuteReportDriver:
         if payload.get("report_result"):
             self.report_result = ReportResult.model_validate(payload["report_result"])
         self._repair_pending = bool(payload.get("repair_pending"))
+        self.coreact_loop = loop_state_from_workflow_state({"coreact": payload.get("coreact")})
 
     async def plan(self, failures: list[str] | None = None) -> None:
         self.planner_result = await asyncio.to_thread(
@@ -85,10 +99,22 @@ class PlanExecuteReportDriver:
             if self.planner_result.needs_clarification():
                 raise NeedsUserInput("needs_user_input")
             raise RuntimeError("Planner 未生成可执行 PlanSpec")
+        if self.orchestration == "coreact_v1":
+            self.state.plan = self.planner_result.plan_spec
+            if self.coreact_loop is None or self.coreact_loop.done:
+                self.coreact_loop = CoreActLoopState()
+            if failures:
+                self.coreact_loop.phase = "decide"
+                self.coreact_loop.pending_action = None
+                self.coreact_loop.done = False
+                self.coreact_loop.stop_reason = None
 
     async def execute(self) -> None:
         if self.planner_result is None:
             raise RuntimeError("缺少 PlannerResult")
+        if self.orchestration == "coreact_v1":
+            await self._execute_coreact_loop()
+            return
         execution_token_ceiling = max(
             0,
             self.context.budget_limits.max_llm_tokens
@@ -116,6 +142,328 @@ class PlanExecuteReportDriver:
         )
         existing = {item.record_id for item in self.state.execution_records}
         self.state.execution_records.extend(item for item in records if item.record_id not in existing)
+
+    async def _execute_coreact_loop(self) -> None:
+        """Run the new F2 step controller; Harness still owns final verification."""
+        if self.planner_result is None or self.planner_result.plan_spec is None:
+            raise RuntimeError("coreact_v1 缺少初始 PlanSpec")
+        if self.state.plan is None:
+            self.state.plan = self.planner_result.plan_spec
+        if self.coreact_loop is None:
+            self.coreact_loop = CoreActLoopState()
+        if self.coreact_loop.done:
+            return
+
+        loop = asyncio.get_running_loop()
+        max_decisions = max(2, int(self.context.budget_limits.max_plan_tasks) * 2)
+        min_evidence = max(1, int(self.context.config_snapshot.get("min_evidence", 1)))
+        acceptance = self.planner_result.plan_spec.acceptance_criteria
+        completion_conditions = list(acceptance.completion_conditions or [])
+        verifier = CoreActVerifier()
+        source_tools = {
+            "graphrag": {"local_search", "global_search", "hybrid_search", "naive_search", "chain_exploration"},
+            "web": {"web_search"},
+            "scholar": {"scholar_search"},
+        }.get(self.context.source_mode.value, set())
+
+        for _ in range(max_decisions + 1):
+            if self.context.cancellation_requested:
+                raise RuntimeError("coreact 在动作边界检测到取消")
+            remaining = max(
+                0,
+                self.context.budget_limits.max_llm_tokens - self.context.budget_usage.llm_tokens,
+            )
+            if remaining <= REPORT_RESERVED_TOKENS + VERIFICATION_RESERVED_TOKENS + 1000:
+                self.coreact_loop.done = True
+                self.coreact_loop.phase = "done"
+                self.coreact_loop.stop_reason = "reserved_budget_reached"
+                break
+
+            plan = self.state.plan
+            if not isinstance(plan, PlanSpec):
+                plan = PlanSpec.model_validate(plan)
+                self.state.plan = plan
+            completed = list(self.state.execution_context.completed_task_ids) if self.state.execution_context else []
+            recent_queries = self._coreact_recent_queries()
+            evidence_count = len(self._coreact_ledger_ids())
+            eligible = [
+                task.model_dump(mode="json")
+                for task in plan.get_ready_tasks(completed)
+                if task.source_mode == self.context.source_mode.value
+            ]
+
+            # Durable pending action resumes as-is; do not ask the controller to replace it.
+            pending = self.coreact_loop.pending_action
+            if pending is not None and self.coreact_loop.phase in {"act", "verify"}:
+                task = TaskNode.model_validate(pending.task)
+                rubric = TaskRubric.model_validate(pending.rubric)
+                attempt = pending.attempt
+            else:
+                if self.coreact_loop.decisions_used >= max_decisions:
+                    self.coreact_loop.done = True
+                    self.coreact_loop.phase = "done"
+                    self.coreact_loop.stop_reason = "max_decisions_reached"
+                    break
+                context = DecisionContext(
+                    goal=self.context.resolved_query or self.context.original_query,
+                    source_mode=self.context.source_mode.value,
+                    eligible_tasks=eligible,
+                    completed_count=len(completed),
+                    evidence_count=evidence_count,
+                    recent_queries=recent_queries,
+                    failed_rubric_reasons=self.coreact_loop.failure_reasons[-6:],
+                    remaining_tokens=remaining,
+                    decisions_used=self.coreact_loop.decisions_used,
+                    max_decisions=max_decisions,
+                    allow_llm=remaining > REPORT_RESERVED_TOKENS + VERIFICATION_RESERVED_TOKENS + 1000,
+                )
+                decision = await asyncio.to_thread(self._coreact_controller.decide, context)
+                self.coreact_loop.decisions_used += 1
+                if decision.ready_to_report or decision.action is None:
+                    self.coreact_loop.done = True
+                    self.coreact_loop.phase = "done"
+                    self.coreact_loop.stop_reason = decision.reason or decision.source
+                    break
+
+            task = self._admit_coreact_action(decision.action, eligible)
+            if task is None:
+                self.coreact_loop.no_progress_count += 1
+                if self.coreact_loop.no_progress_count >= 2:
+                    self.coreact_loop.done = True
+                    self.coreact_loop.phase = "done"
+                    self.coreact_loop.stop_reason = "invalid_action_limit"
+                    break
+                continue
+            query = self._coreact_query(task)
+            if query and query in set(recent_queries):
+                self.coreact_loop.no_progress_count += 1
+                reason = f"拒绝重复查询: {query[:120]}"
+                if reason not in self.coreact_loop.failure_reasons:
+                    self.coreact_loop.failure_reasons.append(reason)
+                if self.coreact_loop.no_progress_count >= 2:
+                    self.coreact_loop.done = True
+                    self.coreact_loop.phase = "done"
+                    self.coreact_loop.stop_reason = "duplicate_query_limit"
+                    break
+                continue
+
+            rubric = build_task_rubric(
+                task.task_id,
+                description=task.description,
+                source_mode=task.source_mode,
+                min_evidence=min_evidence,
+                completion_conditions=completion_conditions,
+            )
+            attempt = 1
+            self.coreact_loop.phase = "act"
+            self.coreact_loop.pending_action = PendingAction(
+                task=task.model_dump(mode="json"), rubric=rubric.model_dump(mode="json"), attempt=attempt,
+            )
+
+            evidence_before = len(self._coreact_ledger_ids())
+            _success, error, record = await self._execute_coreact_action(task, loop)
+            verdict = verifier.verify(
+                rubric=rubric,
+                task=task,
+                records=[record] if record is not None else [],
+                ledger_ids=self._coreact_ledger_ids(),
+                executed_queries=set(recent_queries),
+                allowed_tools=source_tools,
+                semantic_allowed=False,
+            )
+            self.coreact_loop.phase = "verify"
+            self._attach_coreact_verdict(record, rubric, verdict, attempt=attempt, error=error)
+
+            # Co-ReAct 边界：每个动作最多一次定向重试；controller 调用计入总决策预算。
+            retry_allowed = (
+                not verdict.passed
+                and attempt == 1
+                and rubric.max_retries > 0
+                and self._coreact_retry_available()
+                and self.coreact_loop.decisions_used < max_decisions
+            )
+            if retry_allowed:
+                failure_reason = verdict.retry_reason or error or "步级 rubric 未通过"
+                # 刷新最近查询，retry controller 必须看见刚失败的查询，避免原样重复。
+                recent_after_first = self._coreact_recent_queries()
+                retry_candidate = task.model_dump(mode="json")
+                retry_candidate["status"] = "pending"
+                completed_now = list(self.state.execution_context.completed_task_ids) if self.state.execution_context else []
+                retry_context = DecisionContext(
+                    goal=self.context.resolved_query or self.context.original_query,
+                    source_mode=self.context.source_mode.value,
+                    eligible_tasks=[retry_candidate],
+                    completed_count=len(completed_now),
+                    evidence_count=len(self._coreact_ledger_ids()),
+                    recent_queries=recent_after_first,
+                    failed_rubric_reasons=[failure_reason],
+                    remaining_tokens=max(0, self.context.budget_limits.max_llm_tokens - self.context.budget_usage.llm_tokens),
+                    decisions_used=self.coreact_loop.decisions_used,
+                    max_decisions=max_decisions,
+                    allow_llm=self.context.budget_limits.max_llm_tokens - self.context.budget_usage.llm_tokens > REPORT_RESERVED_TOKENS + VERIFICATION_RESERVED_TOKENS + 1000,
+                )
+                retry_decision = await asyncio.to_thread(self._coreact_controller.decide, retry_context)
+                self.coreact_loop.decisions_used += 1
+                if retry_decision.action is not None:
+                    retry_task = task.model_copy(deep=True)
+                    retry_task.description = retry_decision.action.description
+                    retry_task.parameters = dict(retry_decision.action.parameters)
+                    retry_task.status = "pending"
+                    retry_query = self._coreact_query(retry_task)
+                    if retry_query and retry_query in set(recent_after_first):
+                        retry_reason = f"定向重试仍重复查询: {retry_query[:120]}"
+                        if retry_reason not in self.coreact_loop.failure_reasons:
+                            self.coreact_loop.failure_reasons.append(retry_reason)
+                    else:
+                        self.context.budget_usage.task_retries += 1
+                        self.coreact_loop.phase = "act"
+                        self.coreact_loop.pending_action = PendingAction(
+                            task=retry_task.model_dump(mode="json"),
+                            rubric=rubric.model_dump(mode="json"),
+                            attempt=2,
+                            retry_reason=failure_reason,
+                        )
+                        _success, error, retry_record = await self._execute_coreact_action(retry_task, loop)
+                        retry_verdict = verifier.verify(
+                            rubric=rubric,
+                            task=retry_task,
+                            records=[retry_record] if retry_record is not None else [],
+                            ledger_ids=self._coreact_ledger_ids(),
+                            executed_queries=set(recent_after_first),
+                            allowed_tools=source_tools,
+                            semantic_allowed=False,
+                        )
+                        self._attach_coreact_verdict(retry_record, rubric, retry_verdict, attempt=2, error=error)
+                        record = retry_record or record
+                        verdict = retry_verdict
+                        if not retry_verdict.passed:
+                            final_failure = retry_verdict.retry_reason or error or "定向重试仍未通过 rubric"
+                            if final_failure not in self.coreact_loop.failure_reasons:
+                                self.coreact_loop.failure_reasons.append(final_failure)
+                else:
+                    if failure_reason not in self.coreact_loop.failure_reasons:
+                        self.coreact_loop.failure_reasons.append(failure_reason)
+            elif not verdict.passed:
+                reason = verdict.retry_reason or error or "步级 rubric 未通过"
+                if reason not in self.coreact_loop.failure_reasons:
+                    self.coreact_loop.failure_reasons.append(reason)
+
+            self.coreact_loop.step_index += 1
+            evidence_after = len(self._coreact_ledger_ids())
+            if evidence_after <= evidence_before:
+                self.coreact_loop.no_progress_count += 1
+            else:
+                self.coreact_loop.no_progress_count = 0
+            self.coreact_loop.pending_action = None
+            self.coreact_loop.phase = "decide"
+
+            if self.step_commit is not None:
+                await self.step_commit(self)
+
+            if self.coreact_loop.no_progress_count >= 2:
+                self.coreact_loop.done = True
+                self.coreact_loop.phase = "done"
+                self.coreact_loop.stop_reason = "no_evidence_progress"
+                break
+            if self.context.budget_usage.llm_tokens >= self.context.budget_limits.max_llm_tokens:
+                self.coreact_loop.done = True
+                self.coreact_loop.phase = "done"
+                self.coreact_loop.stop_reason = "token_budget_exhausted"
+                break
+        else:
+            self.coreact_loop.done = True
+            self.coreact_loop.phase = "done"
+            self.coreact_loop.stop_reason = "max_decisions_reached"
+
+        if isinstance(self.state.plan, PlanSpec):
+            if self.coreact_loop.done:
+                # 候选图只是 controller 的建议池；未选中项显式标 skipped，
+                # 不能让完成的 Run 留下看似待执行的任务。
+                for node in self.state.plan.task_graph.nodes:
+                    if node.status == "pending":
+                        node.status = "skipped"
+            self.state.plan.status = "completed" if self.coreact_loop.stop_reason else "executing"
+        # Final snapshot is still persisted by the normal runtime stage boundary.
+
+    async def _execute_coreact_action(self, task: TaskNode, loop) -> tuple[bool, str | None, ExecutionRecord | None]:
+        def progress_callback(kind, callback_task, record):
+            if self.events is None:
+                return
+            future = asyncio.run_coroutine_threadsafe(
+                self._publish_execution_progress(kind, callback_task, record), loop,
+            )
+            future.result(timeout=10)
+
+        return await asyncio.to_thread(
+            self.orchestrator.execute_action,
+            self.state,
+            task,
+            progress_callback=progress_callback,
+        )
+
+    def _admit_coreact_action(self, action: TaskNode, eligible: list[dict[str, Any]]) -> TaskNode | None:
+        plan = self.state.plan
+        if not isinstance(plan, PlanSpec):
+            return None
+        existing = next((node for node in plan.task_graph.nodes if node.task_id == action.task_id), None)
+        if existing is not None:
+            return existing if existing.status == "pending" else None
+        if len(plan.task_graph.nodes) >= self.context.budget_limits.max_plan_tasks:
+            return None
+        if action.source_mode != self.context.source_mode.value:
+            return None
+        # 新动作采用 step_index 顺序执行；不继承模型生成的依赖关系。
+        action.depends_on = list(self.state.execution_context.completed_task_ids) if self.state.execution_context else []
+        plan.task_graph.nodes.append(action)
+        return action
+
+    def _coreact_ledger_ids(self) -> set[str]:
+        return {
+            str(getattr(item, "result_id", ""))
+            for record in self.state.execution_records
+            for item in record.evidence
+            if getattr(item, "result_id", None)
+        }
+
+    @staticmethod
+    def _coreact_query(task: TaskNode) -> str:
+        params = task.parameters or {}
+        for key in ("query", "search_query", "question"):
+            value = params.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return str(task.description or "").strip()
+
+    def _coreact_recent_queries(self) -> list[str]:
+        queries = []
+        if self.state.execution_context is not None:
+            for call in self.state.execution_context.tool_call_history:
+                args = call.get("args") if isinstance(call, dict) else None
+                query = args.get("query") if isinstance(args, dict) else None
+                if query:
+                    queries.append(str(query))
+        for record in self.state.execution_records:
+            for call in record.tool_calls:
+                query = call.args.get("query") if isinstance(call.args, dict) else None
+                if query:
+                    queries.append(str(query))
+        return list(dict.fromkeys(queries))[-10:]
+
+    def _coreact_retry_available(self) -> bool:
+        limits = self.context.budget_limits
+        usage = self.context.budget_usage
+        return usage.task_retries < limits.max_task_retries
+
+    @staticmethod
+    def _attach_coreact_verdict(record, rubric, verdict, *, attempt: int, error: str | None) -> None:
+        if record is None:
+            return
+        record.metadata.environment["coreact"] = {
+            "rubric": rubric.model_dump(mode="json"),
+            "verdict": verdict.model_dump(mode="json"),
+            "attempt": attempt,
+            "execution_error": error,
+        }
 
     async def _publish_execution_progress(self, kind, task, record) -> None:
         task_payload = {
@@ -205,8 +553,8 @@ class PlanExecuteReportDriver:
             digest_max_tokens=REPORT_BATCH_DIGEST_MAX_TOKENS,
         )
         cards, _ = pipeline.build_cards(evidence)
-        plan = self.planner_result.plan_spec if self.planner_result else None
-        nodes = list(plan.task_graph.nodes)[:REPORT_MAX_SECTIONS] if plan else []
+        plan = self.state.plan if isinstance(self.state.plan, PlanSpec) else (self.planner_result.plan_spec if self.planner_result else None)
+        nodes = [node for node in plan.task_graph.nodes if node.status != "skipped"][:REPORT_MAX_SECTIONS] if plan else []
         sections = [
             SectionOutline(
                 section_id=f"reserved_{index}",
@@ -311,8 +659,15 @@ class PlanExecuteReportDriver:
         return text
 
     def _uses_compact_report(self) -> bool:
-        plan = self.planner_result.plan_spec if self.planner_result else None
-        if plan is None or len(plan.task_graph.nodes) != 1:
+        plan = self.state.plan if isinstance(self.state.plan, PlanSpec) else (self.planner_result.plan_spec if self.planner_result else None)
+        if plan is None:
+            return False
+        if self.orchestration == "coreact_v1":
+            # 增量动作数代表轨迹长度而非查询复杂度；compact 依据真实动作数 + 查询形态
+            action_count = self.coreact_loop.step_index if self.coreact_loop is not None else 0
+            if action_count > 1:
+                return False
+        elif len(plan.task_graph.nodes) != 1:
             return False
         query = (self.context.resolved_query or self.context.original_query).lower()
         markers = ("概括", "总结", "要点", "列出", "是什么", "简述", "summarize", "list ", "what is")
@@ -437,6 +792,8 @@ class PlanExecuteReportDriver:
             "planner_result": self.planner_result.model_dump(mode="json") if self.planner_result else None,
             "report_result": self.report_result.model_dump(mode="json") if self.report_result else None,
             "repair_pending": self._repair_pending,
+            "orchestration": self.orchestration,
+            "coreact": self.coreact_loop.model_dump(mode="json") if self.coreact_loop else None,
         }
 
     def execution_records(self) -> list[ExecutionRecord]:
@@ -470,9 +827,9 @@ class PlanExecuteReportDriver:
         return dict(self.report_result.report_metrics) if self.report_result else {}
 
     def plan_record(self) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
-        if self.planner_result is None or self.planner_result.plan_spec is None:
+        plan = self.state.plan if isinstance(self.state.plan, PlanSpec) else (self.planner_result.plan_spec if self.planner_result else None)
+        if plan is None:
             return None
-        plan = self.planner_result.plan_spec
         return plan.model_dump(mode="json"), [node.model_dump(mode="json") for node in plan.task_graph.nodes]
 
 

@@ -247,6 +247,17 @@ class MultiAgentOrchestrator:
             progress_callback=progress_callback,
         )
 
+    @property
+    def controller_model(self):
+        """Expose the planner's shared model for the plan_execute_report step controller."""
+        return getattr(self._planner, "_llm", None)
+
+    def execute_action(self, state: PlanExecuteState, task, *, progress_callback=None):
+        """Execute one controller-selected task without exposing coordinator internals."""
+        return self._worker.execute_action(
+            state, task, progress_callback=progress_callback,
+        )
+
     def report(
         self,
         state: PlanExecuteState,

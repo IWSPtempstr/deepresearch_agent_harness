@@ -27,6 +27,11 @@ logger = logging.getLogger(__name__)
 CONTROLLER_VERSION = "coreact_controller_v1"
 MAX_MALFORMED_ATTEMPTS = 2  # 每步决策的总尝试上限（畸形/异常合并计数）
 MAX_DECISION_CONTENT_CHARS = 20_000  # LLM 回传内容上限，防资源耗尽
+SOURCE_TASK_TYPES = {
+    "graphrag": {"local_search", "global_search", "hybrid_search", "naive_search", "chain_exploration"},
+    "web": {"web_search"},
+    "scholar": {"scholar_search"},
+}
 
 _DECISION_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
 
@@ -164,6 +169,24 @@ class CoreActController:
         task_payload = payload.get("task")
         if not isinstance(task_payload, dict):
             return None  # 既不 ready 也没有合法动作 → 视为畸形
+        provided_id = task_payload.get("task_id")
+        if provided_id:
+            # 候选任务只能精确引用当前可执行集合，禁止模型伪造/越权引用依赖任务
+            matched = next(
+                (item for item in context.eligible_tasks if str(item.get("task_id")) == str(provided_id)),
+                None,
+            )
+            if matched is None:
+                return None
+            try:
+                task = TaskNode.model_validate(matched)
+            except ValidationError:
+                return None
+            if task.source_mode != context.source_mode or not self._task_type_allowed(
+                context.source_mode, str(task.task_type)
+            ):
+                return None
+            return ControllerDecision(action=task, reason=reason)
         merged = {
             "task_type": task_payload.get("task_type"),
             "description": task_payload.get("description"),
@@ -176,18 +199,30 @@ class CoreActController:
             return None
         if str(task.task_type) not in TASK_TYPE_CHOICES:
             return None
+        if not self._task_type_allowed(context.source_mode, str(task.task_type)):
+            return None
         return ControllerDecision(action=task, reason=reason)
+
+    @staticmethod
+    def _task_type_allowed(source_mode: str, task_type: str) -> bool:
+        return task_type in SOURCE_TASK_TYPES.get(source_mode, set())
 
     # ---------- 确定性兜底 ----------
 
     def _decide_deterministic(self, context: DecisionContext, *, reason: str) -> ControllerDecision:
-        if context.eligible_tasks:
-            task = TaskNode.model_validate(context.eligible_tasks[0])
-            return ControllerDecision(
-                action=task, reason=reason or "候选计划仍有可执行任务", source="fallback_candidate"
-            )
+        for payload in context.eligible_tasks:
+            try:
+                task = TaskNode.model_validate(payload)
+            except ValidationError:
+                continue
+            if task.source_mode == context.source_mode and self._task_type_allowed(
+                context.source_mode, str(task.task_type)
+            ):
+                return ControllerDecision(
+                    action=task, reason=reason or "候选计划仍有可执行任务", source="fallback_candidate"
+                )
         return ControllerDecision(
             ready_to_report=True,
-            reason=reason or "无候选任务，进入报告",
+            reason=reason or "无兼容候选任务，进入报告",
             source="fallback_ready",
         )

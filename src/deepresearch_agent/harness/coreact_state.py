@@ -32,7 +32,9 @@ class CoreActLoopState(BaseModel):
     engine: Literal["coreact_v1"] = COREACT_ENGINE
     version: int = COREACT_STATE_VERSION
     phase: Literal["decide", "act", "verify", "done"] = "decide"
+    # 已完成动作数与 controller 调用总数分开计数；每步可含首次决策+一次 retry 决策。
     step_index: int = 0
+    decisions_used: int = 0
     # 提交中的动作：崩溃恢复时若 pending_action 非空且 done=false，
     # 该动作视为未提交（恢复后重做——外部调用可能重复一次，见 proposal §4）
     pending_action: Optional[PendingAction] = None
@@ -40,6 +42,7 @@ class CoreActLoopState(BaseModel):
     done: bool = False
     # 连续无进展计数（验证失败且无新增证据）：达到上限即 ready_to_report
     no_progress_count: int = 0
+    failure_reasons: list[str] = Field(default_factory=list)
 
     def continuation_pending(self) -> bool:
         """是否为"执行中断"型 continuation checkpoint 的判据。"""

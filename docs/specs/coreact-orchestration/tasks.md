@@ -36,9 +36,11 @@
 ## T-204 · driver 集成：版本分派 + 步循环 + 单动作适配
 
 - **前置**: T-202、T-203
-- **涉及**: `harness/drivers_plan_execute.py`、`executor/worker_coordinator.py`（+`execute_action`）；测试 `tests/harness/test_coreact_driver.py`
-- **动作**: orchestration 版本分派（缺省 staged_v1）；coreact 路径 plan/execute 循环（串行、步间 pause/cancel/budget 检查、一次重试结果替换、事件按既有形状逐动作发布）；`supports_step_commit=True` 类属性 + `step_commit` 属性；compact/reserved 报告启发式适配；legacy staged 路径与构造签名不变。
-- **状态**: pending
+- **涉及**: `harness/drivers_plan_execute.py`（orchestration 分派 + coreact 步循环）、`executor/worker_coordinator.py`（+`execute_action`）、`agents/multi_agent/orchestrator.py`（`controller_model`/`execute_action` façade）、`agents/multi_agent/core/plan_spec.py`（TaskType 增 scholar_search、status 增 skipped）、`executor/retrieval_executor.py`（can_handle + provider 分派增 scholar_search）、`harness/coreact_state.py`（decisions_used/failure_reasons）、`harness/coreact_controller.py`（source 白名单 + 候选 task_id 精确匹配）；测试 `tests/harness/test_coreact_driver.py`（10）、`tests/retrieval/test_coreact_scholar_route.py`（1）
+- **动作**: orchestration 版本分派（缺省 staged_v1）；coreact 路径 plan/execute 循环（串行、步间取消/预算检查、一次重试结果替换、事件按既有形状逐动作发布）；`supports_step_commit=True` + `step_commit` 注入点；compact/reserved 报告启发式适配（coreact 用动作数而非计划节点数）；legacy staged 路径与构造签名不变。
+- **验收**: focused 11 passed；全量 324 passed/4 skipped；ruff F821/F811/F401 clean；独立评审 PASS（两轮修复后复评）。
+- **状态**: done
+- **已知限制**: 步级 durability（step_commit 注入 + continuation 恢复）属 T-205；本阶段 `step_commit` 默认为 None，不声称已具备逐动作持久化。
 
 ## T-205 · runtime 步级提交与 continuation 恢复
 

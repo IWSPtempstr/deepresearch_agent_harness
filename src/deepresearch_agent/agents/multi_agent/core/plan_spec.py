@@ -22,6 +22,7 @@ TASK_TYPE_CHOICES: Tuple[str, ...] = (
     "reflection",
     "custom",
     "web_search",
+    "scholar_search",
 )
 
 TaskTypeLiteral = Literal[
@@ -35,6 +36,7 @@ TaskTypeLiteral = Literal[
     "reflection",
     "custom",
     "web_search",
+    "scholar_search",
 ]
 
 
@@ -114,9 +116,9 @@ class TaskNode(BaseModel):
     )
 
     # 状态
-    status: Literal["pending", "running", "completed", "failed"] = Field(
+    status: Literal["pending", "running", "completed", "failed", "skipped"] = Field(
         default="pending",
-        description="任务执行状态"
+        description="任务状态：pending/running/completed/failed/skipped（controller 未选择的候选任务）"
     )
 
 
