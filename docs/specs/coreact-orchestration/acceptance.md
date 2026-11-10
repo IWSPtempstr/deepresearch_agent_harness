@@ -12,6 +12,13 @@
 - 2026-11-10 侦察结论（三路 Explore）：EXECUTING checkpoint 现行语义 = 批次完成→REPORTING（恢复规则须版本感知）；工具/证据持久化在整批返回后（需步级提交）；parallel 分支缺 stop_predicate（v1 串行）；状态机 EXECUTING→EXECUTING 已存在（循环 phase 不进 RunStatus）；契约 kind 列为字符串（rubric_coverage 可代码级扩展）。
 - 外部来源（论文/仓库）仅吸收推理时机制，不引入运行时/训练依赖：Co-ReAct（步级 rubric+verify+单次重试）、MiroThinker-H1（局部/全局验证分层）、Marco（预算内候选验证、退化重启思想→no_progress 有界）、QUEST（trusted/untrusted/uncertain 记为后续 ContextState 硬化项，本期不做）。
 
+## T-201（2026-11-10）
+
+- 改动：新增 `agents/multi_agent/core/rubric.py`（TaskRubric/StepVerdict + 确定性生成 + 4 字滑窗判词抽取）、`harness/coreact_state.py`（CoreActLoopState/PendingAction + 安全还原）；新增 13 个单测。
+- 门禁：focused 13 passed；全量 **275 passed, 4 skipped（56s）**（= 基线 262 + 新增 13）；ruff F821,F811 clean。
+- 独立评审：首轮 BLOCK（E 测试缺口）→ 补 4 用例 → 复评 **PASS**（F 项环境限制以实现方本地实证解除）。
+- 过程修复：`completion_conditions` 参数未被消费（claim_support 不生成）→ 修正为 required_terms 未显式给定时从完成条件抽取。
+
 ## 验收矩阵（实现后逐项补证据）
 
 | ID | 标准 | 证据 |

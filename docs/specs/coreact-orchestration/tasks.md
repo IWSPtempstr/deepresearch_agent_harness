@@ -13,9 +13,9 @@
 
 - **前置**: P0
 - **涉及**: 新增 `agents/multi_agent/core/rubric.py`、`harness/coreact_state.py`；测试 `tests/harness/test_coreact_rubric.py`
-- **动作**: RubricCriterion/TaskRubric/RubricVerdict/StepVerdict 模型；`build_task_rubric` 确定性生成（criteria：evidence_presence/source_policy/output_schema/claim_support，threshold=0.5，max_retries=1）；CoreActLoopState/PendingAction 版本化模型。
-- **验收**: pytest 全绿 + 新模型序列化往返单测。
-- **状态**: pending
+- **动作**: RubricCriterion/TaskRubric/StepVerdict 模型；`build_task_rubric` 确定性生成（criteria：evidence_presence/source_policy/output_schema/claim_support/no_duplicate_query，threshold=0.5，max_retries=1）；CoreActLoopState/PendingAction 版本化模型 + 畸形 workflow_state 安全还原。
+- **验收**: pytest 全绿 + 模型序列化/校验单测 13 例。
+- **状态**: done
 
 ## T-202 · coreact_verifier 确定性步级验证
 
