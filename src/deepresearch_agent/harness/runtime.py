@@ -90,6 +90,13 @@ class HarnessRuntime(RuntimeExecutionMixin, RuntimePersistMixin):
             persisted_status = None if run.status == "pausing" else RunStatus(run.status)
             if persisted_status is RunStatus.INTERRUPTED:
                 restored.resume_from_status = self._safe_stage_after(restored.status)
+                # A step-driven loop may still have actions left: resuming must
+                # continue the loop instead of jumping straight to REPORTING.
+                if (
+                    restored.status is RunStatus.EXECUTING
+                    and self._coreact_continuation_pending(restored)
+                ):
+                    restored.resume_from_status = RunStatus.EXECUTING
                 restored.status = RunStatus.INTERRUPTED
             elif persisted_status is RunStatus.PAUSED:
                 restored.status = RunStatus.PAUSED
@@ -131,6 +138,20 @@ class HarnessRuntime(RuntimeExecutionMixin, RuntimePersistMixin):
             RunStatus.REPORTING: RunStatus.VERIFYING,
             RunStatus.VERIFYING: RunStatus.VERIFYING,
         }.get(checkpoint_status, RunStatus.QUEUED)
+
+    @staticmethod
+    def _coreact_continuation_pending(context: RunContext) -> bool:
+        """Whether an EXECUTING checkpoint still has an unfinished action loop.
+
+        A stage-end EXECUTING checkpoint means "the batch finished" and resumes
+        at REPORTING. A step-driven (coreact) checkpoint means "actions are
+        committed one by one", so an unfinished loop must resume at EXECUTING.
+        Legacy snapshots carry no coreact marker and keep the old mapping.
+        """
+        from deepresearch_agent.harness.coreact_state import loop_state_from_workflow_state
+
+        state = loop_state_from_workflow_state(context.workflow_state)
+        return state is not None and state.continuation_pending()
 
     async def _transition(
         self,

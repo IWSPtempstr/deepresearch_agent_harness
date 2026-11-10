@@ -22,17 +22,46 @@ class RuntimePersistMixin:
         plan_id = str(plan.get("plan_id") or f"plan_{context.run_id}_{context.plan_version}")
         await self.trajectory.save_plan(run_id=context.run_id, plan_id=plan_id, version=context.plan_version, status=str(plan.get("status", "executing")), plan=plan, tasks=tasks, source_mode=context.source_mode.value)
 
+    async def _commit_coreact_step(self, context: RunContext, driver: Any, budget: BudgetManager) -> None:
+        """Persist one controller action durably, then snapshot the loop state.
+
+        Idempotency: plan/task rows use stable IDs and tool calls/evidence use
+        stable IDs, so re-running this after a crash re-writes the same rows
+        instead of duplicating them. The checkpoint keeps the loop cursor so a
+        takeover resumes at the next action instead of replaying the batch.
+        """
+        if self.trajectory is None:
+            return
+        await self._persist_plan(context, driver)
+        await self._persist_execution(context, driver, budget)
+        context.budget_usage = budget.usage
+        context.workflow_state = driver.snapshot()
+        await self.checkpoints.save(context, "executing")
+
+    async def _published_event_keys(self, run_id: str) -> tuple[set[str], set[str]]:
+        """Collect task/tool keys of already-published events, paging past the
+        500-row default window so late-run dedup still sees early events."""
+        live_task_ids: set[str] = set()
+        live_tool_ids: set[str] = set()
+        after_event_id = 0
+        while True:
+            batch = await self.events.repository.list_after(run_id, after_event_id=after_event_id, limit=1000)
+            if not batch:
+                break
+            for item in batch:
+                payload = json.loads(item.payload_json or "{}")
+                if item.event_type in {"task.completed", "task.failed"}:
+                    live_task_ids.add(str(payload.get("task_id", "")))
+                elif item.event_type in {"tool.completed", "tool.failed"}:
+                    live_tool_ids.add(str(payload.get("tool_call_id", "")))
+            after_event_id = batch[-1].event_id
+            if len(batch) < 1000:
+                break
+        return live_task_ids, live_tool_ids
+
     async def _persist_execution(self, context: RunContext, driver: Any, budget: BudgetManager) -> None:
         seen_calls: set[str] = set()
-        live_events = await self.events.repository.list_after(context.run_id)
-        live_task_ids = {
-            str(json.loads(item.payload_json or "{}").get("task_id", ""))
-            for item in live_events if item.event_type in {"task.completed", "task.failed"}
-        }
-        live_tool_ids = {
-            str(json.loads(item.payload_json or "{}").get("tool_call_id", ""))
-            for item in live_events if item.event_type in {"tool.completed", "tool.failed"}
-        }
+        live_task_ids, live_tool_ids = await self._published_event_keys(context.run_id)
         published_evidence_ids = {item.evidence_id for item in await self.evidence_repository.list_for_run(context.run_id)}
         records = driver.execution_records()
         reported_tokens = sum(
@@ -51,7 +80,10 @@ class RuntimePersistMixin:
                 existing = await self.trajectory.get_tool_call(call.tool_call_id) if self.trajectory else None
                 if existing is not None and existing.status == "completed":
                     continue
-                budget.consume_tool(tavily=call.source_mode == "web")
+                if existing is None:
+                    # 计费跟随首次写入：行已存在（含 failed）说明首次提交已计费，
+                    # 崩溃重放/步级重复提交不得重复 consume_tool。
+                    budget.consume_tool(tavily=call.source_mode == "web")
                 if self.trajectory:
                     await self.trajectory.prepare_tool_call(tool_call_id=call.tool_call_id, run_id=context.run_id, task_id=record.task_id, tool_name=call.tool_name, source_mode=context.source_mode.value, args=call.args)
                     await self.trajectory.complete_tool_call(call.tool_call_id, result=call.result, error_code="TOOL_FAILED" if call.status == "failed" else None)

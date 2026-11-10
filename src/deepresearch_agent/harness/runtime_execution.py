@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import time
 import uuid
 from typing import Any, Callable
 from deepresearch_agent.harness.budgets import BudgetExceeded, BudgetLimits, BudgetManager
 from deepresearch_agent.harness.contracts import ContractEvaluator, RunStatus, SourceMode, WorkflowMode
+from deepresearch_agent.harness.coreact_state import CoreActPaused
 from deepresearch_agent.harness.errors import AppError, ErrorCode, NeedsUserInput, RunCancelled, RunLeaseLost
 from deepresearch_agent.harness.recovery import classify_exception, classify_verification_failures
 from deepresearch_agent.harness.run_context import RunContext
@@ -43,6 +45,66 @@ class RuntimeExecutionMixin:
             finally:
                 ACTIVE_RUNS.dec()
                 RUN_DURATION_SECONDS.observe(max(0.0, time.monotonic() - started_at))
+
+    def _make_step_commit(self, context: RunContext, driver: Any, budget: BudgetManager):
+        """Build the per-action persistence callback for step-driven drivers."""
+        last_published_step = {"value": -1}
+
+        async def _step_commit(current_driver: Any) -> None:
+            # Budget accounting is owned by the runtime; the driver only records
+            # what it consumed so far.
+            current_driver.context.budget_usage = budget.usage
+            await self._commit_coreact_step(context, current_driver, budget)
+            loop = getattr(current_driver, "coreact_loop", None)
+            step_index = getattr(loop, "step_index", 0)
+            if step_index != last_published_step["value"]:
+                # 同一 step 的崩溃重放（重放走 _persist_execution，不经此回调）
+                # 不会重复发布；这里再按 step_index 防御一次。
+                last_published_step["value"] = step_index
+                await self.events.publish(
+                    context.run_id,
+                    "coreact.step_committed",
+                    stage="executing",
+                    payload={
+                        "step_index": step_index,
+                        "decisions_used": getattr(loop, "decisions_used", 0),
+                        "remaining_tokens": budget.remaining_tokens(),
+                    },
+                )
+
+        return _step_commit
+
+    def _make_pause_probe(self, context: RunContext):
+        """Build the pause probe used at action boundaries by step drivers."""
+
+        async def _pause_requested() -> bool:
+            run = await self.runs.get(context.run_id)
+            if run is None:
+                return False
+            if run.status == "pausing":
+                return True
+            snapshot = json.loads(run.config_snapshot_json or "{}")
+            return bool(snapshot.get("pause_requested"))
+
+        return _pause_requested
+
+    async def _resolve_coreact_pause(self, context: RunContext) -> RunStatus:
+        """Arbitrate pause vs a DB-level cancel: cancellation wins, otherwise pause.
+
+        Returns the terminal/boundary status the run landed in. Resume would
+        clear pause/cancel flags, so a lost cancellation here would be final.
+        """
+        run = await self.runs.get(context.run_id)
+        if run is not None and run.cancellation_requested:
+            context.cancellation_requested = True
+            if context.status is not RunStatus.CANCELLING:
+                await self._transition(context, RunStatus.CANCELLING, event_type="run.cancelling")
+            await self._transition(context, RunStatus.CANCELLED, event_type="run.cancelled")
+            return RunStatus.CANCELLED
+        context.resume_from_status = RunStatus.EXECUTING
+        await self._transition(context, RunStatus.PAUSED, event_type="run.paused")
+        await self.runs.clear_pause_request(context.run_id)
+        return RunStatus.PAUSED
 
     async def _execute_run_inner(self, run_id: str) -> RunContext:
         owner = f"harness-{uuid.uuid4().hex}"
@@ -105,6 +167,12 @@ class RuntimeExecutionMixin:
                 })
                 await self._transition(context, RunStatus.PLANNING)
             budget = BudgetManager(context.budget_limits, context.budget_usage)
+            # Core-action drivers commit each action durably; the callback closes
+            # over this run's context/budget so every step is persisted and
+            # snapshotted before the next action starts.
+            if getattr(driver, "supports_step_commit", False):
+                driver.step_commit = self._make_step_commit(context, driver, budget)
+                driver.pause_requested = self._make_pause_probe(context)
             # A checkpoint and its relational side effects are normally written
             # in order, but a process can stop between those commits. Replaying
             # these idempotent persistence steps reconstructs missing rows from
@@ -112,6 +180,12 @@ class RuntimeExecutionMixin:
             if recovery_target in {RunStatus.EXECUTING, RunStatus.REPORTING, RunStatus.VERIFYING}:
                 await self._persist_plan(context, driver)
             if recovery_target in {RunStatus.REPORTING, RunStatus.VERIFYING}:
+                await self._persist_execution(context, driver, budget)
+                context.budget_usage = budget.usage
+            elif recovery_target is RunStatus.EXECUTING and self._coreact_continuation_pending(context):
+                # A step-driven loop resumes mid-flight: replay the committed
+                # actions' rows so a crash between the checkpoint and the
+                # relational writes does not lose them.
                 await self._persist_execution(context, driver, budget)
                 context.budget_usage = budget.usage
             if recovery_target is RunStatus.VERIFYING:
@@ -278,6 +352,11 @@ class RuntimeExecutionMixin:
                             if hasattr(driver, "evidence_card_coverage")
                             else None
                         ),
+                        rubrics=(
+                            driver.coreact_rubrics()
+                            if hasattr(driver, "coreact_rubrics")
+                            else None
+                        ),
                     )
                     context.workflow_state = driver.snapshot()
                     context.workflow_state["verification_failures"] = verdict.failures
@@ -382,6 +461,17 @@ class RuntimeExecutionMixin:
                     else:
                         await self._transition(context, RunStatus.FAILED, event_type="run.failed", error_message=f"Completion Contract 未通过: {', '.join(verdict.failures)}")
 
+            return context
+        except CoreActPaused:
+            # A step-driven loop paused at an action boundary: committed actions
+            # are already durable, so pausing keeps the resume target intact.
+            if context is None:
+                raise
+            final_status = await self._resolve_coreact_pause(context)
+            if final_status is RunStatus.CANCELLED:
+                await self.checkpoints.save(context, "cancelled")
+            else:
+                await self.checkpoints.save(context, "paused")
             return context
         except (RunCancelled, asyncio.CancelledError):
             if context is None:

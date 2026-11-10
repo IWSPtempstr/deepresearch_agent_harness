@@ -141,6 +141,10 @@ class ChatService:
             else {"model": OPENAI_LLM_MODEL, "tier": "standard", "reason": "routing disabled"}
         )
         snapshot["model_tier"] = routing["tier"]
+        # T-015：plan_execute_report 编排实现版本——驱动按此分派 coreact/staged，
+        # 缺失时按 staged_v1 处理，保证存量 Run 的快照恢复兼容。
+        if request.workflow_mode.value == "plan_execute_report":
+            snapshot["orchestration"] = settings.RESEARCH_ORCHESTRATION
         message, run, created = await self.runs.create_for_user_message(
             MessageCreate(
                 session_id=session_id, role="user", content=request.content,

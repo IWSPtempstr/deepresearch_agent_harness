@@ -65,7 +65,7 @@ class RetrievalExecutor(BaseExecutor):
     def can_handle(self, task_type: str) -> bool:
         return task_type in {
             "local_search", "global_search", "hybrid_search", "naive_search",
-            "web_search", "deep_research", "deeper_research", "chain_exploration",
+            "web_search", "scholar_search", "deep_research", "deeper_research", "chain_exploration",
         }
 
     def execute_task(
@@ -100,7 +100,7 @@ class RetrievalExecutor(BaseExecutor):
         try:
             if tool_name in {"deep_research", "deeper_research"}:
                 structured_output = self._invoke_research_tool(provider, tool_name, payload, state.run_id)
-            elif tool_name in {"local_search", "global_search", "hybrid_search", "naive_search", "web_search"}:
+            elif tool_name in {"local_search", "global_search", "hybrid_search", "naive_search", "web_search", "scholar_search"}:
                 structured_output = self._invoke_provider(
                     provider, tool_name, payload, state, task, tool_call_id
                 )
