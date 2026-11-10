@@ -205,7 +205,13 @@ class RunService:
                 retrieval_provider=provider,
                 max_parallel_workers=context.budget_limits.max_concurrency,
             )
-            bundle = MultiAgentFactory.create_default_bundle(retrieval_provider=provider, worker=worker)
+            # T-016：角色级模型分层（Anthropic lead/subagent 模式）——
+            # planner 强模型、reporter 通用模型；实际注入的 role→model 存入
+            # model_snapshot 供审计（recorded == actual）。
+            role_models = {role: self._role_model_for(context, role) for role in ("planner", "reporter", "controller")}
+            bundle = MultiAgentFactory.create_default_bundle(
+                retrieval_provider=provider, worker=worker, role_models=role_models,
+            )
             return PlanExecuteReportDriver(context, bundle.orchestrator, events=events)
 
         runtime = HarnessRuntime(
@@ -241,6 +247,12 @@ class RunService:
                         name=str(selected.get("name")), version=str(selected.get("version")),
                         succeeded=bool(run and run.status == "completed"), safety_violation=safety_violation,
                     )
+
+    def _role_model_for(self, context, role: str) -> dict[str, str]:
+        """T-016：按角色解析模型（四层顺序见 model_tier.resolve_role_model）。"""
+        from deepresearch_agent.models.model_tier import resolve_role_model
+
+        return resolve_role_model(context.config_snapshot or {}, role=role, settings=settings)
 
     def _tier_model_for(self, context) -> str | None:
         """T-009：从 Run config_snapshot 解析分层模型 ID；路由关闭/未配置返回 None（旧行为）。"""

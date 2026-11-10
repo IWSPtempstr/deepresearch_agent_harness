@@ -249,8 +249,12 @@ class MultiAgentOrchestrator:
 
     @property
     def controller_model(self):
-        """Expose the planner's shared model for the plan_execute_report step controller."""
-        return getattr(self._planner, "_llm", None)
+        """T-016：coreact controller 角色模型（由 bundle 注入）；缺省回落 planner LLM。"""
+        return getattr(self, "_controller_model", None) or getattr(self._planner, "_llm", None)
+
+    @controller_model.setter
+    def controller_model(self, value):
+        self._controller_model = value
 
     def execute_action(self, state: PlanExecuteState, task, *, progress_callback=None):
         """Execute one controller-selected task without exposing coordinator internals."""

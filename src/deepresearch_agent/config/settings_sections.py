@@ -256,6 +256,8 @@ LLM_TIER_ROUTING_ENABLED = _get_env_bool("LLM_TIER_ROUTING_ENABLED", True)
 LLM_TIER_SIMPLE_MODEL = (os.getenv("LLM_TIER_SIMPLE_MODEL") or "").strip()
 LLM_TIER_STANDARD_MODEL = (os.getenv("LLM_TIER_STANDARD_MODEL") or "").strip()
 LLM_TIER_COMPLEX_MODEL = (os.getenv("LLM_TIER_COMPLEX_MODEL") or "").strip()
+# T-016：角色默认 tier（覆盖 model_tier.ROLE_TIERS_DEFAULT 内置映射）。格式 "role:tier,.."
+LLM_ROLE_TIER_DEFAULTS = (os.getenv("LLM_ROLE_TIER_DEFAULTS") or "").strip()
 MEMORY_LLM_MODEL = os.getenv("MEMORY_LLM_MODEL") or OPENAI_LLM_MODEL
 MEMORY_LLM_MIN_CONFIDENCE = _get_env_float("MEMORY_LLM_MIN_CONFIDENCE", 0.75) or 0.75
 if not 0.0 <= MEMORY_LLM_MIN_CONFIDENCE <= 1.0:

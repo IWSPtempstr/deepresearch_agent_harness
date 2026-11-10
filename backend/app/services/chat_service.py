@@ -7,7 +7,7 @@ from sqlalchemy import select
 from backend.app.schemas import MessageCreate, MessageSend, RunAccepted, RunCreate
 from deepresearch_agent.config import settings
 from deepresearch_agent.config.settings import HARNESS_BUDGETS, LEARNING_REVIEW_MODEL, OPENAI_LLM_MODEL
-from deepresearch_agent.models.model_tier import resolve_model_for
+from deepresearch_agent.models.model_tier import resolve_model_for, resolve_role_model
 from deepresearch_agent.harness.errors import AppError, ErrorCode
 from deepresearch_agent.persistence.repositories import MessageRepository, RunRepository, SessionRepository
 
@@ -140,6 +140,13 @@ class ChatService:
             else {"model": OPENAI_LLM_MODEL, "tier": "standard", "reason": "routing disabled"}
         )
         snapshot["model_tier"] = routing["tier"]
+        # T-016：plan_execute_report Run 记录角色→模型审计映射（实际注入发生在
+        # workflow_factory，recorded == actual 由 factory 使用同一解析函数保证）。
+        if request.workflow_mode.value == "plan_execute_report":
+            snapshot["role_models"] = {
+                role: resolve_role_model(snapshot, role=role, settings=settings)
+                for role in ("planner", "reporter", "controller")
+            }
         # T-015：plan_execute_report 编排实现版本——驱动按此分派 coreact/staged，
         # 缺失时按 staged_v1 处理，保证存量 Run 的快照恢复兼容。
         if request.workflow_mode.value == "plan_execute_report":

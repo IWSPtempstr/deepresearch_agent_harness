@@ -38,16 +38,17 @@
 ## T-304 · Track A：角色级模型解析与审计
 
 - **前置**: T-303
-- **涉及**: `models/model_tier.py`（resolve_role_model）、`config/settings.py`（LLM_ROLE_TIER_DEFAULTS）、`backend/app/services/chat_service.py`（model_snapshot.role_models）
-- **动作**: 四层解析链（显式 role model > 角色默认 tier > Run tier > 全局）；审计映射落 model_snapshot。
-- **状态**: pending
+- **涉及**: `models/model_tier.py`（resolve_role_model + _role_tier + _model_for_tier）、`config/settings_sections.py`（LLM_ROLE_TIER_DEFAULTS）、`backend/app/services/chat_service.py`（model_snapshot.role_models）
+- **结果**: 四层解析链实现（显式 role model > 角色默认 tier（env 可覆盖内置 planner:complex/worker:simple/reporter:standard/controller:standard）> Run tier 回落 > 全局）；畸形 env pair 忽略；7+4 用例。
+- **状态**: done
 
 ## T-305 · Track A：F2 角色注入与归因修复
 
 - **前置**: T-304
-- **涉及**: `agents/multi_agent/integration/multi_agent_factory.py`（role_models 参数）、`backend/app/services/run_service.py`（F2 分支解析注入）、`harness/drivers_plan_execute.py`（controller 模型来源）、`reporter/base_reporter.py`（OutlineBuilder/SectionWriter 注入）
-- **动作**: planner/reporter/controller 三角色注入；归因修复（recorded==actual）；v1 边界（worker/research 工具内部 LLM）如实记录。
-- **状态**: pending
+- **涉及**: `agents/multi_agent/integration/multi_agent_factory.py`（role_models 参数 + get_llm_model 实例化 + controller_model ID/实例分离）、`backend/app/services/run_service.py`（F2 分支 _role_model_for 解析注入）、`agents/multi_agent/orchestrator.py`（controller_model property setter，ID 审计/实例 invoke 分离）
+- **结果**: planner→BasePlanner(llm)、reporter→OutlineBuilder/SectionWriter(llm)、controller→CoreActController(llm)；归因断言点 = LLM 实例的 model_name（recorded==actual 可测）；staged 构造无害。归因缺口修复。
+- **边界如实记录**: worker 角色（research 工具内部 LLM）与 EvidenceCardPipeline 内部 LLM 仍走全局默认；F1 维持 Run 级 tier。
+- **状态**: done
 
 ## T-306 · Track B1：coreact 步提交租约 fencing
 
