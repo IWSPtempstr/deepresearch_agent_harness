@@ -70,7 +70,7 @@ class EvidenceData(BaseModel):
 class ContractCheckData(BaseModel):
     check_id: str
     run_id: str
-    kind: Literal["min_evidence", "source_match", "citation_integrity", "claim_support", "report_consistency", "required_section", "source_diversity", "evidence_card_coverage", "custom"]
+    kind: Literal["min_evidence", "source_match", "citation_integrity", "claim_support", "report_consistency", "required_section", "source_diversity", "evidence_card_coverage", "rubric_coverage", "custom"]
     required: bool = True
     threshold: Optional[float] = None
     verifier: str
@@ -106,6 +106,7 @@ class ContractEvaluator:
         required_sections: Optional[List[str]] = None,
         consistency_passed: Optional[bool] = None,
         evidence_card_coverage: Optional[Dict[str, Any]] = None,
+        rubrics: Optional[List[Dict[str, Any]]] = None,
     ) -> ContractVerdict:
         from .verifiers import DeterministicVerifiers
 
@@ -134,6 +135,10 @@ class ContractEvaluator:
                 if str(item.get("evidence_id", "") if isinstance(item, dict) else getattr(item, "evidence_id", ""))
             ]
             checks.append(verifier.evidence_card_coverage(coverage))
+        if rubrics:
+            # 步级 rubric 的主张词必须被"报告已引用的账本证据"覆盖——
+            # rubric 清单来自执行记录元数据，不接受 reporter 自报。
+            checks.append(verifier.rubric_coverage(rubrics))
         if self.repository is not None:
             for check in checks:
                 await self.repository.upsert(check)
@@ -141,6 +146,7 @@ class ContractEvaluator:
         locally_repairable = {
             "min_evidence", "citation_integrity", "required_section", "claim_support",
             "report_consistency", "source_diversity", "source_match", "evidence_card_coverage",
+            "rubric_coverage",
         }
         return ContractVerdict(
             passed=not failures,

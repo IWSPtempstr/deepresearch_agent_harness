@@ -352,6 +352,11 @@ class RuntimeExecutionMixin:
                             if hasattr(driver, "evidence_card_coverage")
                             else None
                         ),
+                        rubrics=(
+                            driver.coreact_rubrics()
+                            if hasattr(driver, "coreact_rubrics")
+                            else None
+                        ),
                     )
                     context.workflow_state = driver.snapshot()
                     context.workflow_state["verification_failures"] = verdict.failures

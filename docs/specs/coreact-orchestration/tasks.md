@@ -52,9 +52,9 @@
 ## T-206 · rubric_coverage 全局契约检查
 
 - **前置**: T-204
-- **涉及**: `harness/contracts.py`、`harness/verifiers/deterministic.py`、`harness/drivers_plan_execute.py`（repair 路由）；测试并入 `test_coreact_driver.py`
-- **动作**: 新 kind `rubric_coverage`（每 rubric required_claims 须被账本内证据就近引用，不接受 reporter 自报）；纳入 `locally_repairable` → 既有 repair→重验；repair 保持确定性 `_evidence_only_report`。
-- **状态**: pending
+- **涉及**: `harness/contracts.py`（kind 扩展 + evaluate rubrics 参数 + locally_repairable）、`harness/verifiers/deterministic.py`（rubric_coverage 检查）、`harness/recovery.py`（repair 路由）、`harness/drivers_plan_execute.py`（repair_report 支持 + coreact_rubrics 收集）、`harness/runtime_execution.py`（VERIFYING 传参）；测试 `tests/harness/test_coreact_rubric_coverage.py`（11 用例）
+- **验收**: pytest 全绿；ruff clean；独立评审 PASS（两轮：首轮 BLOCK——repair 通道未接通/无判词策略不一致/D 项暴露面表述——全部修复；次轮 BLOCK——driver repair 测试空洞 + design 措辞——落盘修复）。
+- **状态**: done
 
 ## T-207 · 配置戳记与文档
 

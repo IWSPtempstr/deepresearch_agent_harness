@@ -126,6 +126,48 @@ class DeterministicVerifiers:
             explanation="全量 Evidence Card 保存在结构化证据台账中；正文只需引用支撑结论的证据",
         )
 
+    def rubric_coverage(self, rubrics: list[dict]) -> ContractCheckData:
+        """步级 rubric 主张词必须被"报告已引用的账本证据"覆盖。
+
+        与 claim_support 的区别：claim_support 只要求主张行有就近引用；
+        rubric_coverage 进一步要求引用到的证据内容确实覆盖 rubric 关键词，
+        防止"引用了不相干证据"的表面合规。
+        """
+        cited_ids = set(_CITATION.findall(self.report))
+        cited_terms_blob = ""
+        cited_count = 0
+        for item in self.evidence:
+            if str(self._get(item, "evidence_id", "")) not in cited_ids:
+                continue
+            cited_count += 1
+            cited_terms_blob += (str(self._get(item, "summary", "")) + " " + str(self._get(item, "title", ""))).lower()
+        unmet: list[dict[str, Any]] = []
+        total_terms = 0
+        seen_pairs: set[tuple[str, str]] = set()
+        for rubric in rubrics:
+            rubric_id = str(rubric.get("rubric_id", ""))
+            for criterion in rubric.get("criteria", []) or []:
+                if criterion.get("kind") != "claim_support" or not criterion.get("required", True):
+                    continue
+                for term in criterion.get("required_terms", []) or []:
+                    key = (rubric_id, term.lower())
+                    if key in seen_pairs:
+                        continue
+                    seen_pairs.add(key)
+                    total_terms += 1
+                    if not cited_terms_blob or term.lower() not in cited_terms_blob:
+                        unmet.append({"rubric_id": rubric_id, "term": term})
+        # 无可判词的 rubric 属合法形态（与步级 verifier 的"无判词跳过"一致）：
+        # 空转通过，交由 claim_support/步级验证兜底，避免永久不可修复失败。
+        passed = not unmet
+        return self._check(
+            "rubric_coverage",
+            passed,
+            expected="每个 rubric 关键主张词都被报告引用的账本证据覆盖",
+            observed={"rubric_count": len(rubrics), "required_terms": total_terms, "unmet": unmet[:10], "cited_evidence": cited_count},
+            explanation="拒绝引用不相干证据的表面合规；rubric 来自执行记录，不接受 reporter 自报",
+        )
+
     def _claim_lines(self) -> list[str]:
         claims: list[str] = []
         excluded_section = False

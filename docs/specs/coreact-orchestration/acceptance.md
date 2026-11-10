@@ -12,6 +12,13 @@
 - 2026-11-10 侦察结论（三路 Explore）：EXECUTING checkpoint 现行语义 = 批次完成→REPORTING（恢复规则须版本感知）；工具/证据持久化在整批返回后（需步级提交）；parallel 分支缺 stop_predicate（v1 串行）；状态机 EXECUTING→EXECUTING 已存在（循环 phase 不进 RunStatus）；契约 kind 列为字符串（rubric_coverage 可代码级扩展）。
 - 外部来源（论文/仓库）仅吸收推理时机制，不引入运行时/训练依赖：Co-ReAct（步级 rubric+verify+单次重试）、MiroThinker-H1（局部/全局验证分层）、Marco（预算内候选验证、退化重启思想→no_progress 有界）、QUEST（trusted/untrusted/uncertain 记为后续 ContextState 硬化项，本期不做）。
 
+## T-206（2026-11-10）
+
+- 改动：ContractCheckData.kind 增 `rubric_coverage`；DeterministicVerifiers 新检查（报告已引用的账本证据须覆盖 rubric required 判词——**关键词子串确定性代理，非语义支持**）；evaluate 接 rubrics 参数；recovery/driver repair 通道接通；`coreact_rubrics()` 从执行记录收集（staged 返回 None 跳过）。
+- 门禁：focused **11 passed**；全量 **349 passed, 4 skipped（54s）**；ruff F821,F811 clean。
+- 独立评审：首轮 **BLOCK**（repair 通道三处未接通、无判词策略与步级 verifier 不一致、kind 暴露面表述不实）→ 全部修复（recovery/repair 白名单、重建触发、无判词空转通过）→ 次轮 **BLOCK**（repair 测试空洞、design 措辞过强）→ 落盘修复（非空报告重建用例 + 措辞收窄）→ 终评 **PASS**。
+- 暴露面如实记录：check.kind 经 GET /runs/{id} API 暴露、前端原文字符串展示（无枚举约束，未知值回退原文），DB kind 列 String(48) 无 CHECK——无 schema 破坏。
+
 ## T-205（2026-11-10）
 
 - 改动：`_commit_coreact_step`（幂等步级持久化 + EXECUTING checkpoint）；step_commit/pause_probe 注入（`supports_step_commit` duck-typing，legacy/fake driver 零影响）；`_resolve_coreact_pause`（DB cancel 胜 pause，CANCELLED 不清标志、PAUSED 清 pause 并 resume=EXECUTING）；`_coreact_continuation_pending` 版本感知恢复（coreact EXECUTING+未完成→EXECUTING，legacy→REPORTING，malformed→legacy）；恢复重放补 EXECUTING+continuation 分支。

@@ -20,7 +20,7 @@ def classify_verification_failures(failures: list[str]) -> RecoveryDecision:
     # return to planning and retrieval before a new report is generated.
     if kinds & {"min_evidence", "claim_support", "source_match"}:
         return RecoveryDecision("replan", ",".join(sorted(kinds)))
-    if kinds and kinds.issubset({"citation_integrity", "required_section", "report_consistency", "source_diversity", "evidence_card_coverage"}):
+    if kinds and kinds.issubset({"citation_integrity", "required_section", "report_consistency", "source_diversity", "evidence_card_coverage", "rubric_coverage"}):
         return RecoveryDecision("repair_report", ",".join(sorted(kinds)))
     return RecoveryDecision("fail", ",".join(sorted(kinds)) or "unknown")
 

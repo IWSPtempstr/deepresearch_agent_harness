@@ -46,7 +46,7 @@ report():  既有管线 + 全局 rubric_coverage 契约检查（T-206）
 | `harness/runtime_execution.py` | 创建 driver、执行阶段 | 构造后对声明 `supports_step_commit=True` 的 driver 注入 `driver.step_commit = self._commit_coreact_step`；恢复重放覆盖 continuation checkpoint | F1/fake driver 无该类属性，零影响 |
 | `harness/runtime_persistence.py` | 整批持久化 | 新增 `commit_coreact_step(context)`：复用幂等的 `_persist_plan/_persist_execution`（stable-ID upsert 天然去重）+ CheckpointManager 写 EXECUTING 快照 | 既有方法不动 |
 | `harness/runtime.py` | 恢复映射 | `_safe_stage_after(EXECUTING)` 前先查 checkpoint payload 的 `workflow_state.coreact`：存在且 `done=false` → 停在 `executing`；否则旧映射 `→reporting` | 专项测试锁定两分支 |
-| `harness/contracts.py` · `verifiers/deterministic.py` | 7+1 检查 | 新增 `rubric_coverage`（每条 rubric 的 required_claims 须被账本内证据就近引用）；加入 `locally_repairable` → 走既有 repair→重验通道 | kind 列为字符串存储，代码级 Literal 扩展 |
+| `harness/contracts.py` · `verifiers/deterministic.py` | 7+1 检查 | 新增 `rubric_coverage`（每条 rubric 的 required 判词须被**报告已引用的账本证据内容**以关键词子串覆盖——是确定性代理，不验证逐条主张的语义支持或就近关系；rubric 清单来自执行记录，不接受 reporter 自报）；加入 `locally_repairable` → 走既有 repair→重验通道（repair 上限 max_task_retries，无死循环） | kind 列为字符串存储，代码级 Literal 扩展 |
 | `config/settings.py` | — | `RESEARCH_ORCHESTRATION: str = "coreact_v1"`、`COREACT_MAX_DECISIONS`、`COREACT_VERIFY_RESERVE_TOKENS` | 纯新增 |
 | `backend/app/services/chat_service.py` | 建 Run | `config_snapshot["orchestration"] = settings.RESEARCH_ORCHESTRATION` | 旧 Run 无此键 → staged_v1 |
 | `docs/RUN-FLOWS.md` | F2 描述 | 改写为 coreact_v1 真实行为 | 文档 |

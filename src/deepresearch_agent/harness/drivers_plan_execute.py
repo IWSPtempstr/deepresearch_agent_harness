@@ -750,11 +750,14 @@ class PlanExecuteReportDriver:
     async def repair_report(self, failures: list[str]) -> bool:
         if self.report_result is None:
             return False
-        supported = {"citation_integrity", "required_section", "report_consistency", "source_diversity", "evidence_card_coverage"}
+        supported = {"citation_integrity", "required_section", "report_consistency", "source_diversity", "evidence_card_coverage", "rubric_coverage"}
         if not set(failures).issubset(supported):
             return False
         report = self.report_result.final_report
-        if set(failures) & {"citation_integrity", "report_consistency"}:
+        if set(failures) & {"citation_integrity", "report_consistency", "rubric_coverage"}:
+            # rubric_coverage 失败意味着引用的证据未覆盖主张词：确定性重建
+            # 重新引用账本证据（尽力覆盖），能否通过仍取决于证据内容本身；
+            # 重建不成功时由 runtime 的 max_task_retries 上限诚实失败。
             all_evidence = [result for _, _, _, result in self.evidence_results()]
             report, selected = _evidence_only_report(
                 all_evidence,
@@ -811,6 +814,23 @@ class PlanExecuteReportDriver:
 
     def execution_records(self) -> list[ExecutionRecord]:
         return list(self.state.execution_records)
+
+    def coreact_rubrics(self) -> list[dict[str, Any]] | None:
+        """Collect deduplicated step rubrics from execution-record metadata.
+
+        Returns None for the legacy staged path (the contract check is then
+        skipped) or when no rubric was recorded.
+        """
+        if self.orchestration != "coreact_v1":
+            return None
+        rubrics: dict[str, dict[str, Any]] = {}
+        for record in self.state.execution_records:
+            meta = getattr(record.metadata, "environment", None) or {}
+            payload = meta.get("coreact") if isinstance(meta, dict) else None
+            rubric = payload.get("rubric") if isinstance(payload, dict) else None
+            if isinstance(rubric, dict) and rubric.get("rubric_id"):
+                rubrics.setdefault(str(rubric["rubric_id"]), rubric)
+        return list(rubrics.values()) or None
 
     def evidence_results(self) -> list[tuple[str | None, str | None, str, RetrievalResult]]:
         output = []
