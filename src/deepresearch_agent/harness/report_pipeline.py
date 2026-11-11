@@ -2,16 +2,14 @@
 """报告生成与修复（原 report/_requires_reserved_budget_fallback/_build_*/_clean_fallback_claim/_uses_compact_report/repair_report）。"""
 
 import asyncio
-import json
 import re
-from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec, TaskNode
+from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
 from deepresearch_agent.agents.multi_agent.reporter.base_reporter import ReportResult, SectionContent
 from deepresearch_agent.agents.multi_agent.reporter.consistency_checker import ConsistencyCheckResult
 from deepresearch_agent.agents.multi_agent.reporter.evidence_cards import EvidenceCardPipeline
 from deepresearch_agent.agents.multi_agent.reporter.outline_builder import ReportOutline, SectionOutline
 from deepresearch_agent.config.settings import (
-    COREACT_MAX_PARALLEL,
     EVIDENCE_CARD_MAX_TOKENS,
     REPORT_BATCH_BUDGET_RATIO,
     REPORT_BATCH_DIGEST_MAX_TOKENS,

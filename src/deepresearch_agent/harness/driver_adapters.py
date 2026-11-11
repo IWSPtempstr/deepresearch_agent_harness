@@ -4,9 +4,9 @@
 import json
 from typing import Any
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionRecord
-from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec, TaskNode
+from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
-from .report_safety import add_inline_citations, citation_evidence_ids, has_internal_material, rank_evidence, sanitize_report
+from .report_safety import has_internal_material
 
 
 class DriverAdaptersMixin:

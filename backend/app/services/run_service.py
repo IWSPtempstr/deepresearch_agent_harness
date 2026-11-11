@@ -206,9 +206,13 @@ class RunService:
                 max_parallel_workers=context.budget_limits.max_concurrency,
             )
             # T-016：角色级模型分层（Anthropic lead/subagent 模式）——
-            # planner 强模型、reporter 通用模型；实际注入的 role→model 存入
-            # model_snapshot 供审计（recorded == actual）。
-            role_models = {role: self._role_model_for(context, role) for role in ("planner", "reporter", "controller")}
+            # 优先消费建 Run 时冻结在 model_snapshot 的映射（跨进程/重启
+            # recorded==actual）；缺省（旧 Run）才按当前 settings 现算。
+            frozen = dict(context.model_snapshot or {}).get("role_models")
+            if isinstance(frozen, dict) and frozen:
+                role_models = frozen
+            else:
+                role_models = {role: self._role_model_for(context, role) for role in ("planner", "reporter", "controller")}
             bundle = MultiAgentFactory.create_default_bundle(
                 retrieval_provider=provider, worker=worker, role_models=role_models,
             )

@@ -30,10 +30,10 @@
 ## T-303 · Track C：F401 清理
 
 - **前置**: T-302
-- **涉及**: T-014 facade 模块（补 `__all__`）+ src/ tests/ 非 facade 文件 ruff --fix
-- **动作**: `ruff --select F401 --fix`（排除 facade），fix diff 人工过目；memory/service.py F811 为既有兼容模式不在范围（如实记录）。
-- **验收**: 全量测试绿；src/ tests/ 非 facade F401=0。
-- **状态**: pending
+- **涉及**: T-014 facade 模块（`__all__` 保护）+ src/ tests/ 非 facade 文件
+- **动作**: ruff --fix 清理后全量测试曾抓到 base_reporter schema re-export 被误删；已按外部 importer 恢复并补 `__all__`。另 T-016 后续新增 8 个测试的 F401 同样清理；拆分 Mixin import 由 splitlib 生成，禁止再对其盲用 --fix。
+- **验收**: 全仓 `ruff --select F401` zero；全量测试 376 passed/4 skipped；workflow/base_reporter facade 导入兼容已由全量测试覆盖。
+- **状态**: done
 
 ## T-304 · Track A：角色级模型解析与审计
 
@@ -89,8 +89,8 @@
 
 ## 进度摘要
 
-- 已完成：10（P0 + T-301..T-309）
+- 已完成：11（P0 + T-301..T-310）
 - 进行中：0
 - 阻塞：0
-- 待执行：1（T-310 收尾）
+- 待执行：0
 - 最后更新：2026-11-11

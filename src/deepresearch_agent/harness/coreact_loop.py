@@ -2,27 +2,20 @@
 """coreact_v1 步级循环：决策/批次执行/验证/定向重试/ContextState（原 _execute_coreact_loop 及其辅助）。"""
 
 import asyncio
-import json
 from typing import Any
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionRecord
 from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec, TaskNode
 from deepresearch_agent.agents.multi_agent.core.rubric import TaskRubric, build_task_rubric
-from deepresearch_agent.harness.coreact_controller import CoreActController, DecisionContext
+from deepresearch_agent.harness.coreact_controller import DecisionContext
 from deepresearch_agent.harness.coreact_state import (
     CoreActLoopState,
     CoreActPaused,
     PendingAction,
-    loop_state_from_workflow_state,
 )
 from deepresearch_agent.harness.coreact_verifier import CoreActVerifier
 from deepresearch_agent.config.settings import (
     COREACT_MAX_PARALLEL,
-    EVIDENCE_CARD_MAX_TOKENS,
-    REPORT_BATCH_BUDGET_RATIO,
-    REPORT_BATCH_DIGEST_MAX_TOKENS,
-    REPORT_MAX_SECTIONS,
     REPORT_RESERVED_TOKENS,
-    REPORT_SECTION_EVIDENCE_BUDGET,
     VERIFICATION_RESERVED_TOKENS,
 )
 
@@ -89,13 +82,21 @@ class CoreActLoopMixin:
                 if task.source_mode == self.context.source_mode.value
             ]
 
-            # Durable pending action resumes as-is; do not ask the controller to replace it.
+            # Durable pending action resumes as-is: redo only that action,
+            # without a fresh controller decision or admission (conservative
+            # serial replay; the intent row already marked it running).
             pending = self.coreact_loop.pending_action
             if pending is not None and self.coreact_loop.phase in {"act", "verify"}:
-                task = TaskNode.model_validate(pending.task)
-                rubric = TaskRubric.model_validate(pending.rubric)
+                resumed_task = TaskNode.model_validate(pending.task)
+                resumed_rubric = TaskRubric.model_validate(pending.rubric)
+                evidence_before = len(self._coreact_ledger_ids())
+                batch = [(resumed_task, resumed_rubric)]
                 attempt = pending.attempt
+                # 恢复路径不走 admit/查重/重试（attempt=2 已是重试）；
+                # 直接进入下方统一执行段（batch_results 循环跳过重试）。
+                resumed_only = True
             else:
+                resumed_only = False
                 if self.coreact_loop.decisions_used >= max_decisions:
                     self.coreact_loop.done = True
                     self.coreact_loop.phase = "done"
@@ -123,61 +124,57 @@ class CoreActLoopMixin:
                     self.coreact_loop.stop_reason = decision.reason or decision.source
                     break
 
-            task = self._admit_coreact_action(decision.action, eligible)
-            if task is None:
-                self.coreact_loop.no_progress_count += 1
-                if self.coreact_loop.no_progress_count >= 2:
-                    self.coreact_loop.done = True
-                    self.coreact_loop.phase = "done"
-                    self.coreact_loop.stop_reason = "invalid_action_limit"
-                    break
-                continue
-            # T-016 有界并行：controller 动作 + 确定性就绪补位（上限 COREACT_MAX_PARALLEL）。
-            batch = [(task, build_task_rubric(
-                task.task_id, description=task.description, source_mode=task.source_mode,
-                min_evidence=min_evidence, completion_conditions=completion_conditions))]
-            if max_parallel > 1:
-                batch_tasks = self._admit_parallel_fillup(plan, eligible, primary=task, limit=max_parallel)
-                for extra in batch_tasks:
-                    batch.append((extra, build_task_rubric(
-                        extra.task_id, description=extra.description, source_mode=extra.source_mode,
-                        min_evidence=min_evidence, completion_conditions=completion_conditions)))
-            query = self._coreact_query(task)
-            if query and query in set(recent_queries):
-                self.coreact_loop.no_progress_count += 1
-                reason = f"拒绝重复查询: {query[:120]}"
-                if reason not in self.coreact_loop.failure_reasons:
-                    self.coreact_loop.failure_reasons.append(reason)
-                if self.coreact_loop.no_progress_count >= 2:
-                    self.coreact_loop.done = True
-                    self.coreact_loop.phase = "done"
-                    self.coreact_loop.stop_reason = "duplicate_query_limit"
-                    break
-                continue
+                task = self._admit_coreact_action(decision.action, eligible)
+                if task is None:
+                    self.coreact_loop.no_progress_count += 1
+                    if self.coreact_loop.no_progress_count >= 2:
+                        self.coreact_loop.done = True
+                        self.coreact_loop.phase = "done"
+                        self.coreact_loop.stop_reason = "invalid_action_limit"
+                        break
+                    continue
+            if not resumed_only:
+                query = self._coreact_query(task)
+                if query and query in set(recent_queries):
+                    self.coreact_loop.no_progress_count += 1
+                    reason = f"拒绝重复查询: {query[:120]}"
+                    if reason not in self.coreact_loop.failure_reasons:
+                        self.coreact_loop.failure_reasons.append(reason)
+                    if self.coreact_loop.no_progress_count >= 2:
+                        self.coreact_loop.done = True
+                        self.coreact_loop.phase = "done"
+                        self.coreact_loop.stop_reason = "duplicate_query_limit"
+                        break
+                    continue
+                # T-016 有界并行：controller 动作 + 确定性就绪补位（含批内/历史查重、
+                # 并发上限受 budget_limits.max_concurrency 约束）。
+                batch = [(task, build_task_rubric(
+                    task.task_id, description=task.description, source_mode=task.source_mode,
+                    min_evidence=min_evidence, completion_conditions=completion_conditions))]
+                attempt = 1
+                if max_parallel > 1:
+                    seen_queries = set(recent_queries)
+                    seen_queries.add(query or "")
+                    fill_limit = min(max_parallel - 1, self.context.budget_limits.max_concurrency - 1)
+                    for extra in self._parallel_fillup(plan, completed, seen_queries, limit=fill_limit):
+                        batch.append((extra, build_task_rubric(
+                            extra.task_id, description=extra.description, source_mode=extra.source_mode,
+                            min_evidence=min_evidence, completion_conditions=completion_conditions)))
+                evidence_before = len(self._coreact_ledger_ids())
 
-            rubric = build_task_rubric(
-                task.task_id,
-                description=task.description,
-                source_mode=task.source_mode,
-                min_evidence=min_evidence,
-                completion_conditions=completion_conditions,
+            # 先设置游标（pending_action 含完整主动作+rubric），再持久化 intent——
+            # 崩溃恢复时 checkpoint 同时携带 running 任务行与可重放的游标。
+            self.coreact_loop.phase = "act"
+            self.coreact_loop.pending_action = PendingAction(
+                task=batch[0][0].model_dump(mode="json"), rubric=batch[0][1].model_dump(mode="json"),
+                attempt=attempt,
             )
-            evidence_before = len(self._coreact_ledger_ids())
-            # T-016 intent 行：派发前持久化 plan/task（status=running）+ 游标快照。
-            # 崩溃恢复时 DB 可见 in-flight 动作；工具调用级 intent 仍不做（如实记录）。
-            if self.step_commit is not None and hasattr(self.step_commit, "__call__"):
+            if self.step_commit is not None and not resumed_only:
                 plan_for_intent = self.state.plan
                 if isinstance(plan_for_intent, PlanSpec):
                     for batch_task, _ in batch:
                         plan_for_intent.update_task_status(batch_task.task_id, "running")
                 await self._coreact_persist_intent(plan_for_intent)
-
-            phase = "act"
-            self.coreact_loop.phase = phase
-            self.coreact_loop.pending_action = PendingAction(
-                task=batch[0][0].model_dump(mode="json"), rubric=batch[0][1].model_dump(mode="json"),
-                attempt=1,
-            )
             batch_results: list[tuple[Any, Any, Any, Any, str | None]] = []  # (task, rubric, record, verdict, error)
             if len(batch) == 1:
                 batch_task, batch_rubric = batch[0]
@@ -267,16 +264,14 @@ class CoreActLoopMixin:
                 if not retry_verdict.passed and retry_verdict.retry_reason not in self.coreact_loop.failure_reasons:
                     self.coreact_loop.failure_reasons.append(retry_verdict.retry_reason or "定向重试仍未通过")
 
+            self.coreact_loop.step_index += len(batch)
             for _bt, _br, _rec, _v, _e in batch_results:
                 self._update_context_state(_v)
-
-            self.coreact_loop.step_index += len(batch)
             evidence_after = len(self._coreact_ledger_ids())
             if evidence_after <= evidence_before:
                 self.coreact_loop.no_progress_count += 1
             else:
                 self.coreact_loop.no_progress_count = 0
-            self._update_context_state(verdict)
             self.coreact_loop.pending_action = None
             self.coreact_loop.phase = "decide"
 
@@ -356,25 +351,20 @@ class CoreActLoopMixin:
         plan.task_graph.nodes.append(action)
         return action
 
-    def _admit_parallel_fillup(self, plan: PlanSpec, eligible: list[dict], *, primary: TaskNode, limit: int) -> list[TaskNode]:
-        """T-016 并行补位：从候选图中确定性选择独立就绪任务（不含主动作），上限 limit-1。"""
+    def _parallel_fillup(self, plan: PlanSpec, completed: list[str], seen_queries: set, *, limit: int) -> list[TaskNode]:
+        """T-016 并行补位：直接复用 plan 中已有的 pending 就绪节点（不重复 append），
+        排除与历史/批内重复的查询；数量受 limit 约束（调用方已按 max_concurrency 收敛）。"""
         admitted: list[TaskNode] = []
-        if plan is None or len(plan.task_graph.nodes) >= self.context.budget_limits.max_plan_tasks:
+        if plan is None or limit <= 0:
             return admitted
-        primary_query = self._coreact_query(primary)
-        completed = list(self.state.execution_context.completed_task_ids) if self.state.execution_context else []
-        for payload in eligible:
-            if len(admitted) >= limit - 1 or len(plan.task_graph.nodes) >= self.context.budget_limits.max_plan_tasks:
+        for node in plan.get_ready_tasks(completed):
+            if len(admitted) >= limit:
                 break
-            try:
-                node = TaskNode.model_validate(payload)
-            except Exception:
+            if node.source_mode != self.context.source_mode.value or node.status != "pending":
                 continue
-            if node.task_id == primary.task_id or node.status != "pending":
+            node_query = self._coreact_query(node)
+            if node_query and node_query in seen_queries:
                 continue
-            if node.source_mode != self.context.source_mode.value:
-                continue
-            node.depends_on = list(completed)
-            plan.task_graph.nodes.append(node)
+            seen_queries.add(node_query or "")
             admitted.append(node)
         return admitted

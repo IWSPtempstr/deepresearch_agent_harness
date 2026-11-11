@@ -1,9 +1,8 @@
 # 由 harness/drivers_plan_execute.py 拆分（T-016），方法体与原位置逐行一致。
 """coreact 支撑：账本/查询/重试预算/ContextState（原 _coreact_* 辅助）。"""
 
-import json
 from typing import Any
-from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec, TaskNode
+from deepresearch_agent.agents.multi_agent.core.plan_spec import TaskNode
 
 
 class CoreActSupportMixin:

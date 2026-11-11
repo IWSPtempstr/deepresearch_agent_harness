@@ -3,28 +3,20 @@
 import asyncio
 from typing import Any
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionRecord
-from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec, TaskNode
+from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.orchestrator import MultiAgentOrchestrator
-from deepresearch_agent.harness.coreact_controller import CoreActController, DecisionContext
+from deepresearch_agent.harness.coreact_controller import CoreActController
 from deepresearch_agent.harness.coreact_state import (
     CoreActLoopState,
-    CoreActPaused,
-    PendingAction,
     loop_state_from_workflow_state,
 )
 from deepresearch_agent.harness.errors import NeedsUserInput
 from deepresearch_agent.agents.multi_agent.planner.base_planner import PlannerResult
-from deepresearch_agent.agents.multi_agent.reporter.base_reporter import ReportResult, SectionContent
+from deepresearch_agent.agents.multi_agent.reporter.base_reporter import ReportResult
 from deepresearch_agent.config.settings import (
-    COREACT_MAX_PARALLEL,
-    EVIDENCE_CARD_MAX_TOKENS,
-    REPORT_BATCH_BUDGET_RATIO,
-    REPORT_BATCH_DIGEST_MAX_TOKENS,
-    REPORT_MAX_SECTIONS,
     REPORT_RESERVED_TOKENS,
-    REPORT_SECTION_EVIDENCE_BUDGET,
     VERIFICATION_RESERVED_TOKENS,
 )
 from deepresearch_agent.evolution.skill_compiler import compile_runtime_policy, policy_prompt
