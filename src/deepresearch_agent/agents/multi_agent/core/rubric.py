@@ -77,6 +77,10 @@ class StepVerdict(BaseModel):
     evidence_ids: List[str] = Field(default_factory=list)
     verifier: str = "deterministic_v1"
     schema_version: int = RUBRIC_SCHEMA_VERSION
+    # T-405：语义判定三态（pass/fail/unknown/not_run）——unknown 表示检查
+    # 不可用/非法输出/预算门未过；required 语义检查的 unknown 不得按 pass。
+    semantic_status: Literal["pass", "fail", "unknown", "not_run"] = "not_run"
+    semantic_reason: Optional[str] = None
 
     def to_metadata(self) -> Dict[str, Any]:
         return self.model_dump()

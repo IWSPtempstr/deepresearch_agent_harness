@@ -59,6 +59,8 @@ class CoreActVerifier:
         allowed_tools: Set[str],
         semantic_allowed: bool = False,
         semantic_fn: Optional[SemanticFn] = None,
+        semantic_required: bool = False,
+        semantic_budget_gate: Optional[Callable[[], bool]] = None,
     ) -> StepVerdict:
         criteria_verdicts: List[CriterionVerdict] = []
         evidence_views = _record_evidence_texts(records)
@@ -88,26 +90,66 @@ class CoreActVerifier:
                 )
             )
 
-        # 语义检查（可选）：只能追加失败，不能升级确定性 fail；畸形/异常静默忽略
-        semantic_note: Optional[str] = None
-        if rubric.semantic_check and semantic_allowed and callable(semantic_fn):
-            query = self._action_query(task)
-            try:
-                payload = semantic_fn(query, ledger_backed)
-                if isinstance(payload, dict) and payload.get("passed") is False:
-                    criteria_verdicts.append(
-                        CriterionVerdict(
-                            criterion_id=f"{rubric.task_id}_semantic_support",
-                            kind="claim_support",
-                            passed=False,
-                            reason=str(payload.get("reason") or "语义检查判定证据不足以支撑任务目标"),
-                            evidence_ids=[v["evidence_id"] for v in ledger_backed[:5]],
-                        )
+        # T-405 语义检查（可选，三态）：返回 pass/fail/unknown——
+        # - 不可用/畸形输出/预算门未过 → unknown；
+        # - optional：unknown 只记录（不改变确定性判定）；fail 追加失败判罚；
+        # - required：unknown（异常/畸形/预算门/判定器缺失）与 fail 都追加失败
+        #   判罚（unknown 不得按 pass）；
+        # - 语义结果只能追加失败，不能把确定性 fail 升级为 pass。
+        semantic_status = "not_run"
+        semantic_reason: Optional[str] = None
+
+        def _append_semantic_failure(reason: str) -> None:
+            criteria_verdicts.append(
+                CriterionVerdict(
+                    criterion_id=f"{rubric.task_id}_semantic_support",
+                    kind="claim_support",
+                    passed=False,
+                    reason=reason[:200],
+                    evidence_ids=[v["evidence_id"] for v in ledger_backed[:5]],
+                )
+            )
+
+        wants_semantic = (
+            (rubric.semantic_check or semantic_required)
+            and semantic_allowed
+        )
+        if wants_semantic:
+            budget_ok = True if semantic_budget_gate is None else bool(semantic_budget_gate())
+            if not budget_ok:
+                semantic_status = "unknown"
+                semantic_reason = "语义检查预算门未通过"
+                if semantic_required:
+                    _append_semantic_failure(f"required 语义检查 unknown：{semantic_reason}")
+            elif not callable(semantic_fn):
+                semantic_status = "unknown"
+                semantic_reason = "语义检查器不可用"
+                if semantic_required:
+                    _append_semantic_failure(f"required 语义检查 unknown：{semantic_reason}")
+            else:
+                query = self._action_query(task)
+                try:
+                    payload = semantic_fn(query, ledger_backed)
+                    status = self._semantic_status_from_payload(payload)
+                except Exception:
+                    payload = None
+                    status = "unknown"
+                semantic_status = status
+                if status == "pass":
+                    payload_reason = payload.get("reason") if isinstance(payload, dict) else None
+                    semantic_reason = str(payload_reason) if payload_reason else "语义检查通过（不改变确定性判定）"
+                elif status == "fail":
+                    payload_reason = payload.get("reason") if isinstance(payload, dict) else None
+                    semantic_reason = str(payload_reason) if payload_reason else "语义检查判定证据不足以支撑任务目标"
+                    _append_semantic_failure(semantic_reason)
+                else:
+                    payload_reason = payload.get("reason") if isinstance(payload, dict) else None
+                    semantic_reason = str(payload_reason) if payload_reason else (
+                        "语义检查不可用/非法输出" if semantic_required else "语义检查异常，降级为确定性判定"
                     )
-                elif isinstance(payload, dict) and payload.get("passed") is True:
-                    semantic_note = str(payload.get("reason") or "语义检查通过（不改变确定性判定）")
-            except Exception:
-                semantic_note = "语义检查异常，降级为确定性判定"
+                    if semantic_required:
+                        # required 的 unknown 不得按 pass：显式失败，走重试/诚实失败
+                        _append_semantic_failure(f"required 语义检查 unknown：{semantic_reason}")
 
         total_weight = sum(c.weight for c in rubric.criteria) or 1.0
         passed_weight = sum(
@@ -129,6 +171,10 @@ class CoreActVerifier:
                 f"[{v.criterion_id}] {v.reason}" for v in failed[:3]
             ) or "步级验证未达标"
 
+        verifier_label = self.version
+        if semantic_status == "pass" and passed:
+            # 仅在整体通过时标注语义通过；确定性失败时整体判定仍是失败
+            verifier_label += "+语义通过"
         return StepVerdict(
             rubric_id=rubric.rubric_id,
             task_id=rubric.task_id,
@@ -138,8 +184,25 @@ class CoreActVerifier:
             criteria=criteria_verdicts,
             retry_reason=retry_reason,
             evidence_ids=[v["evidence_id"] for v in ledger_backed],
-            verifier=self.version + (f"+{semantic_note}" if semantic_note else ""),
+            verifier=verifier_label,
+            semantic_status=semantic_status,
+            semantic_reason=semantic_reason,
         )
+
+    @staticmethod
+    def _semantic_status_from_payload(payload: Any) -> str:
+        """归一化语义判定输出：{"status": pass/fail/unknown} 或旧 {"passed": bool}；
+        其余一律 unknown（非法输出不得解释为通过）。"""
+        if not isinstance(payload, dict):
+            return "unknown"
+        status = payload.get("status")
+        if status in {"pass", "fail", "unknown"}:
+            return str(status)
+        if payload.get("passed") is True:
+            return "pass"
+        if payload.get("passed") is False:
+            return "fail"
+        return "unknown"
 
     def _check_criterion(
         self,
@@ -189,7 +252,7 @@ class CoreActVerifier:
             haystack = "\n".join(v["text"].lower() for v in ledger_backed)
             missing = [term for term in required_terms if term.lower() not in haystack]
             passed = not missing and bool(ledger_backed)
-            reason = "" if passed else f"证据未覆盖主张词: {missing}"
+            reason = "" if passed else f"证据未覆盖主张词: {'、'.join(missing)}"
             return passed, reason, [v["evidence_id"] for v in ledger_backed]
 
         if criterion_kind == "no_duplicate_query":

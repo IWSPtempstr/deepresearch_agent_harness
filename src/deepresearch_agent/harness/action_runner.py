@@ -288,6 +288,14 @@ class ActionRunner:
         # T-404 稳定 tool ID：worker 载荷携带本次尝试序号（不改动共享 plan 节点）
         execution_task = action.task.model_copy(deep=True)
         execution_task.attempt = max(1, int(action.spec.attempt or 1))
+        # T-405 动作契约进入内部执行上下文（messages/context 通道）；
+        # Provider 参数仍只来自 task.parameters 的公开白名单字段。
+        rubrics_map = dict(isolated_state.context_snapshot.get("action_rubrics") or {})
+        rubrics_map[action.action_id] = action.rubric.model_dump(mode="json")
+        isolated_state.context_snapshot = {
+            **isolated_state.context_snapshot,
+            "action_rubrics": rubrics_map,
+        }
         loop = asyncio.get_running_loop()
 
         def _run() -> tuple[bool, str | None, ExecutionRecord | None]:

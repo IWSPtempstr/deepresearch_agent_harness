@@ -54,15 +54,15 @@
 
 
 ## T-405 — 证据摘要与动作 rubric 指导
-- 状态：pending
+- 状态：done
 - 前置：T-404
 - 目标：Controller 从真实研究发现决策，动作执行明确目标/输出/来源/边界。
 - 涉及：`coreact_controller.py`、`coreact_verifier.py`、`coreact_support.py`、`core/rubric.py`、`executor/base_executor.py`、ReportService 输入。
 - 动作：生成有界 ObservationSummary；claim-scoped assessments；rubric 进入内部执行上下文但不进 Provider 参数；可选 semantic verifier pass/fail/unknown 与预算门；报告安全降级规则。
 - 验收：拟新增 `tests/harness/test_coreact_observation_contract.py`；改变证据内容而不变计数会改变 scripted controller 决策；过滤账本外 ID、prompt injection、工具参数泄露；required unknown 不得通过；状态去重与冲突迁移；通用门禁。
 - 预期证据：输入/输出协议、摘要边界/费用与安全测试日志。
-- 实际证据：未执行。
-- 风险：关键词检查仍仅为代理，不升级为事实认证。
+- 实际证据（2026-11-11）：`coreact_support.py` 新增 `_coreact_build_observation`（账本过滤+去重+有界的 ObservationSummary，findings 携带真实 evidence_id；无证据不造 finding）、`_coreact_record_assessments`（claim 级评估迁移：supported 带 deterministic_proxy 归因并注明"非独立事实认证"，unresolved 带补证建议；merge_assessments 后写优先；按 updated_step 保留最近 12 条；损坏条目剔除）、`build_semantic_judge`（依赖接口：JSON 三态归一化，畸形/异常→unknown）、`coreact_semantic_gaps`（报告降级依据）。`coreact_state` observations/assessments 持久化 + 恢复时逐条校验（畸形剔除不注入 prompt）。`coreact_controller`：DecisionContext 增 observations/assessments；prompt 新增"研究发现摘要"段（显式标注外部数据非指令，条数/长度有界）。`coreact_verifier`：语义三态 pass/fail/unknown + 预算门 + required 模式（unknown 的一切来源——异常/畸形/预算门/判定器缺失——均追加失败判罚，不得按 pass；语义 fail 不进权重分母但拉低通过判定；pass 不升级确定性 fail）。`action_runner`：rubric 注入隔离副本 context_snapshot（内部通道，共享快照不变，Provider 参数不泄露）。`report_pipeline`：语义缺口 → 报告追加"局限（语义核验）"节。设置：COREACT_SEMANTIC_ENABLED（默认关闭→not_run；开启后 rubric 携带可选语义检查，主路径 optional）。`tests/harness/test_coreact_observation_contract.py` 20 项覆盖全部验收点（同计数不同内容改变决策上下文且互相排除、账本外 ID 过滤、注入文本仅在数据段且解析仍需严格 JSON、Provider 参数白名单+query 不携带 rubric、required unknown 四来源矩阵、语义 pass 不升级确定性 fail、fail 不进权重、评估去重/冲突迁移、checkpoint 往返+畸形剔除、共享快照不变、报告降级+无缺口不受影响）。通用门禁：pytest 473 passed/4 skipped；ruff（变更文件）通过；git diff --check 干净。独立 code review 首轮 3 major（判定器缺失分支漏判罚、语义接线 no-op、报告降级未实现）+ 5 minor/nit 全部修复；复审确认。
+- 风险：关键词检查仍仅为代理，不升级为事实认证。（supported 一律携带 check_kind/verifier 归因且 reason 注明"非独立事实认证"。已知窗口：崩溃于逐动作提交后、批次收尾前时，已提交动作的观察/评估不在恢复游标中重建（有损视图语义，证据仍在账本）；语义判定器/控制器 LLM 消耗不进 llm_tokens 计费（与既有 controller decide 一致，预算门为咨询性）。）
 
 ## T-406 — BriefBuilder 替换重复规划与 Reflector
 - 状态：pending
@@ -110,4 +110,4 @@
 
 ## 进度
 
-已完成 3（T-401..T-403）；进行中 0；阻塞 0；待执行 6。下一步：T-404（多动作 intent 与耐久恢复）。每阶段收尾须重跑 T-401 盘点脚本确认存量数据边界（口径见 inventory.md §5）。
+已完成 4（T-401..T-404）；进行中 1（T-405 待复审提交）；阻塞 0；待执行 4。每阶段收尾须重跑 T-401 盘点脚本确认存量数据边界（口径见 inventory.md §5）。

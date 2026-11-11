@@ -17,6 +17,7 @@ from deepresearch_agent.agents.multi_agent.core.rubric import TaskRubric, build_
 from deepresearch_agent.harness.action_models import ActionSpec, action_spec_from_task_node
 from deepresearch_agent.harness.action_runner import ActionRunner, BatchAction, DispatchBudget
 from deepresearch_agent.harness.coreact_controller import DecisionContext
+from deepresearch_agent.harness.coreact_support import build_semantic_judge
 from deepresearch_agent.harness.coreact_state import (
     CoreActLoopState,
     CoreActPaused,
@@ -25,6 +26,7 @@ from deepresearch_agent.harness.coreact_state import (
 from deepresearch_agent.harness.coreact_verifier import CoreActVerifier, StepVerdict
 from deepresearch_agent.config.settings import (
     COREACT_MAX_PARALLEL,
+    COREACT_SEMANTIC_ENABLED,
     REPORT_RESERVED_TOKENS,
     VERIFICATION_RESERVED_TOKENS,
 )
@@ -69,13 +71,29 @@ class CoreActLoopMixin:
             ),
         )
 
+        # T-405：可选语义判定器（设置门控 + 预算门控；默认关闭 → not_run）。
+        # 已知口径：判定器/控制器的 LLM 消耗与既有 controller decide 一致，
+        # 不进入 llm_tokens 计费（预算门按工作流上报的用量判断，为咨询性门）。
+        semantic_fn = None
+        semantic_allowed = False
+        if COREACT_SEMANTIC_ENABLED and getattr(self._coreact_controller, "llm", None) is not None:
+            semantic_fn = build_semantic_judge(self._coreact_controller.llm)
+            semantic_allowed = True
+
+        def semantic_budget_gate() -> bool:
+            remaining = max(0, self.context.budget_limits.max_llm_tokens - self.context.budget_usage.llm_tokens)
+            return remaining > REPORT_RESERVED_TOKENS + VERIFICATION_RESERVED_TOKENS + 1000
+
         def verify_action(action: BatchAction, records: list[ExecutionRecord], executed_queries: set[str]) -> StepVerdict:
             return verifier.verify(
                 rubric=action.rubric, task=action.task,
                 records=records,
                 ledger_ids=self._coreact_ledger_ids(),
                 executed_queries=executed_queries,
-                allowed_tools=source_tools, semantic_allowed=False,
+                allowed_tools=source_tools,
+                semantic_allowed=semantic_allowed,
+                semantic_fn=semantic_fn,
+                semantic_budget_gate=semantic_budget_gate,
             )
 
         for _ in range(max_decisions + 1):
@@ -173,6 +191,8 @@ class CoreActLoopMixin:
                     recent_queries=recent_queries,
                     failed_rubric_reasons=self.coreact_loop.failure_reasons[-6:],
                     context_state=self.coreact_loop.context_state.model_dump(),
+                    observations=self.coreact_loop.observations,
+                    assessments=self.coreact_loop.assessments,
                     remaining_tokens=remaining,
                     decisions_used=self.coreact_loop.decisions_used,
                     max_decisions=max_decisions,
@@ -198,9 +218,13 @@ class CoreActLoopMixin:
                 query = self._coreact_query(task)
                 # T-016 有界并行：controller 动作 + 确定性就绪补位（含批内/历史查重、
                 # 并发上限受 budget_limits.max_concurrency 约束）。
+                # T-405：语义判定器可用时（设置门控 + LLM 存在），动作 rubric 携带
+                # 可选语义检查（unknown 不判罚；fail 追加；required 由 rubric kind
+                # 配置，主路径默认 optional）。
                 batch = [(task, build_task_rubric(
                     task.task_id, description=task.description, source_mode=task.source_mode,
-                    min_evidence=min_evidence, completion_conditions=completion_conditions), 1)]
+                    min_evidence=min_evidence, completion_conditions=completion_conditions,
+                    semantic_check=semantic_allowed), 1)]
                 if max_parallel > 1:
                     seen_queries = set(recent_queries)
                     seen_queries.add(query or "")
@@ -208,7 +232,8 @@ class CoreActLoopMixin:
                     for extra in self._parallel_fillup(plan, completed, seen_queries, limit=fill_limit):
                         batch.append((extra, build_task_rubric(
                             extra.task_id, description=extra.description, source_mode=extra.source_mode,
-                            min_evidence=min_evidence, completion_conditions=completion_conditions), 1))
+                            min_evidence=min_evidence, completion_conditions=completion_conditions,
+                            semantic_check=semantic_allowed), 1))
 
             # T-403：预派发准入（依赖/白名单/查重/预算预约）。恢复重放跳过 admit。
             batch_actions = [
@@ -318,6 +343,14 @@ class CoreActLoopMixin:
                         )
                         if reason not in self.coreact_loop.failure_reasons:
                             self.coreact_loop.failure_reasons.append(reason)
+                # T-405：有界观察摘要（账本过滤后）+ claim 级评估迁移
+                active_records = (
+                    [outcome.active.record] if outcome.active is not None and outcome.active.record is not None else []
+                )
+                observation = self._coreact_build_observation(outcome.action, outcome.verdict, active_records)
+                self._coreact_append_observation(observation)
+                if outcome.verdict is not None:
+                    self._coreact_record_assessments(outcome.action, outcome.verdict)
             evidence_after = len(self._coreact_ledger_ids())
             if evidence_after <= evidence_before:
                 self.coreact_loop.no_progress_count += 1
@@ -394,6 +427,9 @@ class CoreActLoopMixin:
                 evidence_count=len(self._coreact_ledger_ids()),
                 recent_queries=self._coreact_recent_queries(),
                 failed_rubric_reasons=[failure_reason],
+                context_state=self.coreact_loop.context_state.model_dump(),
+                observations=self.coreact_loop.observations,
+                assessments=self.coreact_loop.assessments,
                 remaining_tokens=remaining,
                 decisions_used=self.coreact_loop.decisions_used,
                 max_decisions=max_decisions,

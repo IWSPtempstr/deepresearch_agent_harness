@@ -420,6 +420,9 @@ RESEARCH_ORCHESTRATION = _get_env_choice(
 COREACT_MAX_DECISIONS_FLOOR = _get_env_int("COREACT_MAX_DECISIONS_FLOOR", 2) or 2
 # T-016：coreact 并行宽度（默认 1=串行不变）；>1 时 controller 动作 + 候选补位并发执行
 COREACT_MAX_PARALLEL = _get_env_int("COREACT_MAX_PARALLEL", 1) or 1
+# T-405：coreact 可选语义判定（默认关闭）。开启后动作级语义检查经预算门控
+# 执行，返回 pass/fail/unknown；不可用/非法输出记 unknown，不得按 pass。
+COREACT_SEMANTIC_ENABLED = _get_env_bool("COREACT_SEMANTIC_ENABLED", False)
 MULTI_AGENT_REFLECTION_ALLOW_RETRY = _get_env_bool(
     "MA_REFLECTION_ALLOW_RETRY", False
 )
@@ -460,6 +463,7 @@ __all__ = [
     "CONTEXT_RECENT_TURNS",
     "COREACT_MAX_DECISIONS_FLOOR",
     "COREACT_MAX_PARALLEL",
+    "COREACT_SEMANTIC_ENABLED",
     "DEFAULT_CACHE_ROOT",
     "DISAMBIG_NIL_THRESHOLD",
     "DISAMBIG_STRING_THRESHOLD",

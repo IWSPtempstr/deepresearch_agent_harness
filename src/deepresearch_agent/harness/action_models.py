@@ -340,6 +340,8 @@ class ExecutionState(BaseModel):
 MAX_FINDINGS = 12
 MAX_FINDING_CHARS = 800
 MAX_LIST_ITEMS = 12
+# T-405：循环状态内保留的观察/评估条数上限（有界上下文，防 prompt 膨胀）
+MAX_OBSERVATIONS_KEPT = 12
 
 
 def _attempt_id_matches(action_id: str, attempt_id: str) -> bool:

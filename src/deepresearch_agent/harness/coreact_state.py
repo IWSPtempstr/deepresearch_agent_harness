@@ -85,6 +85,11 @@ class CoreActLoopState(BaseModel):
     no_progress_count: int = 0
     failure_reasons: list[str] = Field(default_factory=list)
     context_state: ContextState = Field(default_factory=ContextState)
+    # T-405：有界观察摘要（账本的有损视图，findings 携带真实 evidence_ids）——
+    # Controller 从真实研究发现决策，而非只看计数与失败理由。
+    observations: List[Dict[str, Any]] = Field(default_factory=list)
+    # T-405：claim 级评估（EvidenceAssessment dump；supported≠事实认证）。
+    assessments: List[Dict[str, Any]] = Field(default_factory=list)
 
     @property
     def next_operation(self) -> Literal["execute", "report"]:
@@ -139,6 +144,36 @@ def loop_state_from_workflow_state(
             # 剔除进入 failure_reasons 供 controller/审计可见（不只日志）
             state.failure_reasons.append(f"恢复剔除无效 in-flight 动作: {item.action_id}")
     state.pending_batch = valid
+    # T-405：observations/assessments 是持久化的摘要视图——畸形条目逐条剔除
+    # （损坏 checkpoint 不得把任意内容注入 controller prompt），全部无效则清空。
+    valid_observations = [
+        item for item in state.observations
+        if isinstance(item, dict)
+        and isinstance(item.get("findings"), list)
+        and all(
+            isinstance(finding, dict)
+            and isinstance(finding.get("statement"), str)
+            and isinstance(finding.get("evidence_ids"), list)
+            for finding in item.get("findings")
+        )
+    ]
+    if len(valid_observations) != len(state.observations):
+        logger.warning(
+            "coreact 恢复：剔除 %d 条畸形观察摘要", len(state.observations) - len(valid_observations),
+        )
+    state.observations = valid_observations
+    valid_assessments = [
+        item for item in state.assessments
+        if isinstance(item, dict)
+        and isinstance(item.get("claim_id"), str)
+        and item.get("claim_id")
+        and item.get("status") in {"available", "supported", "disputed", "unresolved"}
+    ]
+    if len(valid_assessments) != len(state.assessments):
+        logger.warning(
+            "coreact 恢复：剔除 %d 条畸形 claim 评估", len(state.assessments) - len(valid_assessments),
+        )
+    state.assessments = valid_assessments
     if state.pending_action is not None and not _pending_action_valid(state.pending_action):
         # 旧单动作游标无效：清空（T-016 行为）
         state.pending_action = None

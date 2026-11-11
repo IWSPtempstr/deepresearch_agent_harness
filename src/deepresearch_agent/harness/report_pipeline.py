@@ -40,6 +40,17 @@ class ReportPipelineStagedMixin:
         self.report_result.final_report = sanitize_report(self.report_result.final_report)
         evidence_ids = citation_evidence_ids([result for _, _, _, result in self.evidence_results()])
         self.report_result.final_report = add_inline_citations(self.report_result.final_report, evidence_ids)
+        # T-405 报告安全降级：语义核验未通过/不可用的动作必须在报告局限中显式
+        # 标注（unknown/fail 不得写成"已核验"；关键词检查仅为代理，不是事实认证）。
+        semantic_gaps = self.coreact_semantic_gaps() if hasattr(self, "coreact_semantic_gaps") else []
+        if semantic_gaps:
+            statuses = "、".join(sorted({gap["status"] for gap in semantic_gaps}))
+            note = (
+                f"\n\n## 局限（语义核验）\n\n部分动作（{len(semantic_gaps)} 个）的语义核验状态为 {statuses}，"
+                "其结论仅由确定性检查与所引用证据支撑，未经语义级核验，请谨慎采信。"
+            )
+            if "## 局限（语义核验）" not in self.report_result.final_report:
+                self.report_result.final_report += note
         self.state.response = self.report_result.final_report
         return self.report_result.final_report
 
