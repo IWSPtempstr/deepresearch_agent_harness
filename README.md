@@ -24,7 +24,9 @@
 
 > **在线站点**：项目已部署为可运行网站（[deepresearch-harness-qwzy.zai.site](https://deepresearch-harness-qwzy.zai.site)）——单机模式运行真实前后端。公开实例未配置模型/检索密钥：界面与会话管理可用，发起研究任务会诚实失败；完整能力请按下方说明在本地部署并配置密钥。
 
-> 以可恢复的 **Agent Harness** 为运行底座，驱动 **Context → Plan → Execute → Report → Verify → Replan** 闭环，统一接入私域 GraphRAG 与 Web 搜索，并提供全量证据上下文压缩、持久化执行、实时可观测、受控自进化和系统化 Agent 评测能力。
+> 以可恢复的 **Agent Harness** 为运行底座，驱动唯一 **coreact 路径**（BriefBuilder 简报规划 → Controller 步级决策 → ActionRunner 隔离执行 → 步级验证与有限修正 → Reporter → Completion Contract）闭环，统一接入私域 GraphRAG 与 Web/学术搜索，并提供全量证据上下文压缩、持久化执行（多动作 intent 与耐久恢复）、实时可观测、受控自进化和系统化 Agent 评测能力。
+
+> **定位说明**：本项目是工程化的研究 Agent 系统实现（简历/作品集项目），**不是 Co-ReAct 等论文的算法复现**，也未开展任何效果对比实验（A/B、基准分数）——正确性、故障恢复与安全测试见 `docs/specs/coreact-consolidation/acceptance.md`；引用论文仅作为 rubric/反馈/重试机制的思想来源。
 
 系统关注的不只是“生成一篇报告”，而是让长时间、多步骤、强证据约束的 Agent 任务能够可靠执行、失败恢复、过程审计、结果验证和持续演进。
 
@@ -34,7 +36,7 @@
 
 ### 1. 可恢复 Agent Harness
 
-Harness Runtime 将 **deep_research** 与 **plan_execute_report** 两种工作流统一封装为持久化执行协议：
+Harness Runtime 将研究任务封装为**唯一 coreact 路径**（`plan_execute_report`）的持久化执行协议（T-017：独立 deep_research 与 staged 整批引擎已退役删除）：
 
 - Session / Run 状态机管理会话与单次研究任务；
 - Lease、版本化 Checkpoint 和幂等 ToolCall 防止重复副作用；
@@ -291,14 +293,13 @@ flowchart TB
 - **web**：Tavily 联网搜索；
 - Memory 与历史对话仅用于理解问题，不可充当本轮研究证据。
 
-Harness 实际支持两种工作流（`WorkflowMode` 成员，见 `src/deepresearch_agent/harness/contracts.py`）：
+Harness 实际支持唯一工作流（`WorkflowMode`，见 `src/deepresearch_agent/harness/contracts.py`）：
 
 | 工作流 | 适用场景 |
 |---|---|
-| deep_research | 多轮搜索、推理和答案生成 |
-| plan_execute_report | DAG 规划、多 Agent 执行、长报告生成与完成验证 |
+| plan_execute_report（coreact） | BriefBuilder 简报规划 → Controller 步级决策 → ActionRunner 隔离执行 → 步级验证与有限修正 → 长报告生成与完成验证 |
 
-> 代码中保留的 `FusionGraphRAGAgent` 是独立入口，其多检索策略与多 Agent 报告能力已由 `plan_execute_report` 覆盖，不属于当前 Harness 工作流。
+> T-017（T-407/T-408）：独立 deep_research 引擎、staged 整批管线与 reflection 流程已退役并物理删除。历史 deep_research Run 只读可读；存量活动旧引擎 Run 显式拒绝（LEGACY_WORKFLOW_UNSUPPORTED，人工处理），不静默换引擎。
 
 ## 技术栈
 

@@ -49,7 +49,7 @@
 - 动作：稳定 action/attempt/tool ID、全量 in-flight intent、逐动作提交/预算核销与 next_operation；pause/cancel/lease 检查；旧 checkpoint 适配器，显式 unsupported 处理。
 - 验收：拟新增 `tests/harness/test_action_runner_recovery.py`；在 intent前后、调用后/提交前、部分批次提交后、retry 中注入中断；新 Runtime 恢复；断言工具调用/证据/预算/事件，不仅测试 helper predicate；通用门禁。
 - 预期证据：故障点矩阵、持久行/事件/费用计数及残余窗口说明。
-- 实际证据（2026-11-11）：`coreact_state.py` 扩展 `pending_batch`（全批次 in-flight intent）+ `committed_action_ids`（逐动作提交）+ `next_operation`（显式 execute/report，driver snapshot 序列化）；恢复归一化逐项校验（畸形项剔除并计入 failure_reasons，全无效→decide，旧单动作快照兼容回退）。`coreact_loop.py`：intent 写全批次、run_and_merge 新增 `commit_fn`（逐动作提交，action_commit 钩子只持久化不发布 step 事件）与 `record_fn`（verdict 元数据提交前写入——恢复后 rubric_coverage 门不被削弱）、修正游标即时持久化、重放防御性跳过已提交项（重试游标始终重放）。`action_runner.py`：commit_fn/record_fn 挂载；RunLeaseLost/BudgetExceeded 从 worker 传播（不降级为动作失败记录）。稳定 tool ID：TaskNode.attempt 字段 + retrieval_executor tool_call_id=(run_id,task_id,attempt) 派生（重放行幂等，重试新 ID 保留全部尝试）。T-402 适配器改用 inflight_items（迁移视图不丢次要动作）。`tests/harness/test_action_runner_recovery.py` 8 项：intent 后崩溃（批次完整落盘、零 tool/evidence 行）、intent 后崩溃恢复（次要动作不丢、恢复不走 controller）、行已落库/checkpoint 未写窗口（稳定 ID 行幂等=1、事件不重复、外部调用重复 2 次如实记录、计费不双收）、部分批次提交后恢复（已提交不重做、rubric_coverage/min_evidence 通过）、retry 中崩溃（attempt=2 游标重放、task_retries 不双计）、批次游标校验 3 项。故障点矩阵：intent 后/行后 checkpoint 前/部分提交后/重试执行中/重试合并后提交前——均无动作丢失窗口；游标收缩先于持久化，checkpoint 恒保守。通用门禁：pytest 453 passed/4 skipped；ruff（变更文件）通过；git diff --check 干净。独立 code review 首轮 2 major（verdict 元数据提交时序、稳定 tool ID 缺失）+ 7 minor/nit 全部修复并复审。
+- 实际证据（2026-11-11）：`coreact_state.py` 扩展 `pending_batch`（全批次 in-flight intent）+ `committed_action_ids`（逐动作提交）+ `next_operation`（显式 execute/report，driver snapshot 序列化）；恢复归一化逐项校验（畸形项剔除并计入 failure_reasons，全无效→decide，旧单动作快照兼容回退）。`coreact_loop.py`：intent 写全批次、run_and_merge 新增 `commit_fn`（逐动作提交，action_commit 钩子只持久化不发布 step 事件）与 `record_fn`（verdict 元数据提交前写入——恢复后 rubric_coverage 门不被削弱）、修正游标即时持久化、重放防御性跳过已提交项（重试游标始终重放）。`action_runner.py`：commit_fn/record_fn 挂载；RunLeaseLost/BudgetExceeded 从 worker 传播（不降级为动作失败记录）。稳定 tool ID：TaskNode.attempt 字段 + retrieval_executor tool_call_id=(run_id,task_id,attempt) 派生（重放行幂等，重试新 ID 保留全部尝试）。T-402 适配器改用 inflight_items（迁移视图不丢次要动作）。`tests/harness/test_action_runner_recovery.py` 8 项：intent 后崩溃（批次完整落盘、零 tool/evidence 行）、intent 后崩溃恢复（次要动作不丢、恢复不走 controller）、行已落库/checkpoint 未写窗口（稳定 ID 行幂等=1、事件不重复、外部调用重复 2 次如实记录、计费不双收）、部分批次提交后恢复（已提交不重做、rubric_coverage/min_evidence 通过）、retry 中崩溃（attempt=2 游标重放、task_retries 不双计）、批次游标校验 3 项。故障点矩阵：intent 后/行后 checkpoint 前/部分提交后/重试执行中（4 点已注入测试）+ 重试合并后提交前（游标收缩先于持久化的顺序保证，分析覆盖）——均无动作丢失窗口；游标收缩先于持久化，checkpoint 恒保守。通用门禁：pytest 453 passed/4 skipped；ruff（变更文件）通过；git diff --check 干净。独立 code review 首轮 2 major（verdict 元数据提交时序、稳定 tool ID 缺失）+ 7 minor/nit 全部修复并复审。
 - 风险：不宣称外部 exactly-once 或已消除原子 fencing 缺口。（外部调用在行后/checkpoint 前崩溃窗口内重复一次，如实断言；内存计费可随窗口丢失（低估），重放不双收。pause/cancel/lease 检查保持在动作边界（lease_probe/pause_probe 未改动）。已知行为变化：确定性 tool ID 使 staged reflection 重试的计费从每次尝试一行变为同 ID 去重一行（低估方向、证据行不受影响；staged 引擎将在 T-407/408 退役）。逐动作提交的 _persist_execution 为 O(N²) 重扫（K≤4 批次可接受，性能不作为目标）。）
 
 
@@ -95,7 +95,7 @@
 - 动作：逐文件列删除原因、已迁移职责、所有 importer；共享搜索/GraphRAG 能力先抽取再删除旧壳；最小 facade 只导出新实现或数据适配器；清理死配置与测试，不能删核心安全测试凑绿。
 - 验收：静态检查旧生产 dispatch/reflection 自动生成消失；import smoke、CLI、三 source mode 端到端；保留 GraphRAG 构建/检索专项测试；通用门禁与独立删除清单 review。
 - 预期证据：删除/保留清单、调用图、无失联 import 及能力覆盖日志。
-- 实际证据（2026-11-11）：**删除 44 个文件**（git rm 可追溯），逐项理由/职责迁移：
+- 实际证据（2026-11-11）：**删除 42 个文件**（git rm 可追溯；合计 −7,831 行，提交整体 −8,891 行含修改文件改写），逐项理由/职责迁移：
   (1) 引擎 driver/agent：`harness/drivers_deep_research.py`、`agents/deep_research_agent*.py`×4——独立 deep_research 引擎已于 T-407 入口退役（唯一 importer workflow.py re-export 同步清理）；
   (2) 嵌套研究工具：`search/tool/deep_research/`×6、`deeper_research/`×11、`deep_research_tool.py`、`deeper_research_tool.py`——仅服务退役引擎；GraphRAG 检索策略在 `retrieval/graphrag_provider.py` 与 graph/ 管线（未动，专项测试保留）；
   (3) 旧规划：`planner/base_planner.py`、`task_decomposer.py`、`plan_reviewer.py`——BriefBuilder 接管；PlannerResult 迁至 `planner/result.py`（避免 plan_spec↔clarifier 循环导入）；CLARIFY_PROMPT 保留（Clarifier 复用）；
@@ -107,16 +107,17 @@
 
 
 ## T-409 — 全链验收、运行文档与移交
-- 状态：pending
+- 状态：done
 - 前置：T-408
 - 目标：验证唯一 coreact 全链，文档/代码/恢复/展示一致。
 - 涉及：真实 Runtime+数据库 e2e、`docs/RUN-FLOWS.md`、README、`.env.example`、acceptance.md。
 - 动作：覆盖 happy path、语义未知、缺证据补检索、bounded repair、K=2、pause/cancel、接管、批次/重试崩溃、旧历史页；更新简历描述，明确非论文复现与未做效果实验。
 - 验收：通用门禁、前端构建/测试（若项目有相应脚本）、适用 CI、最终独立 code review；不虚构 provider/LLM/服务测试。
 - 预期证据：最终验收矩阵、命令输出、审查结论、已知限制/回滚交接。
-- 实际证据：未执行。
-- 风险：未验证的真实服务/GPU/性能不写通过。
+- 实际证据（2026-11-11）：**最终验收矩阵**（acceptance.md §2）AC-01..AC-16 全部 PASS——逐项映射到测试文件与命令（e2e 链路：test_coreact_e2e（happy path/步级提交/暂停续跑）、test_action_runner_recovery（5 故障点崩溃恢复）、test_action_runner_isolation（K=2 barrier/预算/隔离）、test_coreact_observation_contract（语义四来源/注入/泄露/降级）、test_coreact_brief_flow（BriefBuilder/缺口派发/预算 fallback）、test_coreact_only_entry + test_coreact_legacy_adapter（单一入口/历史兼容/转换工具）、test_takeover（SIGKILL 接管））。运行文档：RUN-FLOWS.md F1/F2 重写为唯一 coreact 路径（退役引擎历史兼容如实）、README 定位声明（工程实现/简历项目，非论文复现、未做效果实验）、.env.example 死变量清理 + COREACT_SEMANTIC_ENABLED 说明、inventory.md 边界口径更新。通用门禁：pytest 488 passed/4 skipped；ruff（变更文件）通过；git diff --check 干净；npm run build 通过；CI（ci.yml pytest+npm build+PostgreSQL）配置适用未改。已知限制与回滚交接见 acceptance.md §4（非 exactly-once/fencing/语义默认关闭/2 项既有 flaky/旧 Run 处置清单/按阶段 revert）。
+- 风险：未验证的真实服务/GPU/性能不写通过。（测试以 fake provider + 真实执行器栈/真实 SQLite Runtime；LLM/Neo4j/Tavily 服务级端到端未验证——本地部署路径与 CI 存在，验收不含服务级断言。）
+
 
 ## 进度
 
-已完成 8（T-401..T-408）；进行中 0；阻塞 0；待执行 1。下一步：T-409（全链验收、运行文档与移交）。每阶段收尾须重跑 T-401 盘点脚本确认存量数据边界（口径见 inventory.md §5）。
+已完成 9（T-401..T-409 全部）；进行中 0；阻塞 0；待执行 0。T-017 实施完成：唯一 coreact 生产路径（最终验收矩阵见 acceptance.md §2；已知限制与回滚交接见 §4）。

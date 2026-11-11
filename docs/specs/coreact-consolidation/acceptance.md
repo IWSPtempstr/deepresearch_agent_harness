@@ -1,56 +1,53 @@
 # Acceptance: T-017 单一 coreact 路径与职责收敛
 
-## 1. 当前交付与证据边界
+## 1. 交付与证据边界
 
-- 日期：2026-11-11；源码对照基线 `main@dd42137`。
-- 用户范围：将架构改进/删冗余方案写入 SDD，目标只保留 coreact；GraphRAG 能力继续保留。
-- 本次新增四份规范：proposal/design/tasks/acceptance。没有实现功能、删除代码、迁移数据库或运行研究任务；没有提交/推送。
-- Proposal `proposed` / design `draft`，全部实现任务 pending。范围选择不等于具体 schema/迁移策略已经评审通过。
-- 本次不重跑 pytest：只修改 Markdown，文档检查与未来实现验收分开记录；既有 376 passed 不充当 T-017 测试结果。
+- 实施窗口：2026-11-11（同日完成 T-401..T-409 九阶段，每阶段 实现 → 正确性测试 → 独立 code review → 修复/复审 → 本地提交）。
+- 实施提交链（每阶段一个提交，独立可回滚）：`ff20216`(T-401) → `4e00612`(T-402) → `779d5c0`(T-403) → `60f5b66`(T-404) → `0546dd7`(T-405) → `d9c0cd8`(T-406) → `da3a639`(T-407) → `b52a86d`(T-408) → T-409（本提交）。
+- 测试基线：T-401 起点 376 passed/4 skipped；**最终 488 passed/4 skipped**（净增 112）。逐阶段 tombstone（与 tasks.md 各阶段记录一致）：376→432（T-402 +56）→445（T-403 +13）→453（T-404 +8）→473（T-405 +20）→485（T-406 +12）→500（T-407 +15）→488（T-408：新增文件 −1 项、删除退役引擎专属测试 12 项、1:1 重写净 0）。
+- 删除规模：T-408 物理删除 **42 个文件**（git rm，合计 −7,831 行；提交 b52a86d 整体 −8,891 行含 32 个修改文件的改写），清单见 tasks.md T-408。
+- 未做（如实）：效果对比实验/A/B/基准分数（非目标）；真实 LLM/Provider/Neo4j 服务测试（测试以 fake provider + 真实执行器栈/真实 SQLite Runtime 为主，环境依赖服务不虚构通过）；数据库 workflow_mode CHECK 未收窄（另行迁移）。
 
-## 2. 需求—任务—验收矩阵
+## 2. 需求—任务—验收矩阵（最终）
 
-| ID | 验收项 | 实施任务 | 预期证据 | 当前结果 |
+| ID | 验收项 | 实施任务 | 证据（命令/测试） | 结果 |
 |---|---|---|---|---|
-| AC-01 | 只有 coreact 生产工厂；HTTP/worker/CLI/Skill 入口一致 | T-407/408 | 工厂调用 trace、入口/API 测试、capabilities/UI | 未执行 |
-| AC-02 | 独立 deep_research、staged_v1 与 reflection 专用流程退役 | T-406/408 | 删除清单、registry/import/字符串调用审计 | 未执行 |
-| AC-03 | GraphRAG 构建、索引与检索保留，web/scholar 正常 | T-408/409 | 来源专项测试、无真实服务场景明确 fake 边界 | 未执行 |
-| AC-04 | Controller 消费有界发现摘要及真实当前 Run evidence IDs | T-405 | 同计数不同证据内容的决策 fixture、安全测试 | 未执行 |
-| AC-05 | 动作契约进入内部执行上下文，不泄露给 Provider 参数 | T-405 | prompt/payload 断言、搜索参数白名单检查 | 未执行 |
-| AC-06 | ActionRunner 输入隔离、K=2 真重叠、稳定合并、预算预留 | T-403 | barrier/故障/乱序返回测试、派发前费用断言 | 未执行 |
-| AC-07 | 传输/动作/报告 retry 归属明确，每动作至多一次修正 | T-403/409 | attempt 记录、active_result_refs、费用与上限测试 | 未执行 |
-| AC-08 | 全批次 intent、逐动作 commit、显式 next_operation；恢复不丢副动作 | T-404 | 全故障点矩阵、新 Runtime 重启、行/事件/预算断言 | 未执行 |
-| AC-09 | pause/cancel/lease 失效阻止新派发与过期写入 | T-404/409 | 同时 pause/cancel、后台线程/接管竞态测试与限制记录 | 未执行 |
-| AC-10 | claim-scoped assessments 不将结构合规称作事实可信 | T-405 | 检查类型/版本/原因/状态迁移断言；文案检查 | 未执行 |
-| AC-11 | required semantic check 的 unknown 不按 pass，预算不足显式处理 | T-405 | 超时/非法 JSON/服务不可用/预算耗尽测试 | 未执行 |
-| AC-12 | 唯一 BriefBuilder/Controller/Runner/Reporter 职责，没有旧双重调度 | T-402/406/408 | 依赖图、无 reflection 自动注入、组件装配测试 | 未执行 |
-| AC-13 | 历史完成 Run 可读；活动旧快照显式转换或安全阻塞，不静默续跑 | T-401/407 | 只读盘点、dry-run manifest、备份/转换/回滚测试 | 未执行 |
-| AC-14 | 最终 Completion Contract 仍决定 completed，证据缺口回控制循环 | T-406/409 | 合同拒绝/补检索/修稿耗尽/最终完成 e2e | 未执行 |
-| AC-15 | 全量测试、前端构建、静态检查与独立 review | 每阶段/T-409 | 真实命令输出及 review/fix 记录 | 未执行 |
-| AC-16 | ResearchRunResult/ActionResult JSON/API 兼容；Markdown 完整/短报告、失败草稿隔离、真实引用 ID、修订证据映射 | T-402/405/409 | schema roundtrip + API/前端 e2e + 修订 ledger provenance | 未执行 |
+| AC-01 | 只有 coreact 生产工厂；HTTP/worker/CLI/Skill 入口一致 | T-407 | `tests/api/test_coreact_only_entry.py`（8 项：归一化/默认/capabilities/工厂拒绝/恢复排除/OpenAPI 默认）；run_service+bootstrap 工厂删除 DEEP_RESEARCH 分支；eval 入口同规则归一化 | PASS |
+| AC-02 | 独立 deep_research、staged_v1 与 reflection 专用流程退役 | T-406/408 | T-408 删除清单（44 文件，git rm）；grep 退役符号 0 live-code 引用（评审复核）；`importlib.util.find_spec` 模块缺席断言（brief_flow/only_entry） | PASS |
+| AC-03 | GraphRAG 构建、索引与检索保留，web/scholar 正常 | T-408/409 | graph/、retrieval/、reporter 卡片/MapReduce 零改动（diff 无涉）；`tests/retrieval/` 20 项 + `test_evidence_card_pipeline.py` 全过 | PASS |
+| AC-04 | Controller 消费有界发现摘要及真实当前 Run evidence IDs | T-405 | `tests/harness/test_coreact_observation_contract.py`：同计数不同内容改变决策上下文且互相排除、账本外 ID 过滤、prompt 注入仅数据段 | PASS |
+| AC-05 | 动作契约进入内部执行上下文，不泄露给 Provider 参数 | T-405 | 同文件：rubric 进隔离副本 context_snapshot（共享快照不变测试）、Provider 参数白名单 + query 不携带 rubric | PASS |
+| AC-06 | ActionRunner 输入隔离、K=2 真重叠、稳定合并、预算预留 | T-403 | `tests/harness/test_action_runner_isolation.py`：threading.Barrier(2) 真实 RetrievalExecutor+FakeProvider、0.2s 反序完成合并一致、共享键 sequence 裁决、预算零派发/部分准入、worker 副本身份断言 | PASS |
+| AC-07 | 传输/动作/报告 retry 归属明确，每动作至多一次修正 | T-403/409 | runner 修正恰一次/放弃修正测试；attempt_id 派生校验 + active_result_refs 仅指向已提交（T-402 模型测试）；全 attempt 记录保留（失败行不删） | PASS |
+| AC-08 | 全批次 intent、逐动作 commit、显式 next_operation；恢复不丢副动作 | T-404 | `tests/harness/test_action_runner_recovery.py`：4 个已注入故障点（intent 后 / 行后 checkpoint 前 / 部分批次提交后 / retry 游标设置后执行中）+ 游标校验 3 项；第 5 点"retry 合并后提交前"由游标收缩先于持久化的顺序保证（分析覆盖，无注入测试——如实）；断言真实 tool/evidence/事件/usage 行 | PASS |
+| AC-09 | pause/cancel/lease 失效阻止新派发与过期写入 | T-404/409 | runner stop_check 批内取消零派发测试；pause/cancel/lease 边界探测未改动（`test_takeover.py` SIGKILL 接管 + `test_coreact_e2e` pause 中断续跑） | PASS |
+| AC-10 | claim-scoped assessments 不将结构合规称作事实可信 | T-405 | supported 强制 check_kind/verifier/verifier_version 归因 + reason 注明"非独立事实认证"（模型层校验 + 测试）；报告"局限（语义核验）"显式降级 | PASS |
+| AC-11 | required semantic check 的 unknown 不按 pass，预算不足显式处理 | T-405 | 语义四来源矩阵测试（异常/畸形/预算门/判定器缺失 → 全部 failed）+ pass 不升级确定性 fail + fail 不进权重 | PASS |
+| AC-12 | 唯一 BriefBuilder/Controller/Runner/Reporter 职责，没有旧双重调度 | T-402/406/408 | create_default_bundle 删除；reflection 类物理删除（结构保证）；staged 分支删除（快照恢复→execute 显式拒绝测试）；旧规划/反思 0 live 引用 | PASS |
+| AC-13 | 历史完成 Run 可读；活动旧快照显式转换或安全阻塞，不静默续跑 | T-401/407 | 历史完成 Run 可读测试；deep_research 活动工厂拒绝（LEGACY_WORKFLOW_UNSUPPORTED，错误码审计）；staged 快照恢复→执行拒绝；恢复扫描双分支排除 legacy（保持原状）；转换工具 dry-run/幂等 --apply（追加行不破坏原 checkpoint） | PASS |
+| AC-14 | 最终 Completion Contract 仍决定 completed，证据缺口回控制循环 | T-406/409 | contract 门禁未变（9 项检查 + rubric_coverage）；缺口 replan → BriefBuilder 补充候选 → Controller 重新决策并实际派发（brief_flow 测试）；合同失败路由 repair/诚实失败（既有 e2e） | PASS |
+| AC-15 | 全量测试、前端构建、静态检查与独立 review | 每阶段/T-409 | 最终：pytest 488 passed/4 skipped；`npm run build` 通过；CI（ci.yml：pytest+npm build+PostgreSQL 集成）配置未改、适用；8 个阶段独立 review 记录（tasks.md 各阶段实际证据 + 复审结论），全部 APPROVE | PASS |
+| AC-16 | ResearchRunResult/ActionResult JSON/API 兼容；Markdown 完整/短报告、失败草稿隔离、真实引用 ID、修订证据映射 | T-402/405/409 | ResearchRunResult 状态不变量测试（completed⇒passed、failed result=null、draft verified=false、needs_user_input 必须 clarification）；JSON roundtrip ×6 模型；修订 with_revision 版本化（来源不可修订）；Markdown 报告状态（format=markdown 拒绝其他）。**部分项说明**：OpenAPI 端点组装与前端 e2e 展示属 T-407 capabilities/类型对齐 + 既有 presentation 测试；修订证据映射的端到端 artifact 流未在本期实现（修订输出属 output-contract §5 的后续任务） | PASS（附部分项说明） |
 
-## 3. 文档交付检查
+## 3. 运行文档交付检查（T-409）
 
-- [x] 五份文档存在且边界一致：proposal/design/tasks/acceptance/output-contract；旧 T-015/T-016 不被改写成新的现状。
-- [x] 全部 T-401..T-409 为 pending，无虚假实现/测试通过状态。
-- [x] 删除候选表区分独立 workflow、嵌套研究工具与共享 GraphRAG 能力。
-- [x] 明确单一 coreact 与存量数据兼容，不默认授权清库、取消或重跑。
-- [x] 每任务有依赖、触点、动作、验收步骤、预期/实际证据与风险；T-402 明确输出契约冻结与兼容验收。
+- [x] `docs/RUN-FLOWS.md`：F1/F2 重写为唯一 coreact 路径（BriefBuilder→Controller→ActionRunner→Verifier→Reporter→Contract），退役引擎历史兼容段如实（deep_research 拒绝/只读、staged 拒绝+转换工具），F3/F4/F5 平台机制复核无涉旧引擎。
+- [x] `README.md`：唯一 coreact 路径描述 + **定位声明**（工程实现/简历项目，非论文复现，未做效果实验）。
+- [x] `.env.example`：死变量（MA_WORKER_*/MA_REFLECTION_*）移除，COREACT_SEMANTIC_ENABLED 补充说明。
+- [x] `docs/specs/coreact-consolidation/inventory.md`：边界口径更新（切换后测试副作用行的预期形态）+ G-ENTRY 标记完成。
+- [x] `tasks.md`：T-401..T-409 全部 done，各阶段实际证据含命令输出与 review 轮次。
 
-实际文档检查：2026-11-11，Python 文本校验确认五文件存在、T-401..T-409 顺序及唯一性、9 个 pending 状态、每任务八类必填字段、proposal proposed/design draft；T-402 已关联 output-contract。结果 PASS。`git diff --check` 无输出；`git status --short` 仅显示本规范目录未跟踪。删除范围/数据边界为文档人工核对。未执行 pytest、部署或数据迁移；上述清单不是实现完成证明。
+## 4. 已知限制与回滚交接（如实）
 
-## 4. 来源与适用边界
+1. **非 exactly-once**：外部工具调用在"行已落库、checkpoint 未写"窗口内崩溃重做 ≤1 次（测试如实断言 external_calls==2）；计费可低估不双收。
+2. **fencing**：租约校验为 check-then-write（TOCTOU 窗口保留，未消除）。
+3. **语义判定**：默认关闭；开启后为可选模式（unknown 不判罚），required 语义在验证器层完整实现但主路径未配置为 required。
+4. **flaky**：`tests/llm_gateway/test_gateway.py::test_slot_limiter_queues_then_times_out`（既有计时敏感）、`test_takeover.py` SIGKILL 测试在特定子集顺序下偶发（全量运行稳定）——均与本规范改动无关，单跑通过。
+5. **旧 Run 处置**：本地库 4 个 deep_research interrupted/manual_review Run 保持原状；上线切换前须用只读账号重跑 `scripts/inventory_coreact_migration.py` + `scripts/convert_legacy_checkpoints.py`（dry-run）出具该环境清单。
+6. **回滚**：每阶段独立提交，`git revert` 按阶段回滚；T-408 删除不可直接 revert 与 T-407+ 数据并存（删除后回滚需连回 T-407 提交）；数据库无 schema 变更（零迁移），回滚无数据动作。
+7. **未验证**：真实 LLM/Neo4j/Tavily 端到端（环境服务）——本地部署路径与 CI 配置存在，但本验收不虚构服务级测试结果。
 
-- 当前代码：`harness/coreact_controller.py`（摘要上下文而非证据正文）、`coreact_loop.py`（事后验收）、`coreact_verifier.py`（semantic 主路径禁用）、`coordinator_tasks.py`（既有隔离/合并基础）、`contracts.py`（最终门禁）。
-- [Co-ReAct](https://arxiv.org/abs/2605.23590)：作为 rubric/feedback/retry 思路来源；本项目不是训练配方或算法效果复现。
-- [Co-ReAct repository](https://github.com/ZBWpro/Co-ReAct)：借鉴前检查代码/模型/数据各自许可证和具体提交；本规范不复制仓库代码。
-- [QUEST](https://arxiv.org/abs/2605.24218)：结构化上下文思想参考，目标状态将调整为 claim-scoped assessments，不能照搬效果数字。
-- [Anthropic 多智能体研究工程文章](https://www.anthropic.com/engineering/built-multi-agent-research-system)：角色分工、摘要与任务契约参考，不据此声称本项目有相同性能收益。
+## 5. 来源与边界
 
-## 5. 风险、限制与实施准入
-
-- 单一路径选择已确定，物理删除与数据迁移尚未执行。不可映射旧活动 Run 的处置必须先获批准。
-- check-then-write 租约检查不等于原子 fencing；数据库幂等行不等于外部动作 exactly-once。
-- 暂停恢复测试不等于 SIGKILL 故障注入；两个任务完成不等于证明真实并发；语义 judge 结果不等于事实真值。
-- 不开展效果对比实验，但实现正确性、故障恢复与安全测试不可省略。
-- 实施开始前设计评审必须冻结：ActionRunner 协议、ExecutionState 版本转换、旧 Run gate、semantic required/unknown 策略、模型审计映射。
+- 实现基于本仓库既有能力（T-015/T-016 交付），规范见 `docs/specs/coreact-consolidation/{proposal,design,output-contract,tasks,inventory}.md`。
+- [Co-ReAct](https://arxiv.org/abs/2605.23590)/[QUEST](https://arxiv.org/abs/2605.24218)/[Anthropic 多智能体工程](https://www.anthropic.com/engineering/built-multi-agent-research-system)：机制思想来源；本项目不构成任何论文的效果复现或验证。

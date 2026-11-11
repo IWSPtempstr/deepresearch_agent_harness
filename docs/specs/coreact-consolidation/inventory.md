@@ -89,7 +89,7 @@
 - Evidence Ledger、ArtifactStore、Checkpoint/Lease/StateMachine、Reporter 卡片与
   MapReduce（`reporter/evidence_cards.py`、`mapreduce_sections.py`）、最终确定性 Contract。
 - `planner/clarifier.py` 的澄清能力（T-406 BriefBuilder 复用）。
-- `search/tool_registry.py` 的 `answer_validator` 注册（共享安全检查，非 reflection 专属）。
+- ~~`search/tool_registry.py` 的 `answer_validator` 注册~~（T-408 更正：T-401 调用图确认其唯一消费者为 reflector，随 reflection 引擎一并删除——非共享安全检查）。
 
 ## 4. 关键实施 gate（引用 T-401 结论）
 
