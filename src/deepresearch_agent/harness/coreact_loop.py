@@ -1,18 +1,27 @@
-# 由 harness/drivers_plan_execute.py 拆分（T-016），方法体与原位置逐行一致。
-"""coreact_v1 步级循环：决策/批次执行/验证/定向重试/ContextState（原 _execute_coreact_loop 及其辅助）。"""
+# T-015/T-016 引入步级循环；T-403 重写执行段（统一隔离 ActionRunner）。
+"""coreact_v1 步级循环：决策/批次执行/验证/定向重试/ContextState。
+
+T-403 起：批次执行、隔离、稳定合并、预派发准入与定向修正统一交给
+harness/action_runner.ActionRunner（真实执行器栈经回调注入）；本循环保留
+Controller 决策、游标/pending 语义、intent 持久化与 ContextState 记账。
+已知继承差异：current_task_id 不再由 coreact 路径写入共享状态（隔离副本
+语义；coreact 当前无读者）；tool_call_history 去重键继承 staged 实现。
+"""
 
 import asyncio
 from typing import Any
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionRecord
 from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec, TaskNode
 from deepresearch_agent.agents.multi_agent.core.rubric import TaskRubric, build_task_rubric
+from deepresearch_agent.harness.action_models import ActionSpec, action_spec_from_task_node
+from deepresearch_agent.harness.action_runner import ActionRunner, BatchAction, DispatchBudget
 from deepresearch_agent.harness.coreact_controller import DecisionContext
 from deepresearch_agent.harness.coreact_state import (
     CoreActLoopState,
     CoreActPaused,
     PendingAction,
 )
-from deepresearch_agent.harness.coreact_verifier import CoreActVerifier
+from deepresearch_agent.harness.coreact_verifier import CoreActVerifier, StepVerdict
 from deepresearch_agent.config.settings import (
     COREACT_MAX_PARALLEL,
     REPORT_RESERVED_TOKENS,
@@ -44,6 +53,27 @@ class CoreActLoopMixin:
             "web": {"web_search"},
             "scholar": {"scholar_search"},
         }.get(self.context.source_mode.value, set())
+
+        # T-403：统一隔离执行器（预派发预算预约 + 副本隔离 + 稳定合并 + 单次修正）
+        self._action_runner = ActionRunner(
+            execute_action=self._execute_coreact_action_sync,
+            max_parallel=max_parallel,
+            max_concurrency=self.context.budget_limits.max_concurrency,
+            allowed_tools=source_tools,
+            budget=DispatchBudget(
+                used_fn=lambda: self.context.budget_usage.tool_calls,
+                limit=self.context.budget_limits.max_tool_calls,
+            ),
+        )
+
+        def verify_action(action: BatchAction, records: list[ExecutionRecord], executed_queries: set[str]) -> StepVerdict:
+            return verifier.verify(
+                rubric=action.rubric, task=action.task,
+                records=records,
+                ledger_ids=self._coreact_ledger_ids(),
+                executed_queries=executed_queries,
+                allowed_tools=source_tools, semantic_allowed=False,
+            )
 
         for _ in range(max_decisions + 1):
             if self.context.cancellation_requested:
@@ -89,11 +119,9 @@ class CoreActLoopMixin:
             if pending is not None and self.coreact_loop.phase in {"act", "verify"}:
                 resumed_task = TaskNode.model_validate(pending.task)
                 resumed_rubric = TaskRubric.model_validate(pending.rubric)
-                evidence_before = len(self._coreact_ledger_ids())
                 batch = [(resumed_task, resumed_rubric)]
                 attempt = pending.attempt
-                # 恢复路径不走 admit/查重/重试（attempt=2 已是重试）；
-                # 直接进入下方统一执行段（batch_results 循环跳过重试）。
+                # 恢复路径不走 admit/查重/重试（attempt=2 已是重试）。
                 resumed_only = True
             else:
                 resumed_only = False
@@ -133,19 +161,7 @@ class CoreActLoopMixin:
                         self.coreact_loop.stop_reason = "invalid_action_limit"
                         break
                     continue
-            if not resumed_only:
                 query = self._coreact_query(task)
-                if query and query in set(recent_queries):
-                    self.coreact_loop.no_progress_count += 1
-                    reason = f"拒绝重复查询: {query[:120]}"
-                    if reason not in self.coreact_loop.failure_reasons:
-                        self.coreact_loop.failure_reasons.append(reason)
-                    if self.coreact_loop.no_progress_count >= 2:
-                        self.coreact_loop.done = True
-                        self.coreact_loop.phase = "done"
-                        self.coreact_loop.stop_reason = "duplicate_query_limit"
-                        break
-                    continue
                 # T-016 有界并行：controller 动作 + 确定性就绪补位（含批内/历史查重、
                 # 并发上限受 budget_limits.max_concurrency 约束）。
                 batch = [(task, build_task_rubric(
@@ -160,113 +176,85 @@ class CoreActLoopMixin:
                         batch.append((extra, build_task_rubric(
                             extra.task_id, description=extra.description, source_mode=extra.source_mode,
                             min_evidence=min_evidence, completion_conditions=completion_conditions)))
-                evidence_before = len(self._coreact_ledger_ids())
+
+            # T-403：预派发准入（依赖/白名单/查重/预算预约）。恢复重放跳过 admit。
+            batch_actions = [
+                BatchAction(
+                    spec=action_spec_from_task_node(bt, rubric_id=br.rubric_id, attempt=attempt),
+                    task=bt, rubric=br,
+                )
+                for bt, br in batch
+            ]
+            if resumed_only:
+                admitted = batch_actions
+            else:
+                admission = self._action_runner.admit(
+                    batch_actions, completed_task_ids=completed, executed_queries=recent_queries,
+                )
+                admitted = admission.admitted
+                if not admitted:
+                    # 主动作被拒（含重复查询）：与原实现同样按无进展记账
+                    self.coreact_loop.no_progress_count += 1
+                    for rejection in admission.rejections:
+                        reason = f"{rejection.reason_code}: {rejection.detail}"
+                        if reason not in self.coreact_loop.failure_reasons:
+                            self.coreact_loop.failure_reasons.append(reason)
+                    if self.coreact_loop.no_progress_count >= 2:
+                        self.coreact_loop.done = True
+                        self.coreact_loop.phase = "done"
+                        self.coreact_loop.stop_reason = "admission_rejected"
+                        break
+                    continue
+                # 部分拒绝也要可观测（不改变派发纪律：拒绝动作零派发）
+                for rejection in admission.rejections:
+                    reason = f"{rejection.reason_code}: {rejection.detail}"
+                    if reason not in self.coreact_loop.failure_reasons:
+                        self.coreact_loop.failure_reasons.append(reason)
+
+            evidence_before = len(self._coreact_ledger_ids())
 
             # 先设置游标（pending_action 含完整主动作+rubric），再持久化 intent——
             # 崩溃恢复时 checkpoint 同时携带 running 任务行与可重放的游标。
+            first = admitted[0]
             self.coreact_loop.phase = "act"
             self.coreact_loop.pending_action = PendingAction(
-                task=batch[0][0].model_dump(mode="json"), rubric=batch[0][1].model_dump(mode="json"),
-                attempt=attempt,
+                task=first.task.model_dump(mode="json"), rubric=first.rubric.model_dump(mode="json"),
+                attempt=first.attempt,
             )
             if self.step_commit is not None and not resumed_only:
                 plan_for_intent = self.state.plan
                 if isinstance(plan_for_intent, PlanSpec):
-                    for batch_task, _ in batch:
-                        plan_for_intent.update_task_status(batch_task.task_id, "running")
+                    for action in admitted:
+                        plan_for_intent.update_task_status(action.task.task_id, "running")
                 await self._coreact_persist_intent(plan_for_intent)
-            batch_results: list[tuple[Any, Any, Any, Any, str | None]] = []  # (task, rubric, record, verdict, error)
-            if len(batch) == 1:
-                batch_task, batch_rubric = batch[0]
-                _s, error, record = await self._execute_coreact_action(batch_task, loop)
-                verdict = verifier.verify(
-                    rubric=batch_rubric, task=batch_task,
-                    records=[record] if record is not None else [],
-                    ledger_ids=self._coreact_ledger_ids(), executed_queries=set(recent_queries),
-                    allowed_tools=source_tools, semantic_allowed=False,
-                )
-                self.coreact_loop.phase = "verify"
-                self._attach_coreact_verdict(record, batch_rubric, verdict, attempt=1, error=error)
-                batch_results.append((batch_task, batch_rubric, record, verdict, error))
-            else:
-                # 并发执行（各动作独立 to_thread），逐动作独立 verify
-                outcomes = await asyncio.gather(*[
-                    self._execute_coreact_action(bt, loop) for bt, _ in batch
-                ])
-                self.coreact_loop.phase = "verify"
-                for (bt, br), (_s, error_i, record_i) in zip(batch, outcomes):
-                    v_i = verifier.verify(
-                        rubric=br, task=bt,
-                        records=[record_i] if record_i is not None else [],
-                        ledger_ids=self._coreact_ledger_ids(), executed_queries=set(recent_queries),
-                        allowed_tools=source_tools, semantic_allowed=False,
-                    )
-                    self._attach_coreact_verdict(record_i, br, v_i, attempt=1, error=error_i)
-                    batch_results.append((bt, br, record_i, v_i, error_i))
-                    if not v_i.passed:
-                        self.coreact_loop.failure_reasons.append(
-                            v_i.retry_reason or error_i or "步级 rubric 未通过")
 
-            # 失败动作的串行定向重试（各至多一次，受全局 max_task_retries 约束）
-            for idx, (bt, br, rec, v, err) in enumerate(batch_results):
-                if v.passed or br.max_retries <= 0 or not self._coreact_retry_available():
-                    continue
-                if self.coreact_loop.decisions_used >= max_decisions:
-                    break
-                failure_reason = v.retry_reason or err or "步级 rubric 未通过"
-                retry_candidate = bt.model_dump(mode="json")
-                retry_candidate["status"] = "pending"
-                retry_context = DecisionContext(
-                    goal=self.context.resolved_query or self.context.original_query,
-                    source_mode=self.context.source_mode.value,
-                    eligible_tasks=[retry_candidate],
-                    completed_count=len(self.state.execution_context.completed_task_ids) if self.state.execution_context else [],
-                    evidence_count=len(self._coreact_ledger_ids()),
-                    recent_queries=self._coreact_recent_queries(),
-                    failed_rubric_reasons=[failure_reason],
-                    remaining_tokens=max(0, self.context.budget_limits.max_llm_tokens - self.context.budget_usage.llm_tokens),
-                    decisions_used=self.coreact_loop.decisions_used,
-                    max_decisions=max_decisions,
-                    allow_llm=max(0, self.context.budget_limits.max_llm_tokens - self.context.budget_usage.llm_tokens) > REPORT_RESERVED_TOKENS + VERIFICATION_RESERVED_TOKENS + 1000,
-                )
-                retry_decision = await asyncio.to_thread(self._coreact_controller.decide, retry_context)
-                self.coreact_loop.decisions_used += 1
-                if retry_decision.action is None:
-                    continue
-                retry_task = bt.model_copy(deep=True)
-                retry_task.description = retry_decision.action.description
-                retry_task.parameters = dict(retry_decision.action.parameters)
-                retry_task.status = "pending"
-                # 执行后刷新：recent 必须包含刚失败的查询，原样重复直接拒绝
-                recent_after_batch = self._coreact_recent_queries()
-                retry_query = self._coreact_query(retry_task)
-                if retry_query and retry_query in set(recent_after_batch):
-                    reason = f"定向重试仍重复查询: {retry_query[:120]}"
-                    if reason not in self.coreact_loop.failure_reasons:
-                        self.coreact_loop.failure_reasons.append(reason)
-                    continue
-                self.context.budget_usage.task_retries += 1
-                self.coreact_loop.phase = "act"
-                self.coreact_loop.pending_action = PendingAction(
-                    task=retry_task.model_dump(mode="json"), rubric=br.model_dump(mode="json"),
-                    attempt=2, retry_reason=failure_reason,
-                )
-                _s2, error2, retry_record = await self._execute_coreact_action(retry_task, loop)
-                retry_verdict = verifier.verify(
-                    rubric=br, task=retry_task,
-                    records=[retry_record] if retry_record is not None else [],
-                    ledger_ids=self._coreact_ledger_ids(), executed_queries=set(recent_queries),
-                    allowed_tools=source_tools, semantic_allowed=False,
-                )
-                self.coreact_loop.phase = "verify"
-                self._attach_coreact_verdict(retry_record, br, retry_verdict, attempt=2, error=error2)
-                batch_results[idx] = (bt, br, retry_record or rec, retry_verdict, error2)
-                if not retry_verdict.passed and retry_verdict.retry_reason not in self.coreact_loop.failure_reasons:
-                    self.coreact_loop.failure_reasons.append(retry_verdict.retry_reason or "定向重试仍未通过")
+            outcomes = await self._action_runner.run_and_merge(
+                admitted,
+                shared_state=self.state,
+                verify_fn=verify_action,
+                correction_fn=None if resumed_only else await self._coreact_correction(max_decisions),
+                executed_queries=recent_queries,
+                progress_callback=self._coreact_progress_callback(loop),
+            )
 
-            self.coreact_loop.step_index += len(batch)
-            for _bt, _br, _rec, _v, _e in batch_results:
-                self._update_context_state(_v)
+            self.coreact_loop.step_index += len(outcomes)
+            for outcome in outcomes:
+                for attempt_outcome in outcome.attempts:
+                    if attempt_outcome.record is not None:
+                        self._attach_coreact_verdict(
+                            attempt_outcome.record, outcome.action.rubric, attempt_outcome.verdict,
+                            attempt=attempt_outcome.action.attempt, error=attempt_outcome.error,
+                        )
+                if outcome.verdict is not None:
+                    self._update_context_state(outcome.verdict)
+                    if not outcome.verdict.passed:
+                        reason = (
+                            outcome.verdict.retry_reason
+                            or (outcome.active.error if outcome.active else None)
+                            or "步级 rubric 未通过"
+                        )
+                        if reason not in self.coreact_loop.failure_reasons:
+                            self.coreact_loop.failure_reasons.append(reason)
             evidence_after = len(self._coreact_ledger_ids())
             if evidence_after <= evidence_before:
                 self.coreact_loop.no_progress_count += 1
@@ -303,6 +291,76 @@ class CoreActLoopMixin:
             self.state.plan.status = "completed" if self.coreact_loop.stop_reason else "executing"
         # Final snapshot is still persisted by the normal runtime stage boundary.
 
+    def _coreact_progress_callback(self, loop):
+        """把 worker 线程内的进度事件回投到事件循环（与 staged 路径同源）。"""
+        if self.events is None:
+            return None
+
+        def progress_callback(kind, task, record):
+            future = asyncio.run_coroutine_threadsafe(
+                self._publish_execution_progress(kind, task, record), loop,
+            )
+            future.result(timeout=10)
+
+        return progress_callback
+
+    async def _coreact_correction(self, max_decisions: int):
+        """定向修正回调（ActionRunner 每个失败动作至多调用一次）。
+
+        修正内容由 Controller 决定；重试预算记账（task_retries）在此发生。
+        返回 None 表示放弃修正。
+        """
+
+        async def correct(action: BatchAction, verdict, error) -> BatchAction | None:
+            br = action.rubric
+            if br.max_retries <= 0 or not self._coreact_retry_available():
+                return None
+            if self.coreact_loop.decisions_used >= max_decisions:
+                return None
+            failure_reason = (verdict.retry_reason if verdict is not None else None) or error or "步级 rubric 未通过"
+            retry_candidate = action.task.model_dump(mode="json")
+            retry_candidate["status"] = "pending"
+            remaining = max(0, self.context.budget_limits.max_llm_tokens - self.context.budget_usage.llm_tokens)
+            retry_context = DecisionContext(
+                goal=self.context.resolved_query or self.context.original_query,
+                source_mode=self.context.source_mode.value,
+                eligible_tasks=[retry_candidate],
+                completed_count=len(self.state.execution_context.completed_task_ids) if self.state.execution_context else 0,
+                evidence_count=len(self._coreact_ledger_ids()),
+                recent_queries=self._coreact_recent_queries(),
+                failed_rubric_reasons=[failure_reason],
+                remaining_tokens=remaining,
+                decisions_used=self.coreact_loop.decisions_used,
+                max_decisions=max_decisions,
+                allow_llm=remaining > REPORT_RESERVED_TOKENS + VERIFICATION_RESERVED_TOKENS + 1000,
+            )
+            retry_decision = await asyncio.to_thread(self._coreact_controller.decide, retry_context)
+            self.coreact_loop.decisions_used += 1
+            if retry_decision.action is None:
+                return None
+            retry_task = action.task.model_copy(deep=True)
+            retry_task.description = retry_decision.action.description
+            retry_task.parameters = dict(retry_decision.action.parameters)
+            retry_task.status = "pending"
+            # 执行后刷新：recent 必须包含刚失败的查询，原样重复直接拒绝
+            recent_after_batch = self._coreact_recent_queries()
+            retry_query = self._coreact_query(retry_task)
+            if retry_query and retry_query in set(recent_after_batch):
+                reason = f"定向重试仍重复查询: {retry_query[:120]}"
+                if reason not in self.coreact_loop.failure_reasons:
+                    self.coreact_loop.failure_reasons.append(reason)
+                return None
+            self.context.budget_usage.task_retries += 1
+            self.coreact_loop.phase = "act"
+            self.coreact_loop.pending_action = PendingAction(
+                task=retry_task.model_dump(mode="json"), rubric=br.model_dump(mode="json"),
+                attempt=action.attempt + 1, retry_reason=failure_reason,
+            )
+            spec: ActionSpec = action.spec.next_attempt(query=retry_query or None)
+            return BatchAction(spec=spec, task=retry_task, rubric=br)
+
+        return correct
+
     async def _coreact_persist_intent(self, plan: PlanSpec | None) -> None:
         """T-016 intent：仅持久化 plan/task 行（running）与循环游标 checkpoint。
 
@@ -313,21 +371,9 @@ class CoreActLoopMixin:
             return
         await self._intent_persist(self)
 
-    async def _execute_coreact_action(self, task: TaskNode, loop) -> tuple[bool, str | None, ExecutionRecord | None]:
-        def progress_callback(kind, callback_task, record):
-            if self.events is None:
-                return
-            future = asyncio.run_coroutine_threadsafe(
-                self._publish_execution_progress(kind, callback_task, record), loop,
-            )
-            future.result(timeout=10)
-
-        return await asyncio.to_thread(
-            self.orchestrator.execute_action,
-            self.state,
-            task,
-            progress_callback=progress_callback,
-        )
+    def _execute_coreact_action_sync(self, state, task: TaskNode) -> tuple[bool, str | None, ExecutionRecord | None]:
+        """真实执行器回调：WorkerCoordinator.execute_action（在 runner 的 worker 线程调用）。"""
+        return self.orchestrator.execute_action(state, task)
 
     def _admit_coreact_action(self, action: TaskNode, eligible: list[dict[str, Any]]) -> TaskNode | None:
         plan = self.state.plan

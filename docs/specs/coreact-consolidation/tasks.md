@@ -30,15 +30,16 @@
 - 风险：不把未知旧状态自动当空状态重新执行。（适配器对未知版本/畸形 pending 一律抛 LegacyStateUnsupported；legacy done 态映射为 report 而非 complete。）
 
 ## T-403 — 统一隔离 ActionRunner
-- 状态：pending
+- 状态：done
 - 前置：T-402
 - 目标：替代共享状态 coreact gather 与重复调度/重试逻辑。
 - 涉及：`executor/worker_coordinator.py`、`coordinator_tasks.py`、`coordinator_modes.py`、`harness/coreact_loop.py`、拟新增 `harness/action_runner.py`。
 - 动作：提取公开单动作/批次接口；输入副本隔离、结果 delta、稳定合并；预派发预算预约、来源/去重门；统一 retry 所有权，保留所有 attempt 与成本。
 - 验收：拟新增 `tests/harness/test_action_runner_isolation.py`；K=2 使用 barrier 证明重叠而非仅断言执行两个；不同完成顺序不改变合并结果；真实执行器+fake provider，测试预算超限零派发、任务失败、共享键冲突与每动作一次修正；通用门禁。
 - 预期证据：隔离/并发/预算/重试正确性日志。
-- 实际证据：未执行。
-- 风险：不能用 GIL 下 list.append 原子性作为线程安全证明。
+- 实际证据（2026-11-11）：新增 `harness/action_runner.py`（公开 `ActionRunner`：admit 预派发准入——依赖/工具白名单/query 去重/DispatchBudget tool 额度预约，`execute_isolated` 深拷贝隔离执行，公开 `merge_isolated_state` 从 coordinator_tasks 逐行提取（含 tracker 子树按键合并强化），`run_and_merge`——并发执行→sequence 顺序稳定合并→逐动作验证→每动作至多一次定向修正，try/finally 保证预约释放，合并后副本即弃）；`coreact_loop.py` 执行段重写为 runner 调用（admit→intent→run_and_merge→记账，恢复重放跳过 admit/修正，pending 游标/step_commit 语义保留）。`tests/harness/test_action_runner_isolation.py` 13 项测试：threading.Barrier(2) 在真实 RetrievalExecutor+FakeProvider 内证明 K=2 重叠、0.2s 延迟差反序完成下合并结果一致、共享键 sequence 裁决且局部键不丢、预算零派发与部分准入边界、失败记录保留、修正恰一次/放弃修正、批内取消零派发、worker 线程对象身份隔离证明。通用门禁：pytest 445 passed/4 skipped（432 基线 + 13）；ruff F821/F811/F401 通过；`git diff --check` 干净。独立 code review 结论 APPROVE（13 项 minor/nit 中 7 项随本阶段修复：部分拒绝可观测性、预约 try/finally、副本即弃、record=None 不发 completed、批内取消测试实化、边界准入测试、来源注释更新；其余记账见下）。
+- 风险：不能用 GIL 下 list.append 原子性作为线程安全证明。（测试以 barrier/对象身份/结构隔离证明；合并仅在事件循环协调段发生。）遗留记账：failure_reasons 仅记最终 verdict（接受的行为统一）；current_task_id 不再由 coreact 写入（无读者，docstring 注明）；tool_call_history 去重键继承 staged（无功能影响）；token/retry 额度预约未覆盖（T-404 扩展 DispatchBudget）。
+
 
 ## T-404 — 多动作 intent 与耐久恢复
 - 状态：pending
@@ -108,4 +109,4 @@
 
 ## 进度
 
-已完成 2（T-401、T-402）；进行中 0；阻塞 0；待执行 7。下一步：T-403（统一隔离 ActionRunner）。每阶段收尾须重跑 T-401 盘点脚本确认存量数据边界（runs/checkpoints 计数不变）。
+已完成 3（T-401..T-403）；进行中 0；阻塞 0；待执行 6。下一步：T-404（多动作 intent 与耐久恢复）。每阶段收尾须重跑 T-401 盘点脚本确认存量数据边界（口径见 inventory.md §5）。
