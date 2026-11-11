@@ -2,8 +2,6 @@
 """图谱探索/推理链分析/矛盾检测（原 explore_knowledge 等 3 个方法）。"""
 
 from deepresearch_agent.config.prompts import (
-    LC_SYSTEM_PROMPT,
-    DEEP_RESEARCH_THINKING_SUMMARY_PROMPT,
     EXPLORATION_SUMMARY_PROMPT,
     CONTRADICTION_IMPACT_PROMPT,
 )

@@ -9,7 +9,6 @@ import asyncio
 import os
 
 import pytest
-import pytest_asyncio
 
 from backend.app.schemas import MessageCreate, RunCreate, SessionCreate
 from deepresearch_agent.harness import SourceMode, WorkflowMode

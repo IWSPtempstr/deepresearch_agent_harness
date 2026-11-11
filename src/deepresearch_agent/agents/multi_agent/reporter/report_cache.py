@@ -1,18 +1,15 @@
 # 由 agents/multi_agent/reporter/base_reporter.py 拆分（T-014），方法体与原位置逐行一致。
 """报告缓存与阶段检查点（原 _load_cached_payload 等 9 个方法）。"""
 
-from typing import List, Dict, Any, Optional, Iterable, Tuple
-import json
+from typing import List, Dict, Any, Optional
 import logging
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.reporter.outline_builder import (
-    OutlineBuilder,
     ReportOutline,
     SectionOutline,
 )
 from deepresearch_agent.agents.multi_agent.reporter.consistency_checker import (
-    ConsistencyChecker,
     ConsistencyCheckResult,
 )
 _LOGGER = logging.getLogger(__name__)

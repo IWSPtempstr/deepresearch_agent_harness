@@ -1,7 +1,7 @@
 # 由 agents/reflector.py 拆分（T-014），方法体与原位置逐行一致。
 """反思任务执行主体（原 execute_task，167 行整方法搬移）。"""
 
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional, List
 import time
 from deepresearch_agent.agents.multi_agent.core.execution_record import (
     ExecutionMetadata,
@@ -15,8 +15,6 @@ from deepresearch_agent.agents.multi_agent.core.plan_spec import (
 )
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.executor.base_executor import (
-    BaseExecutor,
-    ExecutorConfig,
     TaskExecutionResult,
 )
 from deepresearch_agent.search.tool.validation_tool import AnswerValidationTool

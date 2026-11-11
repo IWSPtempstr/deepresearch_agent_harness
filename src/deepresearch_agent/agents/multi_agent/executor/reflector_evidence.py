@@ -1,7 +1,7 @@
 # 由 agents/reflector.py 拆分（T-014），方法体与原位置逐行一致。
 """反思证据收集（原 _collect_evidence_from_records/_extract_evidence_text）。"""
 
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Optional, List
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 
 

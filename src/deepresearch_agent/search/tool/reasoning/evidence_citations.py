@@ -1,7 +1,6 @@
 # 由 search/tool/reasoning/evidence.py 拆分（T-014），方法体与原位置逐行一致。
 """引用生成与答案标注（原 generate_citations 等 4 个方法）。"""
 
-from typing import Dict, List
 
 
 class EvidenceCitationsMixin:

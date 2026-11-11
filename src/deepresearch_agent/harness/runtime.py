@@ -6,12 +6,12 @@ from __future__ import annotations
 # 本文件保留类声明与导入路径；未拆出的方法：__init__, _attach_prefix_usage, _load_context, _safe_stage_after, _transition, _pause_at_safe_boundary, _assert_not_cancelled。
 import json
 from typing import Any, Callable
-from deepresearch_agent.harness.budgets import BudgetExceeded, BudgetLimits, BudgetManager
+from deepresearch_agent.harness.budgets import BudgetLimits
 from deepresearch_agent.harness.checkpoints import CheckpointManager
 from deepresearch_agent.harness.contracts import ContractEvaluator, RunStatus, SourceMode, WorkflowMode
 from deepresearch_agent.harness.evidence import EvidenceLedger
 from deepresearch_agent.harness.event_bus import EventBus
-from deepresearch_agent.harness.errors import AppError, ErrorCode, NeedsUserInput, RunCancelled, RunLeaseLost
+from deepresearch_agent.harness.errors import RunCancelled
 from deepresearch_agent.harness.run_context import RunContext
 from deepresearch_agent.harness.state_machine import StateMachine
 from deepresearch_agent.persistence.artifact_store import ArtifactStore

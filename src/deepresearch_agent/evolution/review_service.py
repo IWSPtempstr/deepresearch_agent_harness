@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any
 
 from sqlalchemy import func, select
@@ -12,7 +11,7 @@ from deepresearch_agent.persistence.models import RunEventModel, RunModel, ToolC
 
 from .review_agents import SkillCriticAgent, SkillProposerAgent
 from .review_pack import ReviewPackBuilder
-from .review_schema import ReviewPack, SkillProposal
+from .review_schema import ReviewPack
 from .skill_manager import SkillManager
 from .validators import ProposalValidators
 

@@ -2,23 +2,14 @@
 """消息历史/截断推理/已执行查询状态（原 generate_next_query 等 8 个方法）。"""
 
 import re
-from typing import List, Dict, Any
+from typing import Dict, Any
 import logging
 import traceback
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from deepresearch_agent.config.prompts import (
     BEGIN_SEARCH_QUERY,
     BEGIN_SEARCH_RESULT,
-    END_SEARCH_RESULT,
     REASON_PROMPT,
-    END_SEARCH_QUERY,
-    INITIAL_THINKING_PROMPT,
-    HYPOTHESIS_GENERATION_PROMPT,
-    HYPOTHESIS_VERIFICATION_PROMPT,
-    VERIFICATION_STATUS_PROMPT,
-    UPDATE_THINKING_PROMPT,
-    COUNTERFACTUAL_ANALYSIS_PROMPT,
-    COUNTERFACTUAL_COMPARISON_PROMPT,
 )
 
 

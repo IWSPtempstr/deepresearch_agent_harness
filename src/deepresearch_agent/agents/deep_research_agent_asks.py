@@ -1,7 +1,7 @@
 # 由 agents/deep_research_agent.py 拆分（T-014），方法体与原位置逐行一致。
 """研究问答入口（原 ask/ask_with_thinking/ask_stream）。"""
 
-from typing import List, Dict, AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional
 import asyncio
 import re
 

@@ -3,7 +3,6 @@
 全部离线：httpx.MockTransport 模拟上游响应。
 """
 
-import json
 
 import httpx
 import pytest

@@ -1,8 +1,6 @@
 # 由 search/tool/reasoning/chain_of_exploration.py 拆分（T-014），方法体与原位置逐行一致。
 """图上实体/关系/内容/社区信息读取（原 _get_neighbors 与 _get_*_info）。"""
 
-from typing import List, Dict, Any
-import numpy as np
 import pandas as pd
 
 

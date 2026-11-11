@@ -2,21 +2,13 @@
 """思考文本的标签清洗与查询提取（原 remove_query_tags 等 3 个方法；评审修订：保持 Mixin 方法而非模块函数，调用方 self.* 零改动）。"""
 
 import re
-from typing import List, Dict, Any
+from typing import List
 from deepresearch_agent.search.tool.reasoning.nlp import extract_between
 from deepresearch_agent.config.prompts import (
     BEGIN_SEARCH_QUERY,
     BEGIN_SEARCH_RESULT,
     END_SEARCH_RESULT,
-    REASON_PROMPT,
     END_SEARCH_QUERY,
-    INITIAL_THINKING_PROMPT,
-    HYPOTHESIS_GENERATION_PROMPT,
-    HYPOTHESIS_VERIFICATION_PROMPT,
-    VERIFICATION_STATUS_PROMPT,
-    UPDATE_THINKING_PROMPT,
-    COUNTERFACTUAL_ANALYSIS_PROMPT,
-    COUNTERFACTUAL_COMPARISON_PROMPT,
 )
 
 

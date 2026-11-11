@@ -3,10 +3,9 @@
 
 import time
 import json
-from typing import List, Dict, Any, Tuple
-import pandas as pd
+from typing import List, Dict, Any
 from langchain_core.tools import BaseTool
-from deepresearch_agent.config.settings import gl_description, response_type, HYBRID_SEARCH_SETTINGS
+from deepresearch_agent.config.settings import gl_description
 
 
 class HybridKeywordsMixin:

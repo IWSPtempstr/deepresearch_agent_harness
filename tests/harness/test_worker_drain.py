@@ -145,7 +145,6 @@ def drained_env(tmp_path):
     db_path = tmp_path / "drain.db"
     db_url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
     # 父进程建 schema（子进程跳过 create_schema）
-    import asyncio
     from deepresearch_agent.persistence import Database
     from backend.app.schemas import MessageCreate, RunCreate, SessionCreate
     from deepresearch_agent.harness import SourceMode, WorkflowMode

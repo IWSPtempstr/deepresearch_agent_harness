@@ -1,7 +1,7 @@
 # 由 search/tool/deep_research_tool.py 拆分（T-014），方法体与原位置逐行一致。
 """LangChain 工具工厂（原 get_tool/get_thinking_tool/get_thinking_stream_tool）。"""
 
-from typing import Dict, List, Any, Optional, AsyncGenerator
+from typing import Dict, Any, AsyncGenerator
 from langchain_core.tools import BaseTool
 
 

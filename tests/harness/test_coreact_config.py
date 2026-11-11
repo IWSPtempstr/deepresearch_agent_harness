@@ -12,9 +12,17 @@ class TestOrchestrationStamp:
         import importlib
 
         monkeypatch.setenv("RESEARCH_ORCHESTRATION", "bogus_mode")
+        # 拆分后按依赖顺序 reload：sections 的赋值语句读取 env 时必须真的重执行
+        import deepresearch_agent.config.settings_core as core
+        import deepresearch_agent.config.settings_sections as sections
+
         with pytest.raises(ValueError):
+            importlib.reload(core)
+            importlib.reload(sections)
             importlib.reload(settings)
         monkeypatch.undo()
+        importlib.reload(core)
+        importlib.reload(sections)
         importlib.reload(settings)
         assert settings.RESEARCH_ORCHESTRATION == "coreact_v1"
 

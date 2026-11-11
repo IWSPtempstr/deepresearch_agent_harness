@@ -4,7 +4,7 @@ import json
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from backend.app.dependencies import get_database, get_memory_service, get_skill_services
 from backend.app.schemas import MemoryCreate, MemoryLifecycleUpdate

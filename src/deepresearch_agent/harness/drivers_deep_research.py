@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Protocol
+from typing import Any
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionRecord
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
 from .run_context import RunContext

@@ -4,11 +4,10 @@ from __future__ import annotations
 
 
 import json
-from typing import Any, Callable
-from deepresearch_agent.harness.budgets import BudgetExceeded, BudgetLimits, BudgetManager
+from typing import Any
+from deepresearch_agent.harness.budgets import BudgetManager
 from deepresearch_agent.harness.run_context import RunContext
 from deepresearch_agent.context.artifact_edit import ArtifactEditContextBuilder
-from deepresearch_agent.persistence.artifact_store import ArtifactStore
 
 
 class RuntimePersistMixin:
@@ -22,7 +21,7 @@ class RuntimePersistMixin:
         plan_id = str(plan.get("plan_id") or f"plan_{context.run_id}_{context.plan_version}")
         await self.trajectory.save_plan(run_id=context.run_id, plan_id=plan_id, version=context.plan_version, status=str(plan.get("status", "executing")), plan=plan, tasks=tasks, source_mode=context.source_mode.value)
 
-    async def _commit_coreact_step(self, context: RunContext, driver: Any, budget: BudgetManager) -> None:
+    async def _commit_coreact_step(self, context: RunContext, driver: Any, budget: BudgetManager, *, owner: str = "") -> None:
         """Persist one controller action durably, then snapshot the loop state.
 
         Idempotency: plan/task rows use stable IDs and tool calls/evidence use
@@ -32,6 +31,14 @@ class RuntimePersistMixin:
         """
         if self.trajectory is None:
             return
+        # T-016 fencing（check-then-write）：租约已易主时本实例绝不能再写。
+        # TOCTOU 窗口仍在（校验与写入非原子），全量条件 UPDATE 留后续硬化。
+        if owner:
+            run = await self.runs.get(context.run_id)
+            if run is None or run.lease_owner != owner:
+                from deepresearch_agent.harness.errors import RunLeaseLost
+
+                raise RunLeaseLost("租约已易主，放弃步级提交")
         await self._persist_plan(context, driver)
         await self._persist_execution(context, driver, budget)
         context.budget_usage = budget.usage

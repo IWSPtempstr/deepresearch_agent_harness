@@ -183,6 +183,7 @@ def test_coreact_retries_failed_step_once_with_targeted_feedback():
     asyncio.run(driver.plan())
     asyncio.run(driver.execute())
 
+    print("DBG_RETRY", [(t.task_id, t.parameters.get("query")) for t in orchestrator.executed], llm.prompts[1][:200] if len(llm.prompts)>1 else None)
     assert len(orchestrator.executed) == 2
     assert orchestrator.executed[0].task_id == orchestrator.executed[1].task_id
     assert orchestrator.executed[1].parameters["query"] == "检索增强生成 一手来源和定义"

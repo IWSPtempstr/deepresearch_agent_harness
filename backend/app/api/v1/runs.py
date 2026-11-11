@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request
 from sse_starlette.sse import EventSourceResponse
 
 from backend.app.dependencies import get_database, get_event_stream, get_run_service

@@ -9,10 +9,8 @@ from deepresearch_agent.agents.multi_agent.core.retrieval_result import Retrieva
 from deepresearch_agent.search.retrieval_adapter import (
     create_retrieval_metadata,
     create_retrieval_result,
-    merge_retrieval_results,
     results_from_entities,
     results_from_relationships,
-    results_to_payload,
 )
 
 

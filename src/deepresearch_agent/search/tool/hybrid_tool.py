@@ -2,8 +2,7 @@
 # 本文件保留类声明与导入路径；未拆出的方法：__init__, _setup_chains, structured_search, search, close。
 # MRO：Mixin 在前、ABC 基类殿后（abc 抽象检查沿 MRO getattr，基类在前会忽略 Mixin 中的具体实现）。
 import time
-from typing import List, Dict, Any, Tuple
-import pandas as pd
+from typing import Dict, Any
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from deepresearch_agent.config.prompts import (
@@ -11,13 +10,9 @@ from deepresearch_agent.config.prompts import (
     HYBRID_TOOL_QUERY_PROMPT,
     LOCAL_SEARCH_KEYWORD_PROMPT,
 )
-from deepresearch_agent.config.settings import gl_description, response_type, HYBRID_SEARCH_SETTINGS
+from deepresearch_agent.config.settings import response_type, HYBRID_SEARCH_SETTINGS
 from deepresearch_agent.search.retrieval_adapter import (
-    create_retrieval_metadata,
-    create_retrieval_result,
     merge_retrieval_results,
-    results_from_entities,
-    results_from_relationships,
     results_to_payload,
 )
 

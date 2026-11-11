@@ -1,12 +1,11 @@
 # 由 agents/multi_agent/reporter/base_reporter.py 拆分（T-014），方法体与原位置逐行一致。
 """MapReduce 分节路径（原 _generate_sections_mapreduce 等 5 个方法）。"""
 
-from typing import List, Dict, Any, Optional, Iterable, Tuple
+from typing import List, Dict, Any, Optional, Tuple
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
 from deepresearch_agent.agents.multi_agent.reporter.outline_builder import (
-    OutlineBuilder,
     ReportOutline,
     SectionOutline,
 )
@@ -14,7 +13,6 @@ from deepresearch_agent.agents.multi_agent.reporter.mapreduce import (
     EvidenceMapper,
     EvidenceSummary,
     SectionReducer,
-    ReduceStrategy,
     ReportAssembler,
 )
 _LOGGER = logging.getLogger(__name__)

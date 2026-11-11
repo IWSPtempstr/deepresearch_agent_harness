@@ -238,7 +238,10 @@ class TestCoreActE2E:
 
         final_context = await runtime.execute_run(run_id)
 
-        assert final_context.status.value == "completed", final_context.workflow_state
+        run_row_dbg = await RunRepository(database).get(run_id)
+        if final_context.status.value != "completed":
+            print("DBG_FAIL:", run_row_dbg.error_code, "|", run_row_dbg.error_message)
+        assert final_context.status.value == "completed", (final_context.workflow_state, run_row_dbg.error_message)
         assert [task.parameters["query"] for task in orchestrator.executed] == [
             "检索增强 基础概念", "检索增强 局限与评测",
         ]

@@ -1,12 +1,12 @@
 # 由 search/tool/deep_research_tool.py 拆分（T-014），方法体与原位置逐行一致。
 """流式思考与流式搜索（原 thinking_stream/search_stream/_fix_answer）。"""
 
-from typing import Dict, List, Any, Optional, AsyncGenerator
+from typing import Any, AsyncGenerator
 import time
 import re
 import asyncio
 from deepresearch_agent.search.tool.reasoning.prompts import kb_prompt
-from deepresearch_agent.search.tool.reasoning.search import DualPathSearcher, QueryGenerator
+from deepresearch_agent.search.tool.reasoning.search import QueryGenerator
 
 
 class DeepStreamingMixin:

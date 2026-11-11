@@ -1,7 +1,7 @@
 # 由 agents/multi_agent/reporter/base_reporter.py 拆分（T-014），方法体与原位置逐行一致。
 """附录/清洗/引用格式化与证据指纹（原 _append_evidence_annex 等 8 个方法）。"""
 
-from typing import List, Dict, Any, Optional, Iterable, Tuple
+from typing import List, Dict, Any, Optional, Iterable
 import hashlib
 import json
 import re

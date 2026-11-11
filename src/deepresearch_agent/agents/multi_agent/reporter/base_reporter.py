@@ -7,31 +7,24 @@ Reporter编排基类
 # 由 agents/multi_agent/reporter/base_reporter.py 拆分（T-014），方法体与原位置逐行一致。
 # 本文件保留类声明与导入路径；未拆出的方法：__init__。
 # MRO：Mixin 在前、ABC 基类殿后（abc 抽象检查沿 MRO getattr，基类在前会忽略 Mixin 中的具体实现）。
-from typing import List, Dict, Any, Optional, Iterable, Tuple
+from typing import Optional
 from deepresearch_agent.agents.multi_agent.reporter.outline_builder import (
     OutlineBuilder,
-    ReportOutline,
-    SectionOutline,
 )
 from deepresearch_agent.agents.multi_agent.reporter.section_writer import (
     SectionWriter,
     SectionWriterConfig,
-    SectionDraft,
 )
 from deepresearch_agent.agents.multi_agent.reporter.evidence_cards import (
-    EvidenceCard,
     EvidenceCardPipeline,
 )
 from deepresearch_agent.agents.multi_agent.reporter.consistency_checker import (
     ConsistencyChecker,
-    ConsistencyCheckResult,
 )
 from deepresearch_agent.agents.multi_agent.reporter.formatter import CitationFormatter
 from deepresearch_agent.agents.multi_agent.reporter.mapreduce import (
     EvidenceMapper,
-    EvidenceSummary,
     SectionReducer,
-    ReduceStrategy,
     ReportAssembler,
 )
 from deepresearch_agent.cache_manager.manager import CacheManager
@@ -56,8 +49,13 @@ from deepresearch_agent.agents.multi_agent.reporter.report_pipeline import Repor
 from deepresearch_agent.agents.multi_agent.reporter.card_sections import CardSectionsMixin
 from deepresearch_agent.agents.multi_agent.reporter.mapreduce_sections import MapReduceSectionsMixin
 from deepresearch_agent.agents.multi_agent.reporter.report_formatting import ReportFormattingMixin
+from deepresearch_agent.agents.multi_agent.reporter.report_schemas import (  # noqa: F401  re-export（reporter/__init__ 与 harness/workflow 依赖此路径）
+    ReporterConfig,
+    SectionContent,
+    ReportResult,
+)
 from deepresearch_agent.agents.multi_agent.reporter.report_cache import ReportCacheMixin
-from deepresearch_agent.agents.multi_agent.reporter.report_schemas import ReporterConfig, SectionContent, ReportResult
+from deepresearch_agent.agents.multi_agent.reporter.report_schemas import ReporterConfig
 
 class BaseReporter(ReportPipelineMixin, CardSectionsMixin, MapReduceSectionsMixin, ReportFormattingMixin, ReportCacheMixin):
     """

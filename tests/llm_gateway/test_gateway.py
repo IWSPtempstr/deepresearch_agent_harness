@@ -3,7 +3,6 @@
 全部使用 fake 传输层客户端与 _run_chain/_agenerate_chain 链控入口，不出网。
 """
 
-import asyncio
 import time
 import types
 

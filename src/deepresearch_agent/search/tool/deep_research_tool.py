@@ -1,7 +1,7 @@
 # 由 search/tool/deep_research_tool.py 拆分（T-014），方法体与原位置逐行一致。
 # 本文件保留类声明与导入路径；未拆出的方法：search, close。
 # MRO：Mixin 在前、ABC 基类殿后（abc 抽象检查沿 MRO getattr，基类在前会忽略 Mixin 中的具体实现）。
-from typing import Dict, List, Any, Optional, AsyncGenerator
+from typing import Any
 import time
 import traceback
 
