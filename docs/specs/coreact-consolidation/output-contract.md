@@ -1,8 +1,12 @@
 # T-017 输出契约：用户报告与内部动作结果
 
-- 状态：draft，属于 design.md 的配套协议；以下为目标格式，不是当前 API 已实现的字段。
+- 状态：T-402 已冻结 schema（2026-11-11）；行为接线在 T-403..T-407 完成，API/OpenAPI 冻结在 T-407。
 - 输出字段、状态语义和约束以本文件为单一权威来源，proposal/tasks/acceptance 引用本文件。
-- 本次只写规范；不得把示例 ID 当真实证据，或把 schema 定义视作验收通过。
+- 实现位置：`harness/research_brief.py`（ResearchBrief/EvidenceAssessment/角色规则）、
+  `harness/action_models.py`（ActionSpec/ActionRubric/ActionResult/ObservationSummary/
+  ExecutionState 及旧 TaskNode/TaskRubric/CoreActLoopState 适配器）、
+  `harness/run_result.py`（ResearchRunResult）。schema_version 当前均为 1；
+  高于实现的版本一律拒绝（UnknownSchemaVersion / LegacyStateUnsupported）。
 
 ## 1. 交付分层
 

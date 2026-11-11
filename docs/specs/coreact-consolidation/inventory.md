@@ -113,6 +113,15 @@
   散落脚本，排除 `.venv`/`vendor`/`.zcode-site` 镜像）。
 - 示例输出：本地库盘点结果见本文 §2；静态引用扫描结果见 §3.2。
 - 后续各阶段结束时须重跑脚本确认存量数据边界未被破坏（runs/checkpoints 计数不变）。
+- **边界口径**：本仓库测试套件存在既有副作用——`tests/observability/test_observability.py`
+  调用 `create_app()` 未指定 database_url，会在本地 `data/app.db` 产生新的
+  deep_research/completed Run 行（fake driver，非旧引擎真实执行）。因此
+  "计数不变"按以下口径核对，而非全表计数：
+  1. `plan_execute_report` 行数保持 0；
+  2. 既有 4 个 interrupted/manual_review Run 原状未动；
+  3. checkpoint 编排标记分布不含 coreact_v1/staged 新增。
+  （2026-11-11 T-402 收尾核对：plan_execute_report=0，interrupted=4 原状，checkpoint
+  标记无 coreact 新增——增量行均为上述既有测试副作用。）
 - 独立 code review（2026-11-11，两轮）结论：首轮 8 项脚本/文档发现全部修复并经复审
   逐项验证（标记启发式与快照实现对齐、非 dict state_json 崩溃防护、SQLite-only 表述、
   扫描范围补 tests/与根目录、标记桶对账 954/954、文档 stale 参数、WAL sidecar 说明、

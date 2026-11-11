@@ -19,15 +19,15 @@
 - 风险：若存在不可安全转换的活动 Run，先阻塞切换，另获数据处理批准。（本地库的 4 个 manual_review Run 无执行现场，保持原状，不阻塞后续实现，但上线切换前须重跑盘点出具该环境清单。）
 
 ## T-402 — ResearchBrief 与单一职责接口
-- 状态：pending
+- 状态：done
 - 前置：T-401
 - 目标：冻结 Brief/ActionSpec/ActionResult/ObservationSummary/EvidenceAssessment/ExecutionState 接口，并冻结 `output-contract.md` 中的用户报告与内部动作结果协议。
 - 涉及：现有 `core/plan_spec.py`、`harness/coreact_state.py`、拟新增 `harness/research_brief.py` / `action_models.py`、`docs/specs/coreact-consolidation/output-contract.md`。
 - 动作：定义版本/hash/证据引用/next_operation/inflight 集合；旧 TaskNode/LoopState 的数据适配器；定义模型角色冻结规则；实现 ResearchRunResult 的 API/前端兼容视图设计。
 - 验收：拟新增 `tests/harness/test_coreact_consolidation_models.py`，测试 JSON 往返、未知版本拒绝、来源约束、并行/重试身份和旧 payload 转换；验证 Markdown 报告状态、ActionResult execution/verification 分离；通用门禁。
 - 预期证据：schema/兼容矩阵与测试日志。
-- 实际证据：未执行。
-- 风险：不把未知旧状态自动当空状态重新执行。
+- 实际证据（2026-11-11）：新增 `harness/research_brief.py`（ResearchBrief/BudgetPolicy/EvidenceAssessment/merge_assessments + canonical_role_models 角色冻结规则，schema_version>1 拒绝）、`harness/action_models.py`（ActionSpec/ActionRubric/ActionResult/ObservationSummary/ExecutionState + TaskNode/TaskRubric/CoreActLoopState 只读适配器，LegacyStateUnsupported 显式拒绝未知版本/畸形 pending）、`harness/run_result.py`（ResearchRunResult，覆盖 RunStatus 全部 16 态，completed⇒verification passed、failed draft 隔离、draft verified=false 强制）；`output-contract.md` 状态更新为已冻结 schema。`tests/harness/test_coreact_consolidation_models.py` 56 项测试覆盖全部验收点（含 inflight_rubrics/retry_reasons 保留、active_result_refs 仅引用已提交动作、attempt_id 派生校验、孤儿键拒绝）。通用门禁：pytest 432 passed/4 skipped（376 基线 + 56）；ruff F821/F811/F401 通过；`git diff --check` 干净。独立 code review 一轮 15 项发现（3 major：done→complete 语义反转、in-flight rubric/重试反馈丢失、缺 cancelling 态；12 minor/nit）全部修复并复审 APPROVE。
+- 风险：不把未知旧状态自动当空状态重新执行。（适配器对未知版本/畸形 pending 一律抛 LegacyStateUnsupported；legacy done 态映射为 report 而非 complete。）
 
 ## T-403 — 统一隔离 ActionRunner
 - 状态：pending
@@ -108,4 +108,4 @@
 
 ## 进度
 
-已完成 1（T-401）；进行中 0；阻塞 0；待执行 8。下一步：T-402（ResearchBrief 与单一职责接口）。每阶段收尾须重跑 T-401 盘点脚本确认存量数据边界（runs/checkpoints 计数不变）。
+已完成 2（T-401、T-402）；进行中 0；阻塞 0；待执行 7。下一步：T-403（统一隔离 ActionRunner）。每阶段收尾须重跑 T-401 盘点脚本确认存量数据边界（runs/checkpoints 计数不变）。
