@@ -3,9 +3,9 @@
 
 import json
 from typing import Any
-from deepresearch_agent.harness.budgets import BudgetExceeded, BudgetManager
-from deepresearch_agent.harness.contracts import RunStatus, SourceMode
-from deepresearch_agent.harness.errors import AppError, ErrorCode, NeedsUserInput, RunCancelled, RunLeaseLost
+from deepresearch_agent.harness.budgets import BudgetManager
+from deepresearch_agent.harness.contracts import RunStatus
+from deepresearch_agent.harness.errors import RunLeaseLost
 from deepresearch_agent.harness.run_context import RunContext
 
 
@@ -19,8 +19,6 @@ class RuntimeStepHooksMixin:
             if owner:
                 run = await self.runs.get(context.run_id)
                 if run is None or run.lease_owner != owner:
-                    from deepresearch_agent.harness.errors import RunLeaseLost
-
                     raise RunLeaseLost("租约已易主，放弃 intent 写入")
             await self._persist_plan(context, current_driver)
             current_driver.context.budget_usage = budget_holder_usage(context)

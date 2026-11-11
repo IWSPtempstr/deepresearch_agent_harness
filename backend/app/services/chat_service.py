@@ -140,13 +140,6 @@ class ChatService:
             else {"model": OPENAI_LLM_MODEL, "tier": "standard", "reason": "routing disabled"}
         )
         snapshot["model_tier"] = routing["tier"]
-        # T-016：plan_execute_report Run 记录角色→模型审计映射（实际注入发生在
-        # workflow_factory，recorded == actual 由 factory 使用同一解析函数保证）。
-        if request.workflow_mode.value == "plan_execute_report":
-            snapshot["role_models"] = {
-                role: resolve_role_model(snapshot, role=role, settings=settings)
-                for role in ("planner", "reporter", "controller")
-            }
         # T-015：plan_execute_report 编排实现版本——驱动按此分派 coreact/staged，
         # 缺失时按 staged_v1 处理，保证存量 Run 的快照恢复兼容。
         if request.workflow_mode.value == "plan_execute_report":
@@ -165,12 +158,20 @@ class ChatService:
             ),
         )
         if created:
-            await self.runs.update_model_snapshot(run.run_id, {
+            model_snapshot = {
                 "llm_model": routing["model"],
                 "llm_model_tier": routing["tier"],
                 "llm_model_routing_reason": routing["reason"],
                 "learning_review_model": LEARNING_REVIEW_MODEL,
-            })
+            }
+            # T-016：角色→模型审计映射写入 model_snapshot（与 tier 同处、可审计）。
+            # factory 执行时优先消费此处冻结的映射，保证跨进程/重启 recorded==actual。
+            if request.workflow_mode.value == "plan_execute_report":
+                model_snapshot["role_models"] = {
+                    role: resolve_role_model(snapshot, role=role, settings=settings)
+                    for role in ("planner", "reporter", "controller")
+                }
+            await self.runs.update_model_snapshot(run.run_id, model_snapshot)
             if session.title.strip() in {"新对话", "New conversation", "Untitled"}:
                 title = " ".join(request.content.strip().split())[:36]
                 if title:

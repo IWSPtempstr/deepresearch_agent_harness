@@ -42,3 +42,20 @@
 - 角色分层 v1 边界：research 工具内部 LLM、EvidenceCardPipeline 内部 LLM 仍用全局默认。
 - ContextState 不对最终报告做语义强制。
 - 角色分层收益无实验数据（沿用"只实现"约束）；成本结构可经 model_snapshot 审计。
+
+
+## T-310 · 最终收尾（2026-11-11）
+
+- 拆分收尾：T-016 三处新增长文件 `drivers_plan_execute.py`（967→123+4 Mixin）、`runtime_execution.py`（584→491+runtime_step_hooks 103）全部 ≤500；splitlib 更新以支持前导注释后的模块 docstring；全仓 F401 清理中 base_reporter re-export 曾被误删（测试捕获后恢复 + `__all__` 保护）；拆分 Mixin 多余 import 手工清理，不再对拆分产物盲用 ruff --fix。
+- T-016 主审复核（main 合并后审查触发的修复分支）：
+  1. K>1 并行块的 verdict 未定义 + ContextState 重复更新 → 修复；补 K=2 并行、fillup 去重、pending resume 测试。
+  2. 并行补位重复 append 计划节点 → 改为复用已有 ready node；批内/历史重复 query 过滤；并发宽度受 max_concurrency 限制；批内各 verdict 更新 ContextState。
+  3. LLM_ROLE_TIER_DEFAULTS 未在 settings_sections.__all__ 导出 → 修复，env→facade→resolver 可见。
+  4. role_models 从 config_snapshot 错移到 model_snapshot；run_service factory 改优先消费冻结映射，记录的 role tier/model 与实际组件注入一致。
+  5. 全仓 F401=0；新 F811（base_reporter 重复 ReporterConfig）清理。
+  6. intent 前置状态顺序调整：pending_action/cursor 先进入 snapshot，之后派发前持久 intent；恢复时 unfinished pending action 直接重放、不重问 controller；attempt=2 重放后不叠加 retry。
+  7. 预算 reserve：每个单动作/批次预留 controller + verifier 额度；并行批次预检 tool-call/tavily-call 预算。
+- 最终门禁（项目 `.venv`）：全量 **376 passed, 4 skipped, 8 warnings in 56.33s**；全仓 F401 zero；coreact/harness changed-scope F821/F811 clean；`git diff --check` clean。
+- 行数门禁：src/ 最大文件 `config/settings_sections.py`=576 行（纯配置常量分组、无逻辑且刚由 settings facade 拆分产出，design/proposal 列明豁免）；无其他 ≥500 行非豁免文件。
+- **审查限制**：T-016 首次 PR #6 曾 squash 合并 `a5f4509`；后续审查发现并修复上述多项问题，当前 `fix/t016-review-blockers` 分支含修复提交，需另开 PR 合入。全量测试证据由本地 `.venv` 产生；部分独立复评 agent 环境缺 langchain_core，只做源码静态核查（有的结论 BLOCK 后均由本地测试/复评解除）。
+- 已知限制保持：fencing 为 check-then-write（TOCTOU 缩小非消除）；intent 任务粒度；预算计数非 exactly-once；ContextState 不强制最终报告语义；并行只对独立就绪动作补位；无真实模型/真实 provider、无对比实验（用户目标是简历实现）。
