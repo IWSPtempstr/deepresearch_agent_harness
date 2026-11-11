@@ -30,7 +30,7 @@ def make_context(**overrides):
 
 class TestFactoryInjection:
     def test_bundle_components_use_role_models(self):
-        bundle = MultiAgentFactory.create_default_bundle(role_models=ROLE_MODELS)
+        bundle = MultiAgentFactory.create_coreact_bundle(role_models=ROLE_MODELS)
         # LLM 实例的 model_name 字段是归因断言点（recorded == actual）
         assert bundle.planner._llm.model_name == "planner-model-x"
         assert bundle.reporter._outline_builder._llm.model_name == "reporter-model-y"
@@ -40,22 +40,17 @@ class TestFactoryInjection:
         assert bundle.orchestrator.controller_model.model_name == "controller-model-z"  # 实例供 invoke
 
     def test_no_role_models_falls_back_to_global(self):
-        bundle = MultiAgentFactory.create_default_bundle()
+        """无角色模型：BriefBuilder 离线（clarifier 关闭），reporter 走全局默认。"""
+        bundle = MultiAgentFactory.create_coreact_bundle()
         assert bundle.controller_model is None
-        assert bundle.planner._llm.model_name == bundle.reporter._outline_builder._llm.model_name  # 同全局默认
-        assert bundle.orchestrator.controller_model.model_name == bundle.planner._llm.model_name  # controller 回落 planner LLM
+        assert bundle.planner._llm is None  # BriefBuilder 无 LLM 时确定性规划
+        # controller 回落 planner LLM（同为 None → 确定性兜底）
+        assert bundle.orchestrator.controller_model is None
 
 
 class TestDriverControllerWiring:
     def test_coreact_controller_uses_role_model(self):
         context = make_context()
-        bundle = MultiAgentFactory.create_default_bundle(role_models=ROLE_MODELS)
+        bundle = MultiAgentFactory.create_coreact_bundle(role_models=ROLE_MODELS)
         driver = PlanExecuteReportDriver(context, bundle.orchestrator)
         assert getattr(driver._coreact_controller.llm, "model_name", None) == "controller-model-z"
-
-    def test_staged_driver_still_constructs_with_controller_model(self):
-        context = make_context(config_snapshot={})
-        bundle = MultiAgentFactory.create_default_bundle(role_models=ROLE_MODELS)
-        driver = PlanExecuteReportDriver(context, bundle.orchestrator)
-        assert driver.orchestration == "staged_v1"
-        assert getattr(driver._coreact_controller.llm, "model_name", None) == "controller-model-z"  # staged 不用 controller，但构造无害

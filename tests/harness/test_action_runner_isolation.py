@@ -103,7 +103,7 @@ async def test_k2_real_overlap_proven_by_barrier():
     provider = FakeProvider(SourceMode.WEB, barrier=barrier)
     coordinator = WorkerCoordinator(
         executors=[RetrievalExecutor(provider=provider)],
-        execution_mode="parallel", max_parallel_workers=2,
+        max_parallel_workers=2,
     )
     runner = ActionRunner(
         execute_action=coordinator.execute_action,
@@ -129,7 +129,7 @@ async def test_k1_serial_has_no_overlap_requirement():
     provider = FakeProvider(SourceMode.WEB, barrier=barrier)
     coordinator = WorkerCoordinator(
         executors=[RetrievalExecutor(provider=provider)],
-        execution_mode="parallel", max_parallel_workers=1,
+        max_parallel_workers=1,
     )
     runner = ActionRunner(
         execute_action=coordinator.execute_action,
@@ -192,7 +192,7 @@ async def _run_two(delays: dict[str, float]) -> tuple[PlanExecuteState, list[str
     actions = [make_action("task_1", "查询一"), make_action("task_2", "查询二")]
     executor = _RecordingExecutor(delays)
     coordinator = WorkerCoordinator(
-        executors=[executor], execution_mode="parallel", max_parallel_workers=2,
+        executors=[executor], max_parallel_workers=2,
     )
     runner = ActionRunner(
         execute_action=coordinator.execute_action,
@@ -311,7 +311,7 @@ async def test_failed_task_record_retained_and_active_points_to_it():
     provider = FakeProvider(SourceMode.WEB)
     coordinator = WorkerCoordinator(
         executors=[RetrievalExecutor(provider=provider)],
-        execution_mode="sequential", max_parallel_workers=1,
+        max_parallel_workers=1,
     )
     runner = ActionRunner(
         execute_action=coordinator.execute_action,

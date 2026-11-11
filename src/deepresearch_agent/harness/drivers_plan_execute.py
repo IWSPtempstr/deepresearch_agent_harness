@@ -13,12 +13,8 @@ from deepresearch_agent.harness.coreact_state import (
     loop_state_from_workflow_state,
 )
 from deepresearch_agent.harness.errors import NeedsUserInput
-from deepresearch_agent.agents.multi_agent.planner.base_planner import PlannerResult
+from deepresearch_agent.agents.multi_agent.planner.result import PlannerResult
 from deepresearch_agent.agents.multi_agent.reporter.base_reporter import ReportResult
-from deepresearch_agent.config.settings import (
-    REPORT_RESERVED_TOKENS,
-    VERIFICATION_RESERVED_TOKENS,
-)
 from deepresearch_agent.evolution.skill_compiler import compile_runtime_policy, policy_prompt
 from .run_context import RunContext
 
@@ -36,7 +32,9 @@ class PlanExecuteReportDriver(CoreActLoopMixin, CoreActSupportMixin, ReportPipel
         self.context = context
         self.orchestrator = orchestrator
         self.events = events
-        self.orchestration = str((context.config_snapshot or {}).get("orchestration") or "staged_v1")
+        # T-408：staged 引擎已删除；新写入恒为 coreact_v1（存量 staged checkpoint
+        # 的恢复在 _restore 中显式拒绝并列入人工处理，不启动旧引擎）。
+        self.orchestration = str((context.config_snapshot or {}).get("orchestration") or "coreact_v1")
         self.coreact_loop: CoreActLoopState | None = None
         self._coreact_controller = CoreActController(llm=getattr(orchestrator, "controller_model", None))
         # Harness 注入；直接实例化 driver 的旧测试/离线工具无需提供
@@ -66,7 +64,7 @@ class PlanExecuteReportDriver(CoreActLoopMixin, CoreActSupportMixin, ReportPipel
     def _restore(self, payload: dict[str, Any]) -> None:
         if not payload:
             return
-        # Snapshot implementation marker is authoritative; missing marker means legacy staged_v1.
+        # 快照戳记权威：缺失/旧值 = 旧 staged 快照（引擎已删除 → 恢复时显式拒绝）
         self.orchestration = str(payload.get("orchestration") or "staged_v1")
         raw_state = payload.get("state")
         if raw_state:
@@ -100,46 +98,28 @@ class PlanExecuteReportDriver(CoreActLoopMixin, CoreActSupportMixin, ReportPipel
             if self.planner_result.needs_clarification():
                 raise NeedsUserInput("needs_user_input")
             raise RuntimeError("Planner 未生成可执行 PlanSpec")
-        if self.orchestration == "coreact_v1":
-            self.state.plan = self.planner_result.plan_spec
-            if self.coreact_loop is None or self.coreact_loop.done:
-                self.coreact_loop = CoreActLoopState()
-            if failures:
-                self.coreact_loop.phase = "decide"
-                self.coreact_loop.pending_action = None
-                self.coreact_loop.done = False
-                self.coreact_loop.stop_reason = None
+        # T-408：唯一 coreact 路径（orchestration != coreact_v1 的存量快照在
+        # _restore 标记，execute 时显式拒绝）。
+        self.state.plan = self.planner_result.plan_spec
+        if self.coreact_loop is None or self.coreact_loop.done:
+            self.coreact_loop = CoreActLoopState()
+        if failures:
+            self.coreact_loop.phase = "decide"
+            self.coreact_loop.pending_action = None
+            self.coreact_loop.done = False
+            self.coreact_loop.stop_reason = None
 
     async def execute(self) -> None:
         if self.planner_result is None:
             raise RuntimeError("缺少 PlannerResult")
-        if self.orchestration == "coreact_v1":
-            await self._execute_coreact_loop()
-            return
-        execution_token_ceiling = max(
-            0,
-            self.context.budget_limits.max_llm_tokens
-            - REPORT_RESERVED_TOKENS
-            - VERIFICATION_RESERVED_TOKENS,
-        )
-        loop = asyncio.get_running_loop()
+        if self.orchestration != "coreact_v1":
+            # T-408：staged 引擎已删除——存量 staged 活动快照显式拒绝
+            # （人工处理清单），不静默换引擎、不清空重跑。
+            from deepresearch_agent.harness.errors import AppError, ErrorCode
 
-        def progress_callback(kind, task, record):
-            if self.events is None:
-                return
-            future = asyncio.run_coroutine_threadsafe(
-                self._publish_execution_progress(kind, task, record), loop,
+            raise AppError(
+                ErrorCode.LEGACY_WORKFLOW_UNSUPPORTED,
+                f"Run {self.context.run_id} 为旧 staged_v1 编排快照（活动状态）；"
+                "staged 引擎已退役，请人工处理（转换工具 convert_legacy_checkpoints.py / 重建），不自动续跑",
             )
-            future.result(timeout=10)
-
-        records = await asyncio.to_thread(
-            self.orchestrator.execute,
-            self.state,
-            self.planner_result,
-            stop_predicate=lambda: (
-                self.context.budget_usage.llm_tokens >= execution_token_ceiling
-            ),
-            progress_callback=progress_callback,
-        )
-        existing = {item.record_id for item in self.state.execution_records}
-        self.state.execution_records.extend(item for item in records if item.record_id not in existing)
+        await self._execute_coreact_loop()

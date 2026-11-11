@@ -6,7 +6,6 @@ ReportService 输入与预算 fallback、无旧规划/反思入口调用、角�
 import asyncio
 
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
-from deepresearch_agent.agents.multi_agent.executor.reflector import ReflectionExecutor
 from deepresearch_agent.agents.multi_agent.integration.multi_agent_factory import MultiAgentFactory
 from deepresearch_agent.agents.multi_agent.planner.brief_builder import BriefBuilder, BriefBuilderConfig
 from deepresearch_agent.harness.drivers_plan_execute import PlanExecuteReportDriver
@@ -125,26 +124,20 @@ def test_research_brief_contract_frozen_sources():
 
 # ---------- 工厂装配：核心工厂不注册旧 Reflector ----------
 
-def test_coreact_bundle_uses_brief_builder_and_no_reflector():
+def test_coreact_bundle_uses_brief_builder_and_structurally_excludes_reflector():
+    """T-408：reflection 执行器类已物理删除——"不注册旧 Reflector"由结构保证。"""
+    import importlib.util
+
+    assert importlib.util.find_spec("deepresearch_agent.agents.multi_agent.executor.reflector") is None
+
     bundle = MultiAgentFactory.create_coreact_bundle()
     from deepresearch_agent.agents.multi_agent.planner.brief_builder import BriefBuilder as BB
 
     assert isinstance(bundle.planner, BB)
-    assert not any(isinstance(executor, ReflectionExecutor) for executor in bundle.worker.executors)
+    assert all(type(executor).__name__ == "RetrievalExecutor" for executor in bundle.worker.executors)
     # 旧 planner 角色映射为 brief（角色模型一致性）
     mapped = canonical_role_models({"planner": {"model": "m-planner"}})
     assert mapped["brief"] == {"model": "m-planner"}
-
-
-def test_injected_worker_with_reflector_is_sanitized():
-    """生产路径注入预建 worker（默认含 ReflectionExecutor）时，核心工厂仍保证
-    "不注册旧 Reflector"——注入的 reflection 执行器被清洗。"""
-    from deepresearch_agent.agents.multi_agent.executor.worker_coordinator import WorkerCoordinator
-
-    worker = WorkerCoordinator(retrieval_provider=None, max_parallel_workers=2)
-    assert any(isinstance(executor, ReflectionExecutor) for executor in worker.executors)  # 前提成立
-    bundle = MultiAgentFactory.create_coreact_bundle(worker=worker)
-    assert not any(isinstance(executor, ReflectionExecutor) for executor in bundle.worker.executors)
 
 
 def test_factory_planner_pipeline_end_to_end():

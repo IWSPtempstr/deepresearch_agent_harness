@@ -1,50 +1,35 @@
 """
-执行调度器
+执行调度器（T-408：仅保留 coreact 的单动作执行入口）。
 
-根据 PlanExecutionSignal 调度不同类型的 Worker 执行任务，支持串行与并行模式。
+整批执行（execute_plan/串行/并行调度/隔离合并/反思重试）已由统一
+ActionRunner（harness/action_runner.py）承接并删除重复实现——
+Controller + ActionRunner 是唯一的执行路径。
 """
 
-# 由 agents/worker_coordinator.py 拆分（T-014），方法体与原位置逐行一致。
-# 本文件保留类声明与导入路径；未拆出的方法：__init__, register_executor, execute_plan, _prepare_tasks, _select_executor。
-# MRO：Mixin 在前、ABC 基类殿后（abc 抽象检查沿 MRO getattr，基类在前会忽略 Mixin 中的具体实现）。
-from typing import Callable, Dict, List, Optional
+# 由 agents/worker_coordinator.py 拆分（T-014）；T-408 起仅保留 execute_action。
+from typing import Callable, List, Optional
 import logging
 from deepresearch_agent.agents.multi_agent.core.execution_record import (
     ExecutionRecord,
 )
 from deepresearch_agent.agents.multi_agent.core.plan_spec import (
-    PlanExecutionSignal,
     TaskNode,
 )
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.executor.base_executor import BaseExecutor
-from deepresearch_agent.agents.multi_agent.executor.research_executor import ResearchExecutor
 from deepresearch_agent.agents.multi_agent.executor.retrieval_executor import RetrievalExecutor
-from deepresearch_agent.agents.multi_agent.executor.reflector import ReflectionExecutor
-from deepresearch_agent.config.settings import (
-    MULTI_AGENT_WORKER_EXECUTION_MODE,
-    MULTI_AGENT_WORKER_MAX_CONCURRENCY,
-)
 from deepresearch_agent.retrieval.base import RetrievalProvider
 from deepresearch_agent.retrieval.router import RetrievalRouter
 _LOGGER = logging.getLogger(__name__)
 
-from deepresearch_agent.agents.multi_agent.executor.coordinator_modes import CoordinatorModesMixin
-from deepresearch_agent.agents.multi_agent.executor.coordinator_tasks import CoordinatorTasksMixin
 
-class WorkerCoordinator(CoordinatorModesMixin, CoordinatorTasksMixin):
-    """
-    Worker协调器
-
-    负责解析计划信号、选择合适的执行器并串行或并行地执行任务。
-    默认模式可通过环境变量或构造参数进行配置。
-    """
+class WorkerCoordinator:
+    """coreact 单动作执行器宿主：选择执行器并执行一个任务动作。"""
 
     def __init__(
         self,
         executors: Optional[List[BaseExecutor]] = None,
         *,
-        execution_mode: Optional[str] = None,
         max_parallel_workers: Optional[int] = None,
         retrieval_provider: Optional[RetrievalProvider] = None,
         retrieval_router: Optional[RetrievalRouter] = None,
@@ -52,24 +37,11 @@ class WorkerCoordinator(CoordinatorModesMixin, CoordinatorTasksMixin):
         if executors is None:
             executors = [
                 RetrievalExecutor(provider=retrieval_provider, router=retrieval_router),
-                ResearchExecutor(),
-                ReflectionExecutor(),
             ]
         self.executors = executors
-        configured_mode = (
-            execution_mode.strip().lower()
-            if isinstance(execution_mode, str)
-            else MULTI_AGENT_WORKER_EXECUTION_MODE
-        )
-        if configured_mode not in {"sequential", "parallel"}:
-            raise ValueError(
-                f"WorkerCoordinator execution_mode 必须为 sequential 或 parallel，当前为 {configured_mode}"
-            )
-        workers = max_parallel_workers or MULTI_AGENT_WORKER_MAX_CONCURRENCY
-        if workers < 1:
-            raise ValueError("max_parallel_workers 必须大于等于 1")
-        self.execution_mode = configured_mode
-        self.max_parallel_workers = workers
+        # 兼容保留：并发上限由 Harness/ActionRunner 权威约束（预算/准入），
+        # 此处仅保存供审计读取。
+        self.max_parallel_workers = max_parallel_workers or 1
 
     def register_executor(self, executor: BaseExecutor) -> None:
         """注册额外的执行器"""
@@ -110,61 +82,100 @@ class WorkerCoordinator(CoordinatorModesMixin, CoordinatorTasksMixin):
             progress_callback("task.completed", task, record)
         return success, reason, record
 
-    def execute_plan(
+    def _execute_single_task(
         self,
-        state: PlanExecuteState,
-        signal: PlanExecutionSignal,
         *,
-        stop_predicate: Optional[Callable[[], bool]] = None,
-        progress_callback: Optional[Callable[[str, TaskNode, Optional[ExecutionRecord]], None]] = None,
-    ) -> List[ExecutionRecord]:
-        """根据计划信号执行所有任务，返回执行记录列表。"""
-        task_map = self._prepare_tasks(signal)
+        state: PlanExecuteState,
+        signal,
+        task: TaskNode,
+        task_map: dict,
+        results: List[ExecutionRecord],
+        skip_dependency_check: bool,
+    ) -> tuple[bool, Optional[str]]:
+        """单任务执行（依赖校验 + 失败记录；reflection 重试已随旧引擎删除）。"""
+        if not skip_dependency_check and task.depends_on:
+            plan = state.plan
+            status_map = {node.task_id: node.status for node in plan.task_graph.nodes} if plan is not None else {}
+            exec_context = state.execution_context
+            completed_ids = set(exec_context.completed_task_ids if exec_context else [])
+            unfinished = [
+                dep for dep in task.depends_on
+                if status_map.get(dep) == "failed" or (dep not in completed_ids and status_map.get(dep) != "completed")
+            ]
+            if unfinished:
+                _LOGGER.error("任务依赖未满足，跳过执行: task_id=%s reason=%s", task.task_id, unfinished)
+                failure_record = self._create_failure_record(
+                    state, task, f"依赖未满足: {', '.join(unfinished)}",
+                    failure_reason="dependency_unfinished",
+                )
+                results.append(failure_record)
+                return False, "dependency_unfinished"
 
-        if state.plan is not None:
-            state.plan.status = "executing"
-
-        effective_mode = self._resolve_execution_mode(signal.execution_mode)
-        if effective_mode == "parallel":
-            results = self._execute_parallel(
-                state, signal, task_map, progress_callback=progress_callback,
+        executor = self._select_executor(task.task_type)
+        if executor is None:
+            _LOGGER.error("未找到匹配的执行器: task_id=%s type=%s", task.task_id, task.task_type)
+            failure_record = self._create_failure_record(
+                state, task, f"未找到任务类型 {task.task_type} 对应的执行器",
+                failure_reason="executor_not_found",
             )
-        else:
-            results = self._execute_sequential(
-                state, signal, task_map, stop_predicate=stop_predicate,
-                progress_callback=progress_callback,
+            results.append(failure_record)
+            return False, "executor_not_found"
+
+        try:
+            if state.plan is not None:
+                state.plan.update_task_status(task.task_id, "running")
+            exec_result = executor.execute_task(task, state, signal)
+            results.append(exec_result.record)
+            if exec_result.success:
+                return True, None
+            return False, exec_result.error or "execution_failed"
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("任务执行异常: task_id=%s error=%s", task.task_id, exc)
+            failure_record = self._create_failure_record(
+                state, task, f"任务执行异常: {exc}",
+                failure_reason="execution_exception",
             )
-
-        if state.plan is not None:
-            node_status = [node.status for node in state.plan.task_graph.nodes]
-            if node_status and all(status == "completed" for status in node_status):
-                state.plan.status = "completed"
-            elif any(status == "failed" for status in node_status):
-                state.plan.status = "failed"
-
-        sequence = signal.execution_sequence or list(task_map.keys())
-        ordered_ids = {task_id: index for index, task_id in enumerate(sequence)}
-        results.sort(key=lambda record: (ordered_ids.get(record.task_id, len(ordered_ids)), record.created_at, record.record_id))
-        result_ids = {record.record_id for record in results}
-        prior_records = [record for record in state.execution_records if record.record_id not in result_ids]
-        state.execution_records = prior_records + results
-        if state.execution_context is not None:
-            state.execution_context.completed_task_ids.sort(key=lambda task_id: ordered_ids.get(task_id, len(ordered_ids)))
-        return results
-
-    def _prepare_tasks(self, signal: PlanExecutionSignal) -> Dict[str, TaskNode]:
-        """将信号中的任务恢复为TaskNode对象"""
-        task_map: Dict[str, TaskNode] = {}
-        for task_payload in signal.tasks:
-            try:
-                task = TaskNode(**task_payload)
-                task_map[task.task_id] = task
-            except Exception as exc:  # noqa: BLE001
-                _LOGGER.error("任务解析失败: payload=%s error=%s", task_payload, exc)
-        return task_map
+            results.append(failure_record)
+            return False, "execution_exception"
 
     def _select_executor(self, task_type: str) -> Optional[BaseExecutor]:
         for executor in self.executors:
             if executor.can_handle(task_type):
                 return executor
         return None
+
+    @staticmethod
+    def _create_failure_record(
+        state: PlanExecuteState,
+        task: TaskNode,
+        error: str,
+        *,
+        failure_reason: str = "unknown",
+    ) -> ExecutionRecord:
+        """当无可用执行器或依赖未满足时创建失败记录，并更新状态。"""
+        from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionMetadata
+
+        metadata = ExecutionMetadata(
+            worker_type="worker_coordinator",
+            latency_seconds=0.0,
+            tool_calls_count=0,
+            evidence_count=0,
+            environment={"reason": failure_reason},
+        )
+        record = ExecutionRecord(
+            task_id=task.task_id,
+            session_id=state.session_id,
+            worker_type="worker_coordinator",
+            inputs={"task": task.model_dump()},
+            tool_calls=[],
+            evidence=[],
+            metadata=metadata,
+        )
+        if state.execution_context is not None:
+            state.execution_context.errors.append(
+                {"task_id": task.task_id, "error": error, "worker_type": "worker_coordinator", "reason": failure_reason}
+            )
+        state.execution_records.append(record)
+        if state.plan is not None:
+            state.plan.update_task_status(task.task_id, "failed")
+        return record

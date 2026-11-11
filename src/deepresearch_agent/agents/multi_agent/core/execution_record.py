@@ -129,7 +129,7 @@ class ExecutionRecord(BaseModel):
 
     # Worker类型
     worker_type: str = Field(
-        description="执行此任务的Worker类型: retrieval_executor | research_executor | reflector"
+        description="执行此任务的Worker类型: retrieval_executor（coreact 唯一执行器）"
     )
 
     # 输入参数

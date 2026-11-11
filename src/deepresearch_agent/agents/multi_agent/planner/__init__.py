@@ -1,35 +1,21 @@
 """
-Planner层对外接口
+Planner层对外接口（T-408：BriefBuilder 为唯一规划实现；Clarifier 复用）
 """
 
-from deepresearch_agent.agents.multi_agent.planner.base_planner import (
-    BasePlanner,
-    PlannerConfig,
-    PlannerResult,
+from deepresearch_agent.agents.multi_agent.planner.brief_builder import (
+    BriefBuilder,
+    BriefBuilderConfig,
 )
 from deepresearch_agent.agents.multi_agent.planner.clarifier import (
     Clarifier,
     ClarificationResult,
 )
-from deepresearch_agent.agents.multi_agent.planner.task_decomposer import (
-    TaskDecomposer,
-    TaskDecompositionResult,
-)
-from deepresearch_agent.agents.multi_agent.planner.plan_reviewer import (
-    PlanReviewer,
-    PlanReviewOutcome,
-    PlanValidationResult,
-)
+from deepresearch_agent.agents.multi_agent.planner.result import PlannerResult
 
 __all__ = [
-    "BasePlanner",
-    "PlannerConfig",
-    "PlannerResult",
+    "BriefBuilder",
+    "BriefBuilderConfig",
     "Clarifier",
     "ClarificationResult",
-    "TaskDecomposer",
-    "TaskDecompositionResult",
-    "PlanReviewer",
-    "PlanReviewOutcome",
-    "PlanValidationResult",
+    "PlannerResult",
 ]

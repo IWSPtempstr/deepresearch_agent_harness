@@ -46,7 +46,7 @@ async def execute_gold_set(database: Database, cases: list[dict]) -> list[str]:
             RunCreate(
                 session_id=session.session_id, trigger_message_id="atomic",
                 source_mode=SourceMode(case.get("source_mode", "graphrag")),
-                workflow_mode=WorkflowMode(case.get("workflow", "deep_research")),
+                workflow_mode=WorkflowMode(case.get("workflow", "plan_execute_report")),
                 config_snapshot={"min_evidence": 1, "report_type": "brief"}, budget=BudgetLimits().model_dump(),
             ),
         )

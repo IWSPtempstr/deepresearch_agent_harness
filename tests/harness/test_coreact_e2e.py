@@ -22,7 +22,7 @@ from deepresearch_agent.agents.multi_agent.core.retrieval_result import (
     RetrievalMetadata,
     RetrievalResult,
 )
-from deepresearch_agent.agents.multi_agent.planner.base_planner import PlannerResult
+from deepresearch_agent.agents.multi_agent.planner.result import PlannerResult
 from deepresearch_agent.agents.multi_agent.planner.clarifier import ClarificationResult
 from deepresearch_agent.agents.multi_agent.reporter.consistency_checker import ConsistencyCheckResult
 from deepresearch_agent.agents.multi_agent.reporter.report_schemas import (

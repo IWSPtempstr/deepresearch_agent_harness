@@ -1,4 +1,8 @@
-"""Adapters that place both legacy research workflows behind one Harness loop."""
+"""Adapters placing the coreact workflow behind one Harness loop.
+
+T-408：唯一 coreact 生产实现。独立 deep_research driver 已随引擎退役删除
+（T-407 入口切换 / T-408 物理删除）；本模块仅保留 coreact driver。
+"""
 
 from __future__ import annotations
 
@@ -6,11 +10,10 @@ from typing import Any, Protocol
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionRecord
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
 
-# 两个 driver 已按 T-014 迁出，此处 re-export 保持既有导入路径（run_service/bootstrap/tests）。
-from deepresearch_agent.harness.drivers_deep_research import DeepResearchDriver
+# 由 harness/drivers_plan_execute.py 承载的唯一 coreact driver
 from deepresearch_agent.harness.drivers_plan_execute import PlanExecuteReportDriver
 
-__all__ = ["DeepResearchDriver", "PlanExecuteReportDriver", "WorkflowDriver"]
+__all__ = ["PlanExecuteReportDriver", "WorkflowDriver"]
 
 
 class WorkflowDriver(Protocol):
@@ -25,5 +28,3 @@ class WorkflowDriver(Protocol):
     def evidence_card_coverage(self) -> dict[str, Any] | None: ...
     def report_metrics(self) -> dict[str, Any]: ...
     def plan_record(self) -> tuple[dict[str, Any], list[dict[str, Any]]] | None: ...
-
-

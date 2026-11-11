@@ -74,15 +74,20 @@ class TestDeterministicChecks:
         assert failed["task_1_source_policy"].passed is False
         assert "local_search" in failed["task_1_source_policy"].reason
 
-    def test_internal_tool_does_not_violate_policy(self):
+    def test_internal_tool_set_is_empty_after_reflector_removal(self):
+        """T-408：answer_validator 已随 reflection 引擎删除——内部豁免集为空，
+        任何未白名单工具调用一律算 source policy 违规。"""
+        from deepresearch_agent.harness.coreact_verifier import INTERNAL_TOOLS
+
+        assert INTERNAL_TOOLS == frozenset()
         records = [make_record(tool_name="answer_validator", result={"ok": True})]
         verdict = CoreActVerifier().verify(
             rubric=RUBRIC, task=make_task(), records=records,
             ledger_ids=set(), executed_queries=set(), allowed_tools=ALLOWED,
         )
         policy = {c.criterion_id: c for c in verdict.criteria}["task_1_source_policy"]
-        assert policy.passed is True  # 内部工具不算违规
-        assert verdict.passed is False  # 但无证据仍失败
+        assert policy.passed is False  # 已删除工具不再是内部豁免
+        assert verdict.passed is False
 
     def test_duplicate_query_fails_non_required_criterion(self):
         records = [make_record(evidence_ids=["ev_1"], texts=["检索增强生成技术"])]

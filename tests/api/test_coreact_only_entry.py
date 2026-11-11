@@ -6,7 +6,6 @@ from deepresearch_agent.persistence import Database
 from backend.app.schemas.api import MessageSend
 from deepresearch_agent.agents.multi_agent.integration.multi_agent_factory import MultiAgentFactory
 from deepresearch_agent.agents.multi_agent.planner.brief_builder import BriefBuilder
-from deepresearch_agent.agents.multi_agent.executor.reflector import ReflectionExecutor
 from deepresearch_agent.harness.contracts import SourceMode, WorkflowMode
 
 
@@ -52,7 +51,8 @@ def test_factory_path_always_coreact_for_plan_execute_report():
     bundle = MultiAgentFactory.create_coreact_bundle()
 
     assert isinstance(bundle.planner, BriefBuilder)
-    assert not any(isinstance(executor, ReflectionExecutor) for executor in bundle.worker.executors)
+    # T-408：ReflectionExecutor 类已删除——结构上不存在于任何执行器栈
+    assert all(type(executor).__name__ == "RetrievalExecutor" for executor in bundle.worker.executors)
 
 
 def test_deep_research_context_explicitly_rejected_by_runtime_factory(tmp_path):

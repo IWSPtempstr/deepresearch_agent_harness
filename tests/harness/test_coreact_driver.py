@@ -8,7 +8,7 @@ from deepresearch_agent.agents.multi_agent.core.plan_spec import (
     TaskGraph,
     TaskNode,
 )
-from deepresearch_agent.agents.multi_agent.planner.base_planner import PlannerResult
+from deepresearch_agent.agents.multi_agent.planner.result import PlannerResult
 from deepresearch_agent.agents.multi_agent.planner.clarifier import ClarificationResult
 from deepresearch_agent.harness.contracts import RunStatus, SourceMode, WorkflowMode
 from deepresearch_agent.harness.coreact_state import CoreActLoopState
@@ -255,16 +255,26 @@ def test_retry_decision_counts_against_total_decision_limit():
     assert llm.answers == [action("不能再发出的第三个决策")]  # 决策总上限后不再调用 LLM
 
 
-def test_staged_snapshot_and_legacy_staged_driver_execute_once():
-    ctx = make_context(config_snapshot={})
+def test_staged_snapshot_missing_marker_is_rejected_on_execute():
+    """T-408：staged 引擎已删除——旧快照（无戳记）恢复后 execute 显式拒绝
+    （人工处理），不静默换引擎、不清空重跑。"""
+    import asyncio
+
+    import pytest
+
+    from deepresearch_agent.harness.errors import AppError
+
+    # 构造旧 staged 快照（无 orchestration 戳记的历史 payload）
+    old_snapshot = {"state": {"session_id": "s", "run_id": "r", "input": "q"}, "repair_pending": False}
+    ctx = make_context(config_snapshot={}, workflow_state=old_snapshot)
     orchestrator = FakeOrchestrator(ScriptedLLM([]), [])
     driver = PlanExecuteReportDriver(ctx, orchestrator)
     assert driver.orchestration == "staged_v1"
-    import asyncio
     asyncio.run(driver.plan())
-    asyncio.run(driver.execute())
-    assert orchestrator.execute_calls == 1  # legacy batch 不得双执行
-    assert driver.snapshot()["orchestration"] == "staged_v1"
+    with pytest.raises(AppError) as excinfo:
+        asyncio.run(driver.execute())
+    assert excinfo.value.code.value == "LEGACY_WORKFLOW_UNSUPPORTED"
+    assert orchestrator.execute_calls == 0  # 旧引擎不得执行
 
 
 def test_snapshot_orchestration_marker_overrides_missing_context_config():

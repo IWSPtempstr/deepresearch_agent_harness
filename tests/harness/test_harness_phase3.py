@@ -322,61 +322,6 @@ def test_token_usage_total_does_not_double_count_provider_total():
     assert HarnessRuntime._token_usage_total({"prompt_tokens": 60, "completion_tokens": 10}) == 70
 
 
-@pytest.mark.asyncio
-async def test_web_deep_research_bypasses_answer_cache_and_replan_reexecutes():
-    from deepresearch_agent.harness.workflow import DeepResearchDriver
-
-    class Agent:
-        def __init__(self):
-            self.calls = []
-            self.research_tool = type("Tool", (), {"provider_results": [], "provider_calls": []})()
-
-        def ask(self, query, session_id, *, bypass_cache=False):
-            self.calls.append(bypass_cache)
-            return "answer"
-
-    context = RunContext(
-        run_id="run-web-cache", session_id="ses-web-cache", trigger_message_id="msg-web-cache",
-        source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.DEEP_RESEARCH,
-        status=RunStatus.QUEUED, original_query="current web query", budget_limits=BudgetLimits(),
-    )
-    agent = Agent()
-    driver = DeepResearchDriver(context, agent)
-    await driver.plan()
-    await driver.execute()
-    await driver.plan(["min_evidence"])
-    await driver.execute()
-    assert agent.calls == [True, True]
-
-
-def test_real_deep_research_agent_ask_accepts_and_forwards_bypass_cache(monkeypatch):
-    """真实 DeepResearchAgent.ask 必须接受并转发 bypass_cache（Web Run TypeError 回归）。
-
-    早期回归只用自定义假 Agent（自带 bypass_cache 签名），漏掉了真实
-    DeepResearchAgent 重写 ask() 时未转发参数导致的 TypeError。
-    """
-    from deepresearch_agent.agents.base import BaseAgent
-    from deepresearch_agent.agents.deep_research_agent import DeepResearchAgent
-
-    # 仅构造最小实例，避免 __init__ 初始化 DeepResearchTool 的外部依赖
-    agent = DeepResearchAgent.__new__(DeepResearchAgent)
-    agent.show_thinking = False
-    agent.use_deeper_tool = False
-
-    calls = []
-
-    def fake_base_ask(self, query, thread_id="default", recursion_limit=None, *, bypass_cache=False):
-        calls.append((query, thread_id, recursion_limit, bypass_cache))
-        return "ok"
-
-    monkeypatch.setattr(BaseAgent, "ask", fake_base_ask)
-    assert agent.ask("q", "t", 5, bypass_cache=True) == "ok"
-    assert calls[-1] == ("q", "t", 5, True)
-    assert agent.ask("q2", "t2", bypass_cache=False) == "ok"
-    assert calls[-1] == ("q2", "t2", None, False)
-
-
-@pytest.mark.asyncio
 async def test_required_contract_failure_never_completes(database):
     _, run = await create_run(database)
     evaluator = ContractEvaluator(ContractRepository(database))

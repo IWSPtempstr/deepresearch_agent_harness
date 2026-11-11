@@ -28,7 +28,7 @@ from deepresearch_agent.agents.multi_agent.core.plan_spec import (
     TaskNode,
 )
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
-from deepresearch_agent.agents.multi_agent.planner.base_planner import PlannerResult
+from deepresearch_agent.agents.multi_agent.planner.result import PlannerResult
 from deepresearch_agent.harness.contracts import SourceMode
 from deepresearch_agent.harness.research_brief import BudgetPolicy, ResearchBrief
 

@@ -88,15 +88,23 @@
 
 
 ## T-408 — 删除旧专属模块与整流程外壳
-- 状态：pending
+- 状态：done
 - 前置：T-407
 - 目标：最终仅 coreact 生产实现，不保留旧引擎作 fallback。
 - 涉及：design §7 删除候选表、`MultiAgentOrchestrator.run` 及专用模型、旧 driver/planner/reflector/scheduler/Mixin、registry/__init__/测试/文档。
 - 动作：逐文件列删除原因、已迁移职责、所有 importer；共享搜索/GraphRAG 能力先抽取再删除旧壳；最小 facade 只导出新实现或数据适配器；清理死配置与测试，不能删核心安全测试凑绿。
 - 验收：静态检查旧生产 dispatch/reflection 自动生成消失；import smoke、CLI、三 source mode 端到端；保留 GraphRAG 构建/检索专项测试；通用门禁与独立删除清单 review。
 - 预期证据：删除/保留清单、调用图、无失联 import 及能力覆盖日志。
-- 实际证据：未执行。
-- 风险：零直接 importer 不等于无公共/动态调用，需扫描 registry/字符串入口。
+- 实际证据（2026-11-11）：**删除 44 个文件**（git rm 可追溯），逐项理由/职责迁移：
+  (1) 引擎 driver/agent：`harness/drivers_deep_research.py`、`agents/deep_research_agent*.py`×4——独立 deep_research 引擎已于 T-407 入口退役（唯一 importer workflow.py re-export 同步清理）；
+  (2) 嵌套研究工具：`search/tool/deep_research/`×6、`deeper_research/`×11、`deep_research_tool.py`、`deeper_research_tool.py`——仅服务退役引擎；GraphRAG 检索策略在 `retrieval/graphrag_provider.py` 与 graph/ 管线（未动，专项测试保留）；
+  (3) 旧规划：`planner/base_planner.py`、`task_decomposer.py`、`plan_reviewer.py`——BriefBuilder 接管；PlannerResult 迁至 `planner/result.py`（避免 plan_spec↔clarifier 循环导入）；CLARIFY_PROMPT 保留（Clarifier 复用）；
+  (4) 反思：`executor/reflector*.py`×5、`search/tool/validation_tool.py`——T-401 调用图确认 answer_validator 仅 reflector 消费（registry 条目同步删除）；`executor/research_executor.py`（staged 专属 deep_research 任务类型）；
+  (5) 整流程外壳：`MultiAgentOrchestrator.run`+OrchestratorResult/Metrics（orchestrator.py 重写为组件方法 plan/execute_action/report）；`worker_coordinator` 整批调度（coordinator_modes/coordinator_tasks 删除——隔离/合并由 ActionRunner 权威承载；execute_action/_execute_single_task/_create_failure_record 保留）；`drivers_plan_execute` staged 分支删除（staged 快照恢复→execute 显式 LEGACY_WORKFLOW_UNSUPPORTED 人工处理）；
+  (6) 死代码：`agents/fusion_agent.py`、`integration/legacy_facade.py`（G-DEADCODE：无生产调用方）+ `search_without_stream.py` CLI 简化（fusion/deep_research 选项移除）。
+  保留：GraphRAG 构建/索引/检索（graph/、pipelines/、community/、retrieval/）、web/scholar Provider、Evidence Ledger、Reporter 卡片/MapReduce、确定性 Contract、`harness/verifiers/`、共享 search 工具（local/global/hybrid/naive/chain_exploration/hypothesis）。配置清理：MULTI_AGENT_WORKER_EXECUTION_MODE/MAX_CONCURRENCY、MA_REFLECTION_* 删除；planner/executor prompts 清理（仅 CLARIFY_PROMPT 存活）。**TaskNode/RetrievalResult 的 task_type Literal 保留 deep_research/deeper_research/reflection 值**——存量快照 TaskNode 解析兼容（有意决定，非遗漏；controller 不提议、无执行器处理）。测试调整：删除 staged 批量隔离测试（ActionRunner 测试覆盖）、deep_research driver/agent 测试、planner 结构化输出测试；新增 staged 快照拒绝测试与模块缺席断言（find_spec）。静态检查：退役模块 import 全部清除（grep 0 引用，除 inventory/convert 盘点脚本与兼容性注释）；Import smoke 通过；三 source mode 由 brief_flow（规划级）+ scholar route + coreact e2e 覆盖。通用门禁：pytest 488 passed/4 skipped（500 − 12 个退役引擎专属测试）；ruff（变更文件）通过；git diff --check 干净。
+- 风险：零直接 importer 不等于无公共/动态调用，需扫描 registry/字符串入口。（tool_registry 的 deep_research/deeper_research/answer_validator 键已删除；动态字符串调用扫描见 inventory §3.2 复核记录；TaskNode Literal 保留旧值以保旧快照解析——见上。）
+
 
 ## T-409 — 全链验收、运行文档与移交
 - 状态：pending
@@ -111,4 +119,4 @@
 
 ## 进度
 
-已完成 7（T-401..T-407）；进行中 0；阻塞 0；待执行 2。下一步：T-408（删除旧专属模块与整流程外壳）。每阶段收尾须重跑 T-401 盘点脚本确认存量数据边界（口径见 inventory.md §5）。
+已完成 8（T-401..T-408）；进行中 0；阻塞 0；待执行 1。下一步：T-409（全链验收、运行文档与移交）。每阶段收尾须重跑 T-401 盘点脚本确认存量数据边界（口径见 inventory.md §5）。

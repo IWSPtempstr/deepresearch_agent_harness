@@ -62,9 +62,10 @@ class RetrievalExecutor(BaseExecutor):
         self._evidence_ledger = evidence_ledger or EvidenceLedger()
 
     def can_handle(self, task_type: str) -> bool:
+        # T-408：deep_research/deeper_research 嵌套研究工具随旧引擎删除
         return task_type in {
             "local_search", "global_search", "hybrid_search", "naive_search",
-            "web_search", "scholar_search", "deep_research", "deeper_research", "chain_exploration",
+            "web_search", "scholar_search", "chain_exploration",
         }
 
     def execute_task(
@@ -100,9 +101,7 @@ class RetrievalExecutor(BaseExecutor):
         structured_output: Dict[str, Any] = {}
 
         try:
-            if tool_name in {"deep_research", "deeper_research"}:
-                structured_output = self._invoke_research_tool(provider, tool_name, payload, state.run_id)
-            elif tool_name in {"local_search", "global_search", "hybrid_search", "naive_search", "web_search", "scholar_search"}:
+            if tool_name in {"local_search", "global_search", "hybrid_search", "naive_search", "web_search", "scholar_search"}:
                 structured_output = self._invoke_provider(
                     provider, tool_name, payload, state, task, tool_call_id
                 )
@@ -207,31 +206,6 @@ class RetrievalExecutor(BaseExecutor):
             "source_mode": provider.mode.value,
         }
 
-    def _invoke_research_tool(
-        self,
-        provider: RetrievalProvider,
-        task_type: str,
-        payload: Dict[str, Any],
-        run_id: str,
-    ) -> Dict[str, Any]:
-        from deepresearch_agent.search.tool.deep_research_tool import DeepResearchTool
-
-        if task_type == "deeper_research" and provider.mode == SourceMode.GRAPHRAG:
-            from deepresearch_agent.search.tool.deeper_research_tool import DeeperResearchTool
-            tool = DeeperResearchTool(provider=provider, run_id=run_id)
-        else:
-            tool = DeepResearchTool(provider=provider, run_id=run_id)
-        raw = tool.search(payload)
-        provider_results = getattr(tool, "provider_results", None)
-        if provider_results is None and hasattr(tool, "deep_research"):
-            provider_results = getattr(tool.deep_research, "provider_results", [])
-        return {
-            "answer": raw if isinstance(raw, str) else raw.get("answer", str(raw)),
-            "raw_result": raw,
-            "retrieval_results": [result.to_dict() for result in (provider_results or [])],
-            "provider": provider.provider_name,
-            "source_mode": provider.mode.value,
-        }
 
     def _get_tool_instance(self, task_type: str) -> Any:
         if self._tool_registry is None or self._extra_factories is None:

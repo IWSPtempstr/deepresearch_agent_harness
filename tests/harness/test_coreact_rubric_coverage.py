@@ -110,7 +110,7 @@ class TestRepairRouting:
             RetrievalMetadata,
             RetrievalResult,
         )
-        from deepresearch_agent.agents.multi_agent.planner.base_planner import PlannerResult
+        from deepresearch_agent.agents.multi_agent.planner.result import PlannerResult
         from deepresearch_agent.agents.multi_agent.planner.clarifier import ClarificationResult
         from deepresearch_agent.agents.multi_agent.reporter.report_schemas import (
             ReportOutline,

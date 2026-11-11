@@ -60,15 +60,8 @@ from deepresearch_agent.config.prompts.reasoning_prompts import (
     SEARCH_RESULT_COMPARISON_PROMPT,
     SEARCH_MULTI_HYPOTHESIS_PROMPT,
 )
-from deepresearch_agent.config.prompts.planner_prompts import (
-    TASK_DECOMPOSE_PROMPT,
+from deepresearch_agent.config.prompts.planner_prompts import (  # T-408：仅澄清提示存活
     CLARIFY_PROMPT,
-    PLAN_REVIEW_PROMPT,
-)
-from deepresearch_agent.config.prompts.executor_prompts import (
-    EXECUTE_PROMPT,
-    REFLECT_PROMPT,
-    REPLAN_PROMPT,
 )
 from deepresearch_agent.config.prompts.reporter_prompts import (
     OUTLINE_SYSTEM_PROMPT,
@@ -141,13 +134,8 @@ __all__ = [
     "SEARCH_RESULT_COMPARISON_PROMPT",
     "SEARCH_MULTI_HYPOTHESIS_PROMPT",
     # 计划层模板
-    "TASK_DECOMPOSE_PROMPT",
     "CLARIFY_PROMPT",
-    "PLAN_REVIEW_PROMPT",
     # 执行层模板
-    "EXECUTE_PROMPT",
-    "REFLECT_PROMPT",
-    "REPLAN_PROMPT",
     # 报告层模板
     "OUTLINE_SYSTEM_PROMPT",
     "OUTLINE_PROMPT",

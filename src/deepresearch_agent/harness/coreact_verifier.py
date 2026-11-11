@@ -22,8 +22,9 @@ from deepresearch_agent.agents.multi_agent.core.rubric import (
 
 VERIFIER_VERSION = "coreact_verifier_v1"
 
-# 执行器内部工具（非检索面），不算违反 source policy
-INTERNAL_TOOLS = frozenset({"answer_validator"})
+# 执行器内部工具（非检索面），不算违反 source policy。
+# （answer_validator 已随 reflection 引擎删除——保留集合为空即无内部豁免。）
+INTERNAL_TOOLS: frozenset = frozenset()
 
 SemanticFn = Callable[[str, List[Dict[str, Any]]], Dict[str, Any]]
 

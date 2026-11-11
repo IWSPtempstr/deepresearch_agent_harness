@@ -15,8 +15,6 @@ from deepresearch_agent.retrieval.base import SearchFilters, TimeoutBoundProvide
 from deepresearch_agent.retrieval.graphrag_provider import GraphRAGProvider
 from deepresearch_agent.retrieval.router import RetrievalRouter
 from deepresearch_agent.retrieval.tavily_provider import TavilyProvider
-from deepresearch_agent.search.tool.deep_research_tool import DeepResearchTool
-from deepresearch_agent.agents.multi_agent.planner.task_decomposer import TaskDecomposer
 from deepresearch_agent.agents.multi_agent.reporter.formatter import CitationFormatter
 
 
@@ -109,19 +107,6 @@ def test_source_policy_rejects_both_cross_source_directions_and_private_fields()
         policy.sanitize_web_arguments({"query": "safe", "graphrag_context": "private"})
     assert private.value.details["rejected_fields"] == ["graphrag_context"]
 
-
-def test_planner_task_graph_normalizes_llm_cross_source_output():
-    decomposer = object.__new__(TaskDecomposer)
-    web_graph = decomposer._build_task_graph({"nodes": [{
-        "task_id": "task_1", "task_type": "local_search", "description": "q"
-    }]}, source_mode="web")
-    assert web_graph.nodes[0].task_type == "web_search"
-    assert web_graph.nodes[0].source_mode == "web"
-    graph_graph = decomposer._build_task_graph({"nodes": [{
-        "task_id": "task_2", "task_type": "web_search", "description": "q"
-    }]}, source_mode="graphrag")
-    assert graph_graph.nodes[0].task_type == "hybrid_search"
-    assert graph_graph.nodes[0].source_mode == "graphrag"
 
 
 @pytest.mark.asyncio
@@ -264,44 +249,6 @@ def test_per_provider_injection_preserves_source_trace(mode):
     assert result.record.evidence[0].result_id.startswith("ev_")
     assert result.record.evidence[0].metadata.extra["tool_call_id"] == result.record.tool_calls[0].tool_call_id
     assert len(provider.calls) == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("mode", [SourceMode.GRAPHRAG, SourceMode.WEB])
-async def test_deep_research_loop_uses_injected_provider(mode):
-    provider = FakeProvider(mode)
-    tool = object.__new__(DeepResearchTool)
-    tool.retrieval_provider = provider
-    tool.run_id = "run_deep"
-    tool.provider_results = []
-    legacy = await tool._async_search("iterative query")
-    assert legacy["chunks"][0]["source_mode"] == mode.value
-    assert len(provider.calls) == 1
-
-
-def test_web_deep_research_disables_vector_cache_initialization(monkeypatch):
-    calls = []
-
-    def fail_if_initialized():
-        calls.append("embedding")
-        raise AssertionError("Web DeepResearch 不应初始化向量缓存 embedding")
-
-    monkeypatch.setattr(
-        "deepresearch_agent.cache_manager.manager.get_cache_embedding_provider",
-        fail_if_initialized,
-    )
-    from deepresearch_agent.agents.deep_research_agent import DeepResearchAgent
-
-    agent = DeepResearchAgent(
-        use_deeper_tool=True,
-        retrieval_provider=FakeProvider(SourceMode.WEB),
-        run_id="run_web_no_vector_cache",
-    )
-    assert calls == []
-    assert agent.cache_manager.enable_vector_similarity is False
-    assert agent.global_cache_manager.enable_vector_similarity is False
-    assert agent.research_tool.cache_manager.enable_vector_similarity is False
-    agent.close()
 
 
 def test_report_references_include_deterministic_source_label():
