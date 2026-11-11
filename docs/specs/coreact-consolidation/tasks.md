@@ -42,15 +42,16 @@
 
 
 ## T-404 — 多动作 intent 与耐久恢复
-- 状态：pending
+- 状态：done
 - 前置：T-403
 - 目标：派发前保存全批次动作，恢复不丢次要动作或重做已提交结果。
 - 涉及：`runtime_step_hooks.py`、`runtime_persistence.py`、`runtime.py`、`coreact_state.py`、trajectory repositories。
 - 动作：稳定 action/attempt/tool ID、全量 in-flight intent、逐动作提交/预算核销与 next_operation；pause/cancel/lease 检查；旧 checkpoint 适配器，显式 unsupported 处理。
 - 验收：拟新增 `tests/harness/test_action_runner_recovery.py`；在 intent前后、调用后/提交前、部分批次提交后、retry 中注入中断；新 Runtime 恢复；断言工具调用/证据/预算/事件，不仅测试 helper predicate；通用门禁。
 - 预期证据：故障点矩阵、持久行/事件/费用计数及残余窗口说明。
-- 实际证据：未执行。
-- 风险：不宣称外部 exactly-once 或已消除原子 fencing 缺口。
+- 实际证据（2026-11-11）：`coreact_state.py` 扩展 `pending_batch`（全批次 in-flight intent）+ `committed_action_ids`（逐动作提交）+ `next_operation`（显式 execute/report，driver snapshot 序列化）；恢复归一化逐项校验（畸形项剔除并计入 failure_reasons，全无效→decide，旧单动作快照兼容回退）。`coreact_loop.py`：intent 写全批次、run_and_merge 新增 `commit_fn`（逐动作提交，action_commit 钩子只持久化不发布 step 事件）与 `record_fn`（verdict 元数据提交前写入——恢复后 rubric_coverage 门不被削弱）、修正游标即时持久化、重放防御性跳过已提交项（重试游标始终重放）。`action_runner.py`：commit_fn/record_fn 挂载；RunLeaseLost/BudgetExceeded 从 worker 传播（不降级为动作失败记录）。稳定 tool ID：TaskNode.attempt 字段 + retrieval_executor tool_call_id=(run_id,task_id,attempt) 派生（重放行幂等，重试新 ID 保留全部尝试）。T-402 适配器改用 inflight_items（迁移视图不丢次要动作）。`tests/harness/test_action_runner_recovery.py` 8 项：intent 后崩溃（批次完整落盘、零 tool/evidence 行）、intent 后崩溃恢复（次要动作不丢、恢复不走 controller）、行已落库/checkpoint 未写窗口（稳定 ID 行幂等=1、事件不重复、外部调用重复 2 次如实记录、计费不双收）、部分批次提交后恢复（已提交不重做、rubric_coverage/min_evidence 通过）、retry 中崩溃（attempt=2 游标重放、task_retries 不双计）、批次游标校验 3 项。故障点矩阵：intent 后/行后 checkpoint 前/部分提交后/重试执行中/重试合并后提交前——均无动作丢失窗口；游标收缩先于持久化，checkpoint 恒保守。通用门禁：pytest 453 passed/4 skipped；ruff（变更文件）通过；git diff --check 干净。独立 code review 首轮 2 major（verdict 元数据提交时序、稳定 tool ID 缺失）+ 7 minor/nit 全部修复并复审。
+- 风险：不宣称外部 exactly-once 或已消除原子 fencing 缺口。（外部调用在行后/checkpoint 前崩溃窗口内重复一次，如实断言；内存计费可随窗口丢失（低估），重放不双收。pause/cancel/lease 检查保持在动作边界（lease_probe/pause_probe 未改动）。已知行为变化：确定性 tool ID 使 staged reflection 重试的计费从每次尝试一行变为同 ID 去重一行（低估方向、证据行不受影响；staged 引擎将在 T-407/408 退役）。逐动作提交的 _persist_execution 为 O(N²) 重扫（K≤4 批次可接受，性能不作为目标）。）
+
 
 ## T-405 — 证据摘要与动作 rubric 指导
 - 状态：pending

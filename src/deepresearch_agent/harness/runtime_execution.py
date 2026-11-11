@@ -111,6 +111,8 @@ class RuntimeExecutionMixin(RuntimeStepHooksMixin):
             # snapshotted before the next action starts.
             if getattr(driver, "supports_step_commit", False):
                 driver.step_commit = self._make_step_commit(context, driver, budget, owner=owner)
+                # T-404：批内逐动作提交钩子（只持久化，不发布 step 事件）
+                driver.action_commit = self._make_action_commit(context, driver, budget, owner=owner)
                 driver.pause_requested = self._make_pause_probe(context)
                 driver.lease_probe = self._make_lease_probe(context, owner)
                 driver._intent_persist = self._make_intent_persist(context, driver, owner=owner)

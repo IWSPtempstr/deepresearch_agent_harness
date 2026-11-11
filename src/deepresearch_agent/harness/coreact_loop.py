@@ -9,6 +9,7 @@ Controller 决策、游标/pending 语义、intent 持久化与 ContextState 记
 """
 
 import asyncio
+import logging
 from typing import Any
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionRecord
 from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec, TaskNode
@@ -27,6 +28,8 @@ from deepresearch_agent.config.settings import (
     REPORT_RESERVED_TOKENS,
     VERIFICATION_RESERVED_TOKENS,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CoreActLoopMixin:
@@ -112,15 +115,46 @@ class CoreActLoopMixin:
                 if task.source_mode == self.context.source_mode.value
             ]
 
-            # Durable pending action resumes as-is: redo only that action,
-            # without a fresh controller decision or admission (conservative
-            # serial replay; the intent row already marked it running).
-            pending = self.coreact_loop.pending_action
-            if pending is not None and self.coreact_loop.phase in {"act", "verify"}:
-                resumed_task = TaskNode.model_validate(pending.task)
-                resumed_rubric = TaskRubric.model_validate(pending.rubric)
-                batch = [(resumed_task, resumed_rubric)]
-                attempt = pending.attempt
+            # Durable pending actions resume as-is: replay the whole uncommitted
+            # in-flight batch (T-404：pending_batch + 单动作 pending_action 兼容)
+            # without a fresh controller decision or admission.
+            inflight = self.coreact_loop.inflight_items() if self.coreact_loop.phase in {"act", "verify"} else []
+            if inflight:
+                # 防御：pending_batch 中已提交的项是游标不一致（主机制是 commit 时
+                # 收缩游标）——跳过防重放。pending_action 是修正重试游标，与已提交
+                # 动作共享 action_id，必须始终重放（attempt 序号区分尝试）。
+                committed = set(self.coreact_loop.committed_action_ids)
+                replayable = [
+                    item for item in (self.coreact_loop.pending_batch or inflight)
+                    if item.action_id not in committed
+                ]
+                retry_item = self.coreact_loop.pending_action
+                if (
+                    retry_item is not None
+                    and retry_item not in replayable
+                    and self.coreact_loop.phase in {"act", "verify"}
+                    and (
+                        not self.coreact_loop.pending_batch
+                        # 重试游标（attempt>1）始终重放；attempt=1 且批次非空的
+                        # 场景只可能是批量首项（已在 replayable 或被 committed 过滤
+                        # ——后者属游标不一致的损坏快照，不重放已提交动作）。
+                        or retry_item.attempt > 1
+                    )
+                ):
+                    replayable.append(retry_item)
+                skipped = len(inflight) - len(replayable)
+                if skipped:
+                    logger.warning("coreact 恢复：跳过已提交动作 %d 个（防重放）", skipped)
+                if not replayable:
+                    # 游标实际为空：重新决策
+                    self.coreact_loop.pending_batch = []
+                    self.coreact_loop.pending_action = None
+                    self.coreact_loop.phase = "decide"
+                    continue
+                batch = [
+                    (TaskNode.model_validate(item.task), TaskRubric.model_validate(item.rubric), item.attempt)
+                    for item in replayable
+                ]
                 # 恢复路径不走 admit/查重/重试（attempt=2 已是重试）。
                 resumed_only = True
             else:
@@ -166,8 +200,7 @@ class CoreActLoopMixin:
                 # 并发上限受 budget_limits.max_concurrency 约束）。
                 batch = [(task, build_task_rubric(
                     task.task_id, description=task.description, source_mode=task.source_mode,
-                    min_evidence=min_evidence, completion_conditions=completion_conditions))]
-                attempt = 1
+                    min_evidence=min_evidence, completion_conditions=completion_conditions), 1)]
                 if max_parallel > 1:
                     seen_queries = set(recent_queries)
                     seen_queries.add(query or "")
@@ -175,15 +208,15 @@ class CoreActLoopMixin:
                     for extra in self._parallel_fillup(plan, completed, seen_queries, limit=fill_limit):
                         batch.append((extra, build_task_rubric(
                             extra.task_id, description=extra.description, source_mode=extra.source_mode,
-                            min_evidence=min_evidence, completion_conditions=completion_conditions)))
+                            min_evidence=min_evidence, completion_conditions=completion_conditions), 1))
 
             # T-403：预派发准入（依赖/白名单/查重/预算预约）。恢复重放跳过 admit。
             batch_actions = [
                 BatchAction(
-                    spec=action_spec_from_task_node(bt, rubric_id=br.rubric_id, attempt=attempt),
+                    spec=action_spec_from_task_node(bt, rubric_id=br.rubric_id, attempt=bt_attempt),
                     task=bt, rubric=br,
                 )
-                for bt, br in batch
+                for bt, br, bt_attempt in batch
             ]
             if resumed_only:
                 admitted = batch_actions
@@ -213,14 +246,17 @@ class CoreActLoopMixin:
 
             evidence_before = len(self._coreact_ledger_ids())
 
-            # 先设置游标（pending_action 含完整主动作+rubric），再持久化 intent——
-            # 崩溃恢复时 checkpoint 同时携带 running 任务行与可重放的游标。
-            first = admitted[0]
+            # T-404：派发前把**全部批内动作**写入可持久化游标（intent）——崩溃恢复
+            # 不丢次要动作。pending_action 保留为批首动作（旧快照兼容读取）。
             self.coreact_loop.phase = "act"
-            self.coreact_loop.pending_action = PendingAction(
-                task=first.task.model_dump(mode="json"), rubric=first.rubric.model_dump(mode="json"),
-                attempt=first.attempt,
-            )
+            self.coreact_loop.pending_batch = [
+                PendingAction(
+                    task=action.task.model_dump(mode="json"), rubric=action.rubric.model_dump(mode="json"),
+                    attempt=action.attempt,
+                )
+                for action in admitted
+            ]
+            self.coreact_loop.pending_action = self.coreact_loop.pending_batch[0]
             if self.step_commit is not None and not resumed_only:
                 plan_for_intent = self.state.plan
                 if isinstance(plan_for_intent, PlanSpec):
@@ -228,23 +264,50 @@ class CoreActLoopMixin:
                         plan_for_intent.update_task_status(action.task.task_id, "running")
                 await self._coreact_persist_intent(plan_for_intent)
 
+            async def commit_action(action: BatchAction) -> None:
+                """T-404 逐动作提交：已合并结果落库 + 游标收缩（幂等）。
+
+                使用 action_commit 钩子（只持久化）；step 事件保持在批次边界。
+                """
+                if action.action_id not in self.coreact_loop.committed_action_ids:
+                    self.coreact_loop.committed_action_ids.append(action.action_id)
+                self.coreact_loop.pending_batch = [
+                    item for item in self.coreact_loop.pending_batch
+                    if item.action_id != action.action_id
+                ]
+                if (
+                    self.coreact_loop.pending_action is not None
+                    and self.coreact_loop.pending_action.action_id == action.action_id
+                ):
+                    self.coreact_loop.pending_action = None
+                # 仅用 action_commit（持久化、无 step 事件）；step 事件保持在批次
+                # 边界（step_commit 由批次收尾调用）。缺省（离线工具）只动内存游标。
+                commit_hook = getattr(self, "action_commit", None)
+                if commit_hook is not None:
+                    await commit_hook(self)
+
+            def record_action(action: BatchAction, attempt_outcome) -> None:
+                """T-404：验证元数据在提交前写入记录（崩溃恢复后 committed
+                记录仍携带 rubric/verdict，最终 rubric_coverage 门不被削弱）。"""
+                if attempt_outcome.record is not None:
+                    self._attach_coreact_verdict(
+                        attempt_outcome.record, action.rubric, attempt_outcome.verdict,
+                        attempt=attempt_outcome.action.attempt, error=attempt_outcome.error,
+                    )
+
             outcomes = await self._action_runner.run_and_merge(
                 admitted,
                 shared_state=self.state,
                 verify_fn=verify_action,
                 correction_fn=None if resumed_only else await self._coreact_correction(max_decisions),
+                commit_fn=commit_action,
+                record_fn=record_action,
                 executed_queries=recent_queries,
                 progress_callback=self._coreact_progress_callback(loop),
             )
 
             self.coreact_loop.step_index += len(outcomes)
             for outcome in outcomes:
-                for attempt_outcome in outcome.attempts:
-                    if attempt_outcome.record is not None:
-                        self._attach_coreact_verdict(
-                            attempt_outcome.record, outcome.action.rubric, attempt_outcome.verdict,
-                            attempt=attempt_outcome.action.attempt, error=attempt_outcome.error,
-                        )
                 if outcome.verdict is not None:
                     self._update_context_state(outcome.verdict)
                     if not outcome.verdict.passed:
@@ -260,6 +323,8 @@ class CoreActLoopMixin:
                 self.coreact_loop.no_progress_count += 1
             else:
                 self.coreact_loop.no_progress_count = 0
+            # 批次收尾：清空全部 in-flight 游标（T-404 pending_batch + 兼容字段）
+            self.coreact_loop.pending_batch = []
             self.coreact_loop.pending_action = None
             self.coreact_loop.phase = "decide"
 
@@ -356,6 +421,9 @@ class CoreActLoopMixin:
                 task=retry_task.model_dump(mode="json"), rubric=br.model_dump(mode="json"),
                 attempt=action.attempt + 1, retry_reason=failure_reason,
             )
+            # T-404：修正游标即时持久化——崩溃于重试执行中时恢复能重放该重试，
+            # 而不是静默丢弃候选动作（外部调用仍不承诺恰好一次）。
+            await self._coreact_persist_intent(self.state.plan)
             spec: ActionSpec = action.spec.next_attempt(query=retry_query or None)
             return BatchAction(spec=spec, task=retry_task, rubric=br)
 

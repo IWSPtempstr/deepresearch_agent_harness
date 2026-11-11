@@ -26,6 +26,8 @@ from deepresearch_agent.agents.multi_agent.core.execution_record import Executio
 from deepresearch_agent.agents.multi_agent.core.plan_spec import TaskNode
 from deepresearch_agent.agents.multi_agent.core.rubric import TaskRubric
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
+from deepresearch_agent.harness.budgets import BudgetExceeded
+from deepresearch_agent.harness.errors import RunLeaseLost
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,11 @@ VerifyFn = Callable[[Any, list[ExecutionRecord], set[str]], Any]
 CorrectionFn = Callable[[Any, Any, str | None], Awaitable[Any | None]]
 StopCheck = Callable[[], bool]
 ProgressCallback = Callable[[str, TaskNode, ExecutionRecord | None], None]
+# T-404：逐动作提交回调（合并+验证后调用；持久化由实现方负责）
+CommitFn = Callable[[Any], Awaitable[None]]
+# T-404 review：verdict 元数据必须在提交前写入记录（否则崩溃恢复后
+# committed 记录缺 rubric 元数据，最终 rubric_coverage 门被静默削弱）
+RecordFn = Callable[[Any, Any], None]
 
 
 @dataclass
@@ -278,13 +285,20 @@ class ActionRunner:
                 error="cancelled_before_dispatch", record=None, cancelled=True,
             )
         isolated_state = shared_state.model_copy(deep=True)
+        # T-404 稳定 tool ID：worker 载荷携带本次尝试序号（不改动共享 plan 节点）
+        execution_task = action.task.model_copy(deep=True)
+        execution_task.attempt = max(1, int(action.spec.attempt or 1))
         loop = asyncio.get_running_loop()
 
         def _run() -> tuple[bool, str | None, ExecutionRecord | None]:
             if progress_callback is not None:
                 progress_callback("task.started", action.task, None)
             try:
-                success, error, record = self._execute_action(isolated_state, action.task)
+                success, error, record = self._execute_action(isolated_state, execution_task)
+            except (RunLeaseLost, BudgetExceeded):
+                # 租约易主/预算耗尽是运行时边界信号：必须传播让 Runtime 仲裁，
+                # 不得降级为该动作的失败记录（否则接管者语义被吞）。
+                raise
             except Exception as exc:  # noqa: BLE001 —— 执行器异常转为失败记录语义
                 logger.exception("动作执行异常 action_id=%s error=%s", action.action_id, exc)
                 return False, str(exc), None
@@ -331,12 +345,18 @@ class ActionRunner:
         shared_state: PlanExecuteState,
         verify_fn: VerifyFn,
         correction_fn: CorrectionFn | None = None,
+        commit_fn: CommitFn | None = None,
+        record_fn: RecordFn | None = None,
         executed_queries: Sequence[str] = (),
         progress_callback: ProgressCallback | None = None,
         stop_check: StopCheck | None = None,
     ) -> list[ActionOutcome]:
         """执行整批并按 sequence 顺序合并/验证；失败动作至多一次定向修正。
 
+        commit_fn（T-404）：每个动作在合并+验证后立即回调（含修正重试的合并），
+        实现方在此做逐动作持久化提交——崩溃恢复不丢已合并结果、不重做已提交动作。
+        record_fn：每次尝试（含修正）在提交前被回调以写入验证元数据（先于
+        commit_fn——提交的记录必须已携带 verdict/rubric 元数据）。
         返回与输入同序的 ActionOutcome 列表；所有尝试（含修正）的记录都已
         合并进共享状态（record_id 去重），失败历史不删除。
         """
@@ -372,6 +392,10 @@ class ActionRunner:
             if asyncio.isfuture(first.verdict) or asyncio.iscoroutine(first.verdict):
                 first.verdict = await first.verdict
             outcomes.append(ActionOutcome(action=action, attempts=[first], verdict=first.verdict, active=first))
+            if record_fn is not None:
+                record_fn(action, first)
+            if commit_fn is not None and not first.cancelled:
+                await commit_fn(action)
 
         # 单次定向修正：仅对验证未通过的动作；修正结果同样走隔离执行 + 稳定合并
         if correction_fn is not None:
@@ -403,4 +427,8 @@ class ActionRunner:
                 outcome.attempts.append(retry_outcome)
                 outcome.verdict = retry_outcome.verdict
                 outcome.active = retry_outcome
+                if record_fn is not None:
+                    record_fn(retry_action, retry_outcome)
+                if commit_fn is not None and not retry_outcome.cancelled:
+                    await commit_fn(retry_action)
         return outcomes

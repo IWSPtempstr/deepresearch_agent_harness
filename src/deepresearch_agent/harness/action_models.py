@@ -494,8 +494,9 @@ def execution_state_from_coreact_loop(loop_state: Any, *, run_id: str = "") -> E
     inflight: list[ActionSpec] = []
     inflight_rubrics: dict[str, ActionRubric] = {}
     retry_reasons: dict[str, str] = {}
-    if loop_state.pending_action is not None:
-        pending = loop_state.pending_action
+    # T-404：整批次 in-flight（pending_batch 优先；旧单动作快照经 inflight_items
+    # 回退）——迁移视图不得静默丢弃次要动作。
+    for pending in loop_state.inflight_items():
         # pending 内的 task/rubric 是跨版本写入的原始 dict（见 coreact_state）：
         # 畸形 pending 与畸形外层一致地显式拒绝，交"待人工处理"分流。
         try:

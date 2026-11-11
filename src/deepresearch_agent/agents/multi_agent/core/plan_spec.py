@@ -109,6 +109,10 @@ class TaskNode(BaseModel):
         description="任务执行所需的参数"
     )
 
+    # 执行尝试序号（T-404：tool_call_id 以 (run_id, task_id, attempt) 派生，
+    # 跨崩溃重放稳定；定向重试时由 runner 递增）
+    attempt: int = Field(default=1, ge=1, description="执行尝试序号")
+
     # 相关实体（用于chain_exploration等类型）
     entities: List[str] = Field(
         default_factory=list,

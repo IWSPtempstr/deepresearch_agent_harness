@@ -68,6 +68,19 @@ class RuntimeStepHooksMixin:
 
         return _step_commit
 
+    def _make_action_commit(self, context: RunContext, driver: Any, budget: BudgetManager, *, owner: str = ""):
+        """T-404：批内逐动作提交回调——只持久化，不发 step 事件。
+
+        step 事件保持在批次边界（step_commit）；逐动作提交只做幂等落库，
+        使崩溃恢复不丢已合并结果、不重做已提交动作。
+        """
+
+        async def _action_commit(current_driver: Any) -> None:
+            current_driver.context.budget_usage = budget.usage
+            await self._commit_coreact_step(context, current_driver, budget, owner=owner)
+
+        return _action_commit
+
     def _make_pause_probe(self, context: RunContext):
         """Build the pause probe used at action boundaries by step drivers."""
 

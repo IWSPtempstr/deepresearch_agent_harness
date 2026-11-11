@@ -143,7 +143,7 @@ class FakeOrchestrator:
             worker_type="retrieval_executor",
             tool_calls=[ToolCall(
                 tool_name="web_search",
-                tool_call_id=f"call-{state.run_id}-{task.task_id}",
+                tool_call_id=f"call-{state.run_id}-{task.task_id}-a{getattr(task, 'attempt', 1)}",
                 source_mode="web",
                 args=dict(task.parameters),
                 result={"answer": str(result.evidence)},
@@ -317,8 +317,8 @@ class TestCoreActE2E:
         assert [task.task_id for task in orchestrator_b.executed] == ["plan_2"]
         # 动作 1/2 的 tool_call 行都存在，动作 1 不重复
         tool_repo = PlanTaskToolRepository(database)
-        assert await tool_repo.get_tool_call(f"call-{run_id}-plan_1") is not None
-        assert await tool_repo.get_tool_call(f"call-{run_id}-plan_2") is not None
+        assert await tool_repo.get_tool_call(f"call-{run_id}-plan_1-a1") is not None
+        assert await tool_repo.get_tool_call(f"call-{run_id}-plan_2-a1") is not None
         stored_evidence = await EvidenceRepository(database).list_for_run(run_id)
         assert len(stored_evidence) == 2
         events = await EventRepository(database).list_after(run_id)

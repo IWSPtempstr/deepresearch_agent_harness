@@ -6,7 +6,6 @@
 from typing import Any, Dict, List, Optional
 import time
 import logging
-import uuid
 
 from deepresearch_agent.agents.multi_agent.core.execution_record import (
     ExecutionMetadata,
@@ -91,7 +90,10 @@ class RetrievalExecutor(BaseExecutor):
         provider = self._provider or self._router.for_mode(state.source_mode)  # type: ignore[union-attr]
         if provider.mode.value != state.source_mode or task.source_mode != state.source_mode:
             raise ValueError("Plan/Task/Provider source_mode 不一致")
-        tool_call_id = f"call_{uuid.uuid4().hex}"
+        # T-404 稳定 tool ID：tool_call_id 由 (run_id, task_id, attempt) 派生——
+        # 崩溃重放同一尝试生成相同 ID（行幂等、不重复计费）；定向重试 attempt+1
+        # 产生新 ID，全部尝试的记录保留。外部调用本身不承诺恰好一次。
+        tool_call_id = f"call-{state.run_id}-{task.task_id}-a{max(1, int(getattr(task, 'attempt', 1) or 1))}"
         start_time = time.perf_counter()
         success = True
         error_message: Optional[str] = None

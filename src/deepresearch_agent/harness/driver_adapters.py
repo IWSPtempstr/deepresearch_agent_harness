@@ -11,13 +11,21 @@ from .report_safety import has_internal_material
 
 class DriverAdaptersMixin:
     def snapshot(self) -> dict[str, Any]:
+        coreact_snapshot = None
+        if self.coreact_loop is not None:
+            # T-404：next_operation 显式序列化（execute/report），不得只凭
+            # RunStatus.EXECUTING 推断下一阶段。
+            coreact_snapshot = {
+                **self.coreact_loop.model_dump(mode="json"),
+                "next_operation": self.coreact_loop.next_operation,
+            }
         return {
             "state": self.state.model_dump(mode="json"),
             "planner_result": self.planner_result.model_dump(mode="json") if self.planner_result else None,
             "report_result": self.report_result.model_dump(mode="json") if self.report_result else None,
             "repair_pending": self._repair_pending,
             "orchestration": self.orchestration,
-            "coreact": self.coreact_loop.model_dump(mode="json") if self.coreact_loop else None,
+            "coreact": coreact_snapshot,
         }
 
     def execution_records(self) -> list[ExecutionRecord]:
