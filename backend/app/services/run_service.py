@@ -208,12 +208,23 @@ class RunService:
             # T-016：角色级模型分层（Anthropic lead/subagent 模式）——
             # 优先消费建 Run 时冻结在 model_snapshot 的映射（跨进程/重启
             # recorded==actual）；缺省（旧 Run）才按当前 settings 现算。
+            # T-406：角色归一化（旧 planner key → brief）；装配走唯一 coreact
+            # 工厂（BriefBuilder，无 Reflector）。
             frozen = dict(context.model_snapshot or {}).get("role_models")
             if isinstance(frozen, dict) and frozen:
                 role_models = frozen
             else:
-                role_models = {role: self._role_model_for(context, role) for role in ("planner", "reporter", "controller")}
-            bundle = MultiAgentFactory.create_default_bundle(
+                # T-406：brief 角色的历史兼容——旧 Run 的显式 planner_model 仍生效
+                # （不现算覆盖历史选择，design §8）；verifier 角色为语义判定器
+                # 预留（COREACT_SEMANTIC_ENABLED 开启前仅作审计冻结）。
+                role_config = dict(context.config_snapshot or {})
+                if not role_config.get("brief_model") and role_config.get("planner_model"):
+                    role_config["brief_model"] = role_config["planner_model"]
+                role_models = {
+                    role: self._role_model_for_snapshot(role_config, role)
+                    for role in ("brief", "reporter", "controller", "verifier")
+                }
+            bundle = MultiAgentFactory.create_coreact_bundle(
                 retrieval_provider=provider, worker=worker, role_models=role_models,
             )
             return PlanExecuteReportDriver(context, bundle.orchestrator, events=events)
@@ -254,9 +265,13 @@ class RunService:
 
     def _role_model_for(self, context, role: str) -> dict[str, str]:
         """T-016：按角色解析模型（四层顺序见 model_tier.resolve_role_model）。"""
+        return self._role_model_for_snapshot(dict(context.config_snapshot or {}), role)
+
+    def _role_model_for_snapshot(self, config_snapshot: dict, role: str) -> dict[str, str]:
+        """T-016/T-406：按角色解析模型（快照可含历史兼容改写后的显式覆盖）。"""
         from deepresearch_agent.models.model_tier import resolve_role_model
 
-        return resolve_role_model(context.config_snapshot or {}, role=role, settings=settings)
+        return resolve_role_model(config_snapshot, role=role, settings=settings)
 
     def _tier_model_for(self, context) -> str | None:
         """T-009：从 Run config_snapshot 解析分层模型 ID；路由关闭/未配置返回 None（旧行为）。"""

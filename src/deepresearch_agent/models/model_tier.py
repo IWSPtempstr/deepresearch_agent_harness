@@ -23,12 +23,16 @@ Tier = Literal["simple", "standard", "complex"]
 
 # T-016：角色级模型分层。角色 → 默认 tier（Anthropic 模式：lead 强模型、
 # subagent 便宜模型）。可用 env 覆盖：LLM_ROLE_TIER_DEFAULTS="planner:complex,worker:simple"
-Role = Literal["planner", "worker", "reporter", "controller"]
+# T-406：brief 承接原 planner 的规划职责（BriefBuilder），沿用 complex 档；
+# verifier 为语义判定器预留角色（COREACT_SEMANTIC_ENABLED）。
+Role = Literal["planner", "worker", "reporter", "controller", "brief", "verifier"]
 _ROLE_TIERS_DEFAULT: dict[str, Tier] = {
     "planner": "complex",
+    "brief": "complex",
     "worker": "simple",
     "reporter": "standard",
     "controller": "standard",
+    "verifier": "standard",
 }
 
 _DETAILED_MARKERS = ("详细", "深入", "全面", "长篇", "报告", "研究报告")

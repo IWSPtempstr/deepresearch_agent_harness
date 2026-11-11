@@ -46,10 +46,17 @@ async def run_persistent_query(
     try:
         # CLI/local stage-3 entry remains self-contained; deployed startup uses Alembic.
         await database.create_schema()
+        # T-406：CLI/本地入口与 HTTP 同规则写入编排戳记（缺省=staged_v1 的旧
+        # 语义会让 plan_execute_report 落入整批外壳而非 coreact 循环）。
+        config_payload = dict(config_snapshot or {"min_evidence": 1})
+        if workflow is WorkflowMode.PLAN_EXECUTE_REPORT:
+            from deepresearch_agent.config.settings import RESEARCH_ORCHESTRATION
+
+            config_payload.setdefault("orchestration", RESEARCH_ORCHESTRATION)
         session = await SessionRepository(database).create(SessionCreate(title=query[:80] or "新对话"))
         _, run, _ = await RunRepository(database).create_for_user_message(
             MessageCreate(session_id=session.session_id, role="user", content=query, client_message_id=client_message_id or f"cli-{session.session_id}"),
-            RunCreate(session_id=session.session_id, trigger_message_id="assigned-atomically", source_mode=source, workflow_mode=workflow, config_snapshot=config_snapshot or {"min_evidence": 1}, budget=HARNESS_BUDGETS),
+            RunCreate(session_id=session.session_id, trigger_message_id="assigned-atomically", source_mode=source, workflow_mode=workflow, config_snapshot=config_payload, budget=HARNESS_BUDGETS),
         )
         provider = create_default_router().for_mode(source)
 
@@ -58,7 +65,8 @@ async def run_persistent_query(
                 agent = DeepResearchAgent(use_deeper_tool=True, retrieval_provider=provider, run_id=context.run_id)
                 agents.append(agent)
                 return DeepResearchDriver(context, agent, events=events)
-            bundle = MultiAgentFactory.create_default_bundle(retrieval_provider=provider)
+            # T-406：唯一 coreact 装配（BriefBuilder，无 Reflector）
+            bundle = MultiAgentFactory.create_coreact_bundle(retrieval_provider=provider)
             return PlanExecuteReportDriver(context, bundle.orchestrator, events=events)
 
         runtime = HarnessRuntime(

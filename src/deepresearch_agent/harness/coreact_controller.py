@@ -79,8 +79,12 @@ class CoreActController:
         self.version = version
 
     def decide(self, context: DecisionContext) -> ControllerDecision:
-        """主入口。LLM 失败自动降级；决策上限耗尽直接确定性兜底。"""
-        if context.allow_llm and context.decisions_used < context.max_decisions:
+        """主入口。LLM 失败自动降级；决策上限耗尽直接确定性兜底。
+
+        llm 缺省（离线/未配置角色模型）时跳过 LLM 尝试，直接确定性兜底——
+        不烧异常重试。
+        """
+        if context.allow_llm and self.llm is not None and context.decisions_used < context.max_decisions:
             for _ in range(MAX_MALFORMED_ATTEMPTS):
                 try:
                     decision = self._decide_with_llm(context)
@@ -91,6 +95,8 @@ class CoreActController:
                     decision.source = "llm"
                     return decision
             logger.warning("coreact 决策连续畸形 %d 次，转入确定性兜底", MAX_MALFORMED_ATTEMPTS)
+        if self.llm is None:
+            return self._decide_deterministic(context, reason="llm_disabled")
         return self._decide_deterministic(context, reason="llm_failed" if context.allow_llm else "llm_disabled")
 
     # ---------- LLM 路径 ----------

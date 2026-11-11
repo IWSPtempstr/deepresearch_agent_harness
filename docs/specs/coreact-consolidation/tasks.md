@@ -65,15 +65,15 @@
 - 风险：关键词检查仍仅为代理，不升级为事实认证。（supported 一律携带 check_kind/verifier 归因且 reason 注明"非独立事实认证"。已知窗口：崩溃于逐动作提交后、批次收尾前时，已提交动作的观察/评估不在恢复游标中重建（有损视图语义，证据仍在账本）；语义判定器/控制器 LLM 消耗不进 llm_tokens 计费（与既有 controller decide 一致，预算门为咨询性）。）
 
 ## T-406 — BriefBuilder 替换重复规划与 Reflector
-- 状态：pending
+- 状态：done
 - 前置：T-405
 - 目标：Controller 成为唯一下一动作决策者，移除无效 reflection 候选。
 - 涉及：`planner/base_planner.py`、`clarifier.py`、`task_decomposer.py`、`plan_reviewer.py`、`executor/reflector*.py`、工厂与 coreact driver。
 - 动作：BriefBuilder 生成问题/验收/报告契约，保留可选澄清及简单请求捷径；停止自动 reflection task、核心工厂不注册旧 Reflector；改 final evidence 缺口反馈 Controller，而非回旧 Planner。
 - 验收：拟新增 `tests/harness/test_coreact_brief_flow.py`；澄清/摘要/多方向研究、三来源模式、无 reflection 派发、ReportService 输入与预算 fallback；通用门禁。
 - 预期证据：无旧规划/反思入口调用的运行 trace、角色模型一致性断言。
-- 实际证据：未执行。
-- 风险：只有共享检查完整迁移且调用者审计通过才能物理删除文件。
+- 实际证据（2026-11-11）：新增 `planner/brief_builder.py`（BriefBuilder：与 BasePlanner.generate_plan 同签名；简单请求捷径与旧实现同参数；多方向候选图全部就绪、来源冻结、无 reflection/custom/deep_research 类型；evidence 缺口（min_evidence/no_source_evidence/insufficient_source_evidence/claim_support/source_match）→ 补充检索候选反馈 Controller；可选澄清（复用 Clarifier，无 LLM 跳过）+ 澄清历史记录；ResearchBrief 契约随候选图生成并在 replan 时显式版本化（同 goal 复用、变更 with_revision +1））。工厂新增 `create_coreact_bundle`（planner=BriefBuilder；worker 不注册 ReflectionExecutor——注入的 worker 亦被清洗；角色 brief/controller/reporter/verifier 走 canonical 映射；OrchestratorConfig 与 BriefBuilderConfig 由 settings 派生）。入口接线：run_service HTTP/worker 路径与 bootstrap CLI 路径均改用 create_coreact_bundle；bootstrap 为 plan_execute_report 写入 orchestration 戳记（与 chat_service 同规则）；coreact_controller.decide 增加 llm-None 守卫（离线直落确定性兜底，llm_disabled 标注）；model_tier 增加 brief(complex)/verifier(standard) 角色 + 历史 planner_model→brief_model 兼容映射（不覆盖历史选择）。`tests/harness/test_coreact_brief_flow.py` 12 项：简单捷径、多方向无 reflection、三来源模式、缺口补充候选、澄清门（阻塞/放行）、brief 契约冻结、工厂装配+注入 worker 清洗、factory plan 端到端、coreact 全流程无 reflection 派发 trace、缺口 replan 后补充候选**实际可派发**（executed==["web_search"] 且 query 含"补充证据"）、预算 fallback 真实执行 `_build_reserved_budget_report` 且 rubric 随 Contract、coreact_rubrics 输入。staged 路径（BasePlanner/_ensure_reflection_task/ReflectionExecutor）零改动；无文件物理删除。通用门禁：pytest 485 passed/4 skipped；ruff（变更文件）通过；git diff --check 干净。独立 code review 两轮：首轮 2 major（run_service 注入 worker 绕过"不注册 Reflector"、bootstrap 入口缺 orchestration 戳记）+ 8 minor/nit；二轮 Finding A（replan 测试空断言）+ 2 nit——全部修复并复审 APPROVE。
+- 风险：只有共享检查完整迁移且调用者审计通过才能物理删除文件。（本阶段零删除。显式遗留至 T-407：chat_service 冻结 model_snapshot.role_models 仍为 ("planner","reporter","controller") 三角色、不含 verifier——HTTP 路径新 Run 的冻结快照需在 T-407 model snapshot 工作中纳入 brief/verifier 角色命名（模型身份经 planner→brief 别名保持 recorded==actual）。）
 
 ## T-407 — 单一入口切换与历史兼容
 - 状态：pending
@@ -110,4 +110,4 @@
 
 ## 进度
 
-已完成 4（T-401..T-404）；进行中 1（T-405 待复审提交）；阻塞 0；待执行 4。每阶段收尾须重跑 T-401 盘点脚本确认存量数据边界（口径见 inventory.md §5）。
+已完成 6（T-401..T-406）；进行中 0；阻塞 0；待执行 3。下一步：T-407（单一入口切换与历史兼容；含 chat_service 冻结快照的 brief/verifier 角色命名）。每阶段收尾须重跑 T-401 盘点脚本确认存量数据边界（口径见 inventory.md §5）。
