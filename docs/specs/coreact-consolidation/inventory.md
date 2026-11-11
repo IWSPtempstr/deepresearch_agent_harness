@@ -93,11 +93,14 @@
 
 ## 4. 关键实施 gate（引用 T-401 结论）
 
-1. **G-ENTRY**：T-407 切换前，本清单中 3.1 全部入口必须改为唯一 coreact 工厂；
-   `WorkflowMode.DEEP_RESEARCH` 分支、API 默认值与前端选择器一并归一化。
+1. **G-ENTRY**：~~T-407 切换前~~ **T-407 已完成**：全部生产入口（HTTP/worker/CLI）
+   改为唯一 coreact 工厂；`WorkflowMode.DEEP_RESEARCH` 分支删除、API 请求在边界
+   归一化、前端选择器移除、capabilities 只广告唯一入口；存量活动 deep_research Run
+   由工厂显式拒绝（LEGACY_WORKFLOW_UNSUPPORTED，人工处理）且不进入自动恢复。
 2. **G-DATA**：切换只影响新写入；历史读取（含 4 个 manual_review Run）保持原状；
    不自动取消/重启。若上线库出现带 coreact/staged checkpoint 的活动 Run，
-   需先重跑盘点并另批处置清单。
+   需先重跑盘点并另批处置清单（工具：`scripts/convert_legacy_checkpoints.py`，
+   dry-run 默认、--apply 仅追加归一化行不破坏原 checkpoint）。
 3. **G-DELETE**：T-408 物理删除前必须复核 3.2 引用清单并重跑脚本（含 registry/
    字符串入口扫描——`tool_registry.py` 的 `deep_research`/`deeper_research`/`answer_validator`
    键与 prompt 文本提及均需逐项处理），仅专属且无调用方的文件可删；共享能力先抽取。
@@ -114,14 +117,18 @@
 - 示例输出：本地库盘点结果见本文 §2；静态引用扫描结果见 §3.2。
 - 后续各阶段结束时须重跑脚本确认存量数据边界未被破坏（runs/checkpoints 计数不变）。
 - **边界口径**：本仓库测试套件存在既有副作用——`tests/observability/test_observability.py`
-  调用 `create_app()` 未指定 database_url，会在本地 `data/app.db` 产生新的
-  deep_research/completed Run 行（fake driver，非旧引擎真实执行）。因此
-  "计数不变"按以下口径核对，而非全表计数：
-  1. `plan_execute_report` 行数保持 0；
-  2. 既有 4 个 interrupted/manual_review Run 原状未动；
-  3. checkpoint 编排标记分布不含 coreact_v1/staged 新增。
-  （2026-11-11 T-402 收尾核对：plan_execute_report=0，interrupted=4 原状，checkpoint
-  标记无 coreact 新增——增量行均为上述既有测试副作用。）
+  调用 `create_app()` 未指定 database_url，会在本地 `data/app.db` 产生新 Run 行
+  （fake driver，非真实引擎执行）。T-407 切换后这些新行经归一化入口写入
+  `plan_execute_report`（fake driver 快照无编排标记 → 归类 staged_legacy）。
+  因此"计数不变"按以下口径核对，而非全表计数：
+  1. 既有 4 个 deep_research interrupted/manual_review Run 原状未动；
+  2. deep_research 历史 completed 行只增不改（T-407 前的增量均为旧入口测试副作用）；
+  3. T-407 起新写入（含测试副作用）一律 plan_execute_report；真实 coreact 执行
+     只发生在 tmp_path 测试库（app.db 无 coreact_v1 标记属预期——fake driver 不产
+     coreact 游标）。
+  （2026-11-11 T-407 收尾核对：interrupted=4 原状；plan_execute_report completed=5
+  且 checkpoint 标记 staged_legacy=30——均为 fake-driver 测试副作用；deep_research
+  历史行可读不变。）
 - 独立 code review（2026-11-11，两轮）结论：首轮 8 项脚本/文档发现全部修复并经复审
   逐项验证（标记启发式与快照实现对齐、非 dict state_json 崩溃防护、SQLite-only 表述、
   扫描范围补 tests/与根目录、标记桶对账 954/954、文档 stale 参数、WAL sidecar 说明、

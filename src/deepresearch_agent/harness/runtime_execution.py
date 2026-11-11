@@ -453,7 +453,10 @@ class RuntimeExecutionMixin(RuntimeStepHooksMixin):
                 if isinstance(exc, NeedsUserInput):
                     await self._transition(context, RunStatus.NEEDS_USER_INPUT, event_type="run.needs_user_input", error_message=str(exc))
                 else:
-                    await self._transition(context, RunStatus.FAILED, event_type="run.failed", error_code=type(exc).__name__, error_message=str(exc))
+                    # T-407：AppError 携带业务错误码（如 LEGACY_WORKFLOW_UNSUPPORTED），
+                    # 不退化成类名——人工处理清单按错误码筛选。
+                    error_code = exc.code.value if isinstance(exc, AppError) else type(exc).__name__
+                    await self._transition(context, RunStatus.FAILED, event_type="run.failed", error_code=error_code, error_message=str(exc))
                 await self.checkpoints.save(context, context.status.value)
             return context
         finally:

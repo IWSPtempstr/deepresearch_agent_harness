@@ -130,7 +130,7 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
   const queryClient = useQueryClient();
   const [text, setText] = useState("");
   const [source, setSource] = useState<SourceMode>(() => (localStorage.getItem("source_mode") as SourceMode) || "graphrag");
-  const [workflow, setWorkflow] = useState<WorkflowMode>("deep_research");
+  const workflow: WorkflowMode = "plan_execute_report";  // T-407：唯一生产入口（不做选择）
   const [runId, setRunId] = useState<string | null>(null);
   const [selectedEvidence, setSelectedEvidence] = useState<Evidence | null>(null);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
@@ -165,7 +165,7 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
   }, [detail.data, runId, sessionId]);
   useEffect(() => {
     if (!run) return;
-    setSource(run.source_mode); setWorkflow(run.workflow_mode);
+    setSource(run.source_mode);  // T-407：workflow 唯一入口，不做选择恢复
     if (run.status === "paused" || (!run.pause_requested && run.status !== "pausing")) setPausing(false);
     if (run.status === "cancelled") setCancelling(false);
     if (run.status !== "paused" && run.status !== "pausing") setResuming(false);
@@ -351,7 +351,7 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
           initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 24, scale: 0.9 }}
           transition={{ type: "spring", stiffness: 320, damping: 26 }}
         >
-          <div className="composer-tools"><SourceSelector value={source} onChange={setSource} capabilities={capabilities.data} /><select value={workflow} onChange={(event) => setWorkflow(event.target.value as WorkflowMode)}><option value="deep_research">DeepResearch</option><option value="plan_execute_report">Plan–Execute–Report</option></select></div>
+          <div className="composer-tools"><SourceSelector value={source} onChange={setSource} capabilities={capabilities.data} /></div>
           {source === "web" && capabilities.data?.sources.web.reason && <small className="capability-note">{capabilities.data.sources.web.reason}</small>}
           <textarea value={text} onChange={(event) => setText(event.target.value)} onKeyDown={onComposerKeyDown} placeholder="提出一个需要证据支持的问题…" rows={3} />
           <div className="composer-actions">

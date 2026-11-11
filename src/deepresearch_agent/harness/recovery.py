@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from deepresearch_agent.harness.errors import AppError, ErrorCode
 from deepresearch_agent.persistence.repositories import RunRepository
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -38,12 +41,44 @@ def classify_exception(exc: Exception) -> RecoveryDecision:
 
 
 class RecoveryManager:
+    # T-407：唯一可执行工作流；旧模式的活动 Run 不自动续跑（人工处理清单）。
+    SUPPORTED_WORKFLOW_MODES = frozenset({"plan_execute_report"})
+
     def __init__(self, run_repository: RunRepository):
         self.run_repository = run_repository
 
     async def scan(self, *, auto_resume: bool = True) -> list[str]:
-        interrupted = await self.run_repository.mark_expired_leases_interrupted()
+        interrupted_ids = await self.run_repository.mark_expired_leases_interrupted()
         if not auto_resume:
-            return interrupted
+            # T-407：旧引擎过滤同样适用于非自动恢复分支（AUTO_RESUME_RUNS=False
+            # 的部署）——过期租约的 legacy Run 同样保持原状，不重新投递。
+            return await self._filter_supported(interrupted_ids)
         recoverable = await self.run_repository.list_recoverable()
-        return [run.run_id for run in recoverable if run.status == "interrupted"]
+        # T-407：旧引擎（deep_research）活动 Run 安全拒绝——不自动续跑、不取消、
+        # 不静默换引擎；显式记录供人工处理清单。
+        resumable: list[str] = []
+        for run in recoverable:
+            if run.status != "interrupted":
+                continue
+            if run.workflow_mode not in self.SUPPORTED_WORKFLOW_MODES:
+                logger.warning(
+                    "恢复扫描：旧工作流 Run 不自动续跑（run_id=%s workflow_mode=%s status=%s）"
+                    "——列入人工处理清单，保持原状",
+                    run.run_id, run.workflow_mode, run.status,
+                )
+                continue
+            resumable.append(run.run_id)
+        return resumable
+
+    async def _filter_supported(self, run_ids: list[str]) -> list[str]:
+        resumable: list[str] = []
+        for run_id in run_ids:
+            run = await self.run_repository.get(run_id)
+            if run is not None and run.workflow_mode not in self.SUPPORTED_WORKFLOW_MODES:
+                logger.warning(
+                    "恢复扫描：旧工作流 Run 不重新投递（run_id=%s workflow_mode=%s）——保持原状",
+                    run_id, run.workflow_mode,
+                )
+                continue
+            resumable.append(run_id)
+        return resumable

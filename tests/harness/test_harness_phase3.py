@@ -35,7 +35,7 @@ async def database(tmp_path):
 async def create_run(
     database, *, budget=None,
     source_mode=SourceMode.GRAPHRAG,
-    workflow_mode=WorkflowMode.DEEP_RESEARCH,
+    workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT,
     min_evidence=1,
 ):
     session = await SessionRepository(database).create(SessionCreate(title="stage3"))

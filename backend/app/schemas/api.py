@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from deepresearch_agent.harness.contracts import SourceMode, WorkflowMode
 
@@ -34,8 +34,17 @@ class MessageSend(ApiModel):
     client_message_id: str = Field(min_length=1, max_length=128)
     content: str = Field(min_length=1, max_length=20000)
     source_mode: SourceMode
-    workflow_mode: WorkflowMode = WorkflowMode.DEEP_RESEARCH
+    # T-407：唯一生产入口——旧标识 deep_research 在边界归一化为
+    # plan_execute_report（历史读取返回持久层原值，不受影响）。
+    workflow_mode: WorkflowMode = WorkflowMode.PLAN_EXECUTE_REPORT
     report_type: Literal["brief", "long_document"] = "brief"
+
+    @field_validator("workflow_mode", mode="before")
+    @classmethod
+    def _normalize_legacy_workflow(cls, value: Any) -> Any:
+        if isinstance(value, str) and value == WorkflowMode.DEEP_RESEARCH.value:
+            return WorkflowMode.PLAN_EXECUTE_REPORT
+        return value
 
 
 class ClarificationSubmit(ApiModel):

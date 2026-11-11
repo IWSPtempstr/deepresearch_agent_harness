@@ -8,7 +8,6 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from deepresearch_agent.agents.deep_research_agent import DeepResearchAgent
 from deepresearch_agent.agents.multi_agent.integration.multi_agent_factory import MultiAgentFactory
 from deepresearch_agent.agents.multi_agent.executor.worker_coordinator import WorkerCoordinator
 from deepresearch_agent.config.settings import ARTIFACT_ROOT, AUTO_RESUME_RUNS
@@ -16,7 +15,7 @@ from deepresearch_agent.harness.contracts import SourceMode, WorkflowMode
 from deepresearch_agent.harness.event_bus import EventBus
 from deepresearch_agent.harness.recovery import RecoveryManager
 from deepresearch_agent.harness.runtime import HarnessRuntime
-from deepresearch_agent.harness.workflow import DeepResearchDriver, PlanExecuteReportDriver
+from deepresearch_agent.harness.workflow import PlanExecuteReportDriver
 from deepresearch_agent.persistence import ArtifactStore, Database
 from deepresearch_agent.persistence.repositories import (
     ArtifactRepository, CheckpointRepository, ContractRepository, EventRepository,
@@ -189,18 +188,22 @@ class RunService:
         def workflow_factory(context, events=None):
             if self._external_factory is not None:
                 return self._external_factory(context, events)
+            if context.workflow_mode is WorkflowMode.DEEP_RESEARCH:
+                # T-407：独立 deep_research 引擎已退役。存量活动 Run（历史创建、
+                # 非终态）显式拒绝执行并列入人工处理清单——不静默换引擎、
+                # 不自动取消；新请求在 API 边界已归一化为 plan_execute_report。
+                # （拒绝先于 Provider 构建——不为已拒绝的 Run 触碰外部资源。）
+                from deepresearch_agent.harness.errors import AppError, ErrorCode
+
+                raise AppError(
+                    ErrorCode.LEGACY_WORKFLOW_UNSUPPORTED,
+                    f"Run {context.run_id} 为旧 deep_research 工作流（活动状态）；"
+                    "该引擎已退役，请人工处理（查看/取消/重建为 plan_execute_report），不自动续跑",
+                )
             provider = TimeoutBoundProvider(
                 self._router.for_mode(context.source_mode),
                 timeout_seconds=context.budget_limits.tool_timeout_seconds,
             )
-            if context.workflow_mode is WorkflowMode.DEEP_RESEARCH:
-                tier_model = self._tier_model_for(context)
-                agent = DeepResearchAgent(
-                    use_deeper_tool=True, retrieval_provider=provider, run_id=context.run_id,
-                    llm_model=tier_model,
-                )
-                agents.append(agent)
-                return DeepResearchDriver(context, agent, events=events)
             worker = WorkerCoordinator(
                 retrieval_provider=provider,
                 max_parallel_workers=context.budget_limits.max_concurrency,
@@ -284,6 +287,10 @@ class RunService:
 
     async def run_evaluation_case(self, *, query: str, source_mode: str, workflow_mode: str, forced_skill=None) -> dict[str, Any]:
         """Execute one isolated real Harness Run for paired Skill evaluation."""
+        # T-407：评测入口与 HTTP 边界同规则——旧标识归一化（存量 eval 用例
+        # 中的 deep_research 不再系统性产出诚实失败）。
+        if workflow_mode == "deep_research":
+            workflow_mode = "plan_execute_report"
         session = await self.sessions.create(SessionCreate(title="[Skill Eval]"))
         message, run, _ = await self.runs.create_for_user_message(
             MessageCreate(session_id=session.session_id, role="user", content=query, client_message_id=None, metadata={"evaluation": True}),

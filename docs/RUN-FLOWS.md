@@ -37,7 +37,7 @@ T-015 起：编排实现按 Run 的 `config_snapshot["orchestration"]` 分派—
 
 ### coreact_v1 · 步级验证控制（新 Run 默认）
 
-- **触发**：`workflow_mode=plan_execute_report` 且 `orchestration=coreact_v1`（由 `RESEARCH_ORCHESTRATION` 环境变量控制，默认 coreact_v1）。
+- **触发**：`workflow_mode=plan_execute_report` 且 `orchestration=coreact_v1`。T-407 起 coreact 是唯一生产编排；`RESEARCH_ORCHESTRATION` 环境变量不再提供 staged_v1 选择（旧值 staged_v1 映射为 coreact_v1 并告警），存量 staged checkpoint 仍按其戳记只读恢复。
 - **持久化**：候选计划/任务、每动作 ExecutionRecord、ToolCall、Evidence、rubric 与 verdict（写入 record 元数据）入库；**每个动作完成后持久提交一次**（幂等 upsert + EXECUTING checkpoint 携带循环游标），恢复粒度为"单个已提交动作之后"。
 - **成功出口**：9 项检查（含 rubric_coverage——报告已引用的账本证据须覆盖步级 rubric 的 required 判词，关键词子串确定性代理）全部通过 → completed。
 

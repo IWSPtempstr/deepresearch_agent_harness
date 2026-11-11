@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.app.schemas import MessageCreate, RunCreate, SessionCreate
-from deepresearch_agent.agents.deep_research_agent import DeepResearchAgent
 from deepresearch_agent.agents.multi_agent.integration.multi_agent_factory import MultiAgentFactory
 from deepresearch_agent.config.settings import APP_DATABASE_URL, ARTIFACT_ROOT, HARNESS_BUDGETS
 from deepresearch_agent.persistence import ArtifactStore, Database
@@ -18,7 +17,7 @@ from deepresearch_agent.retrieval.router import create_default_router
 
 from .contracts import SourceMode, WorkflowMode
 from .runtime import HarnessRuntime
-from .workflow import DeepResearchDriver, PlanExecuteReportDriver
+from .workflow import PlanExecuteReportDriver
 
 
 @dataclass
@@ -33,13 +32,17 @@ async def run_persistent_query(
     query: str,
     *,
     source_mode: SourceMode | str = SourceMode.GRAPHRAG,
-    workflow_mode: WorkflowMode | str = WorkflowMode.DEEP_RESEARCH,
+    # T-407：唯一生产入口——CLI 默认与 HTTP 边界同规则；旧标识归一化而非
+    # 创建后拒绝。
+    workflow_mode: WorkflowMode | str = WorkflowMode.PLAN_EXECUTE_REPORT,
     database_url: str = APP_DATABASE_URL,
     client_message_id: str | None = None,
     config_snapshot: dict[str, Any] | None = None,
 ) -> HarnessRunResult:
     """Create Session/Message/Run and execute the real selected workflow once."""
     source = SourceMode(source_mode)
+    if isinstance(workflow_mode, str) and workflow_mode == WorkflowMode.DEEP_RESEARCH.value:
+        workflow_mode = WorkflowMode.PLAN_EXECUTE_REPORT  # 旧标识边界归一化
     workflow = WorkflowMode(workflow_mode)
     database = Database(database_url)
     agents: list[Any] = []
@@ -62,9 +65,14 @@ async def run_persistent_query(
 
         def workflow_factory(context, events=None):
             if workflow is WorkflowMode.DEEP_RESEARCH:
-                agent = DeepResearchAgent(use_deeper_tool=True, retrieval_provider=provider, run_id=context.run_id)
-                agents.append(agent)
-                return DeepResearchDriver(context, agent, events=events)
+                # T-407：独立 deep_research 引擎已退役——显式拒绝（人工处理），
+                # 不静默换引擎。
+                from deepresearch_agent.harness.errors import AppError, ErrorCode
+
+                raise AppError(
+                    ErrorCode.LEGACY_WORKFLOW_UNSUPPORTED,
+                    f"Run {context.run_id} 为旧 deep_research 工作流；该引擎已退役，请改用 plan_execute_report",
+                )
             # T-406：唯一 coreact 装配（BriefBuilder，无 Reflector）
             bundle = MultiAgentFactory.create_coreact_bundle(retrieval_provider=provider)
             return PlanExecuteReportDriver(context, bundle.orchestrator, events=events)

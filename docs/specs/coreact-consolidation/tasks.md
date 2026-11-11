@@ -76,15 +76,16 @@
 - 风险：只有共享检查完整迁移且调用者审计通过才能物理删除文件。（本阶段零删除。显式遗留至 T-407：chat_service 冻结 model_snapshot.role_models 仍为 ("planner","reporter","controller") 三角色、不含 verifier——HTTP 路径新 Run 的冻结快照需在 T-407 model snapshot 工作中纳入 brief/verifier 角色命名（模型身份经 planner→brief 别名保持 recorded==actual）。）
 
 ## T-407 — 单一入口切换与历史兼容
-- 状态：pending
+- 状态：done
 - 前置：T-406；T-401 的旧 Run 处置 gate 通过
 - 目标：所有生产入口只创建 coreact，不再运行 F1/staged 引擎。
 - 涉及：`run_service.py`、`bootstrap.py`、API schemas、capabilities、前端 ChatPage/types、model snapshot、迁移工具。
 - 动作：新请求旧标识在边界归一化；保留历史读取；dry-run 检查并转换可映射快照；不可映射活动 Run 安全拒绝且列人工处理，禁止自动取消；移除 RESEARCH_ORCHESTRATION 的旧路径选择。
 - 验收：拟新增 `tests/api/test_coreact_only_entry.py` 与 `tests/harness/test_coreact_legacy_adapter.py`；HTTP/worker/CLI/Skill eval 全入口 trace 同一路径、OpenAPI/前端一致；历史报告可读、旧快照可转换或明确拒绝；`npm --prefix frontend run build` + 通用门禁。
 - 预期证据：入口矩阵、dry-run/备份回滚记录、前端构建、历史读取测试。
-- 实际证据：未执行。
-- 风险：任何破坏性数据操作必须另获批准；数据库历史 CHECK 不随意收窄。
+- 实际证据（2026-11-11）：入口矩阵切换完成——(a) API：`MessageSend.workflow_mode` 默认 plan_execute_report + before 校验器把旧标识 deep_research 边界归一化（历史读取返回持久层原值）；(b) run_service/bootstrap 工厂删除 DEEP_RESEARCH 分支（无 else 落入旧引擎），存量活动 deep_research Run 显式抛 `AppError(LEGACY_WORKFLOW_UNSUPPORTED)`（新增业务错误码；拒绝先于 Provider 构建），Runtime 落诚实失败并保留业务错误码（AppError error_code 不退化成类名）；(c) RecoveryManager：旧模式活动 Run 不进入自动恢复（保持原状，warning 记录人工处理清单）；(d) capabilities 只广告 `plan_execute_report`；(e) chat_service 冻结 role_models 含 brief/controller/reporter/verifier（T-406 遗留项落地）；(f) RESEARCH_ORCHESTRATION 收窄为单选 coreact_v1（staged 快照仍按戳记只读恢复）；(g) 前端 ChatPage 移除工作流选择器（唯一入口默认 plan_execute_report，历史 Run 只读展示）。迁移工具：`scripts/convert_legacy_checkpoints.py`（默认 dry-run 清单；--apply 对可映射 coreact 游标**追加**归一化 checkpoint 行——原行与原 hash 保留、不原地破坏；staged/deep_research/未来版本→待人工处理）。新增测试 15 项（API 归一化/默认/拒绝未知、capabilities 单入口、工厂显式拒绝+错误码审计、恢复排除 legacy 且原状、历史完成 Run 可读、旧单动作快照恢复适配、转换工具分类矩阵/dry-run 零写入/--apply 追加行、chat_service 角色戳记、OpenAPI 默认值一致）。前端 `npm run build` 通过。通用门禁：pytest 500 passed/4 skipped（485 基线 + 15）；ruff（变更文件）通过；git diff --check 干净；存量数据边界按更新后口径核对（inventory.md §5）。
+- 风险：任何破坏性数据操作必须另获批准；数据库历史 CHECK 不随意收窄。（本阶段零破坏性数据操作：--apply 仅追加行且默认 dry-run；4 个 manual_review Run 原状；无 CHECK 收窄。flaky 备注：tests/llm_gateway/test_gateway.py::test_slot_limiter_queues_then_times_out 为既有计时敏感测试，与本阶段无关，单跑通过。）
+
 
 ## T-408 — 删除旧专属模块与整流程外壳
 - 状态：pending
@@ -110,4 +111,4 @@
 
 ## 进度
 
-已完成 6（T-401..T-406）；进行中 0；阻塞 0；待执行 3。下一步：T-407（单一入口切换与历史兼容；含 chat_service 冻结快照的 brief/verifier 角色命名）。每阶段收尾须重跑 T-401 盘点脚本确认存量数据边界（口径见 inventory.md §5）。
+已完成 7（T-401..T-407）；进行中 0；阻塞 0；待执行 2。下一步：T-408（删除旧专属模块与整流程外壳）。每阶段收尾须重跑 T-401 盘点脚本确认存量数据边界（口径见 inventory.md §5）。

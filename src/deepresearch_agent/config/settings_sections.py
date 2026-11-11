@@ -409,11 +409,23 @@ REPORT_MAX_SECTIONS = _get_env_int("REPORT_MAX_SECTIONS", 6) or 6
 REPORT_MAX_MODEL_CALLS = _get_env_int("REPORT_MAX_MODEL_CALLS", 15) or 15
 REPORT_RESERVED_TOKENS = _get_env_int("REPORT_RESERVED_TOKENS", 60000) or 60000
 VERIFICATION_RESERVED_TOKENS = _get_env_int("VERIFICATION_RESERVED_TOKENS", 15000) or 15000
-# T-015：plan_execute_report 编排实现版本（coreact_v1=步级验证控制，staged_v1=整批）。
-# 写入 Run config_snapshot["orchestration"]；缺省 staged_v1 保证存量 Run 兼容。
+# T-015/T-407：plan_execute_report 编排实现版本——新写入唯一 coreact_v1
+#（staged_v1 选择已退役；存量 staged checkpoint 仍按其戳记只读恢复）。
+# 兼容：旧部署环境变量 RESEARCH_ORCHESTRATION=staged_v1 不再使导入崩溃，
+# 映射为 coreact_v1 并告警（docs/RUN-FLOWS.md 已同步说明）。
+import os as _os
+import warnings as _warnings
+
+if (_os.getenv("RESEARCH_ORCHESTRATION") or "").strip().lower() == "staged_v1":
+    _warnings.warn(
+        "RESEARCH_ORCHESTRATION=staged_v1 已退役（T-407）；按 coreact_v1 运行。",
+        DeprecationWarning,
+        stacklevel=1,
+    )
+    _os.environ["RESEARCH_ORCHESTRATION"] = "coreact_v1"
 RESEARCH_ORCHESTRATION = _get_env_choice(
     "RESEARCH_ORCHESTRATION",
-    {"coreact_v1", "staged_v1"},
+    {"coreact_v1"},
     "coreact_v1",
 )
 # coreact 步级循环的决策总上限（含初始决策与重试决策），超出即进入报告。

@@ -68,7 +68,8 @@ async def capabilities():
             "graphrag": {"available": graph, "reason": None if graph else graph_reason},
             "web": {"available": web, "reason": None if web else "TAVILY_API_KEY 未配置"},
         },
-        "workflows": ["deep_research", "plan_execute_report"],
+        # T-407：唯一生产入口（历史 Run 的 deep_research 标识仅作只读兼容）
+        "workflows": ["plan_execute_report"],
         "default_source_mode": "graphrag",
         "default_budget": settings.HARNESS_BUDGETS,
         "features": {"sse": True, "memory_management": True, "skill_management": True},

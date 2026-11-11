@@ -167,9 +167,11 @@ class ChatService:
             # T-016：角色→模型审计映射写入 model_snapshot（与 tier 同处、可审计）。
             # factory 执行时优先消费此处冻结的映射，保证跨进程/重启 recorded==actual。
             if request.workflow_mode.value == "plan_execute_report":
+                # T-406/T-407：冻结 brief/controller/reporter/verifier 实际身份
+                #（旧 planner key 经 canonical 映射兼容历史快照）。
                 model_snapshot["role_models"] = {
                     role: resolve_role_model(snapshot, role=role, settings=settings)
-                    for role in ("planner", "reporter", "controller")
+                    for role in ("brief", "controller", "reporter", "verifier")
                 }
             await self.runs.update_model_snapshot(run.run_id, model_snapshot)
             if session.title.strip() in {"新对话", "New conversation", "Untitled"}:

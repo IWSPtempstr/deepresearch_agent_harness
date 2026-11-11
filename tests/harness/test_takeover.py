@@ -44,7 +44,7 @@ async def _create_queued_run(database) -> str:
         MessageCreate(session_id=session.session_id, role="user", content="takeover", client_message_id=f"client-{session.session_id}"),
         RunCreate(
             session_id=session.session_id, trigger_message_id="atomic",
-            source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH,
+            source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT,
             config_snapshot={"min_evidence": 1}, budget=BudgetLimits(wall_time_seconds=120).model_dump(),
         ),
     )
