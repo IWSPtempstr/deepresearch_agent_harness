@@ -435,6 +435,16 @@ COREACT_MAX_PARALLEL = _get_env_int("COREACT_MAX_PARALLEL", 1) or 1
 # T-405：coreact 可选语义判定（默认关闭）。开启后动作级语义检查经预算门控
 # 执行，返回 pass/fail/unknown；不可用/非法输出记 unknown，不得按 pass。
 COREACT_SEMANTIC_ENABLED = _get_env_bool("COREACT_SEMANTIC_ENABLED", False)
+# RG-02/03：rubric 指导生成器（deterministic=不触模型；model=显式授权真实
+# 模型调用，仍受报告/验证预留预算门约束）。动作前建议门默认 off。
+COREACT_RUBRIC_GENERATOR = _get_env_choice(
+    "COREACT_RUBRIC_GENERATOR", {"deterministic", "model"}, "deterministic",
+)
+# RG-03：动作前建议门强度。off=不运行；advisory=建议性（fail 允许一次提案
+# 修订，unknown 记 degraded 继续）；required=fail/unknown 均不得派发。
+COREACT_PRE_ACTION_MODE = _get_env_choice(
+    "COREACT_PRE_ACTION_MODE", {"off", "advisory", "required"}, "off",
+)
 # T-408：MULTI_AGENT_WORKER_EXECUTION_MODE / MULTI_AGENT_WORKER_MAX_CONCURRENCY /
 # MA_REFLECTION_* 已随 staged 引擎删除（并发上限由 Harness 预算权威约束）。
 
@@ -461,6 +471,8 @@ __all__ = [
     "CONTEXT_RECENT_TURNS",
     "COREACT_MAX_DECISIONS_FLOOR",
     "COREACT_MAX_PARALLEL",
+    "COREACT_PRE_ACTION_MODE",
+    "COREACT_RUBRIC_GENERATOR",
     "COREACT_SEMANTIC_ENABLED",
     "DEFAULT_CACHE_ROOT",
     "DISAMBIG_NIL_THRESHOLD",

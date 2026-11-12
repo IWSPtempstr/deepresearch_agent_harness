@@ -88,11 +88,12 @@ rubric 生成、事前建议、修订和事后语义检查全部计入统一预�
 - 实际证据：上游固定为 ZBWpro/Co-ReAct `ff5540a6ba69090c7b41b81c7fa7f4b5b9627a3a`（2026-06-24，Apache-2.0，GitHub API 核实），流程时序经 co_react_eval.py 文件头/调用点与 rubric_generator.py phase 提示核对并写入 output-contract §4.1（未复制任何上游代码/模板）；ActionRubric 新增 content_hash/source/phase/generator_model/prompt_version/trajectory_ref/hash/pre_action/fallback_reason/phase_rule_version，GuidanceCriterion 结构化 schema（check_kind 别名兼容旧 kind）；v1 宽松只读兼容（空 ID/空白/高权重/多判词/全员 optional 原样保留）+ v2 严格不变量（空白拒绝/权重≤10/判词≤8/至少一条 required/权重和>0/嵌套冻结 tuple 不可变）；ActionVerdict 增 rubric_id/hash/criteria/usage/degraded_reason，ActionResult.pre_action_verification 缺省 not_run（旧记录不改写）；PreActionVerification/RubricInjectionRecord 形状冻结（messages_hash hex 16-128、注入列表≤32）；pre_action_blocks 协议助手（required+fail/unknown 阻止，advisory/off 不阻止）。`tests/harness/test_rubric_protocol.py` 27 项：roundtrip、非法权重/空条件、v1/v2 分界、旧记录 not_run、required unknown roundtrip、注入 hex/边界、不可变性。独立 review 三轮（发现：上游 provenance 缺失、v1 语义改写、frozen 不传递、空白/长度共享约束、注入格式）全部修复，终审 APPROVE。门禁：pytest 556 passed/4 skipped（含后续阶段）、ruff、git diff --check。
 
 ### RG-02 — RubricBuilder 与 phase
-- 状态：pending
+- 状态：done（2026-11-12）
 - 依赖：RG-01
 - 触点：拟新增 harness/rubric_builder.py；模型工厂、预算计量。
 - 动作：有界轨迹/观察输入、phase、3～5条准则、模型生成/固定/确定性回退及来源审计。
 - 验收：相同 query 不同轨迹/phase 的 scripted 输出，非法响应/超时回退，预算不足零额外调用，真实模型调用仅在获授权后。
+- 实际证据：`harness/rubric_builder.py`（PHASE_RULE_VERSION=phase_rule_v1 持久化到 rubric.phase_rule_version；phase 规则 = 剩余预算比 <0.20 或工具比 ≥0.80 → synthesize，无账本证据或未解决问题 ≥2 → explore，否则 deepen——不按固定步数判定；确定性生成与 build_task_rubric 同构（evidence/source/output/claim/nodup 权重一致）+ 固定硬门 origin=fixed 合并（模型文本整体替换，不冒充 fixed）；模型路径：bind(max_tokens=generation_allocation_tokens) 可强制下发——不支持/失败 → **零调用**回退（model_no_generation_cap），响应侧超配额拒绝（generation_over_allocation），真实 deadline（ThreadPoolExecutor+future.result(timeout)）；准入 = 报告/验证预留 + CJK 感知 prompt 估算（count_tokens）+ 生成配额；失败尝试计入 usage（calls≥1、estimated、response_known 区分超时/已知响应）；claim_support 判词缺失 → 从验收条件抽取，仍无 → 回退；计数门（merge 后裁剪至 max、受控填充至 min，config 校验 min≥3/max≤5/max≥min）。`tests/harness/test_rubric_builder.py` 44 项覆盖全部验收点。独立 review 两轮（round1：超时未强制/预留未保护/失败零成本/装配越界/判词丢失/计数门/尾部截断/规则版本/混合来源/ID 碰撞；round2：配额不可强制、min5 回退抛错、已知响应成本、header 超预算、CJK 低估）全部修复，终审 APPROVE（2 项 minor 随 RG-03 落地：source_mode clip、CJK est）。门禁：ruff 通过；pytest 567 passed/4 skipped。
 
 ### RG-03 — 注入消费与事前建议门
 - 状态：pending

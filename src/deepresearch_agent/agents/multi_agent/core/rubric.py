@@ -209,3 +209,8 @@ def _terms_from_conditions(conditions: List[str]) -> List[str]:
             else:
                 _push(run)
     return terms[:8]
+
+
+def terms_from_conditions(conditions: List[str]) -> List[str]:
+    """公开入口：从完成条件抽取可判定词项（确定性代理，供 RubricBuilder 复用）。"""
+    return _terms_from_conditions(conditions)
