@@ -63,3 +63,10 @@
 ## 8. 与既有规范关系
 
 T-015/T-016 保持历史交付记录，不重写其当时的兼容决策。本规范在实施通过后，替代其“保留 F1/staged、完整预规划、共享状态 coreact 并行”等目标架构描述；在此之前，当前代码仍以 T-015/T-016 为事实。冲突以本规范明确标注的**未来目标**为准，不把目标当现状。
+
+
+## 后续扩展：Prompt-only Rubric 与业务余项
+
+详见 [rubric-guidance-followup.md](rubric-guidance-followup.md)。该文档是本规范的拟议兼容增量，记录 RG-01～RG-04 和 BC-01～BC-05（全部 pending），不重置 T-401～T-409 的历史完成状态。
+
+区分动作前指导/建议性验证与动作后验收；advisory unknown 允许显式降级，required unknown 仍不得通过。RACE 风格质量维度不是官方 DRB 分数；不承诺复现论文增益。本次仅写文档，尚未实现这些后续项。

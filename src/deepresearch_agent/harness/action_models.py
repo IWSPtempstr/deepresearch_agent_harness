@@ -21,9 +21,12 @@ research_brief.py）。旧 LoopState 的升级适配是**只读**的：映射不
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, Literal
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -39,9 +42,44 @@ from .research_brief import (
 )
 
 ACTION_MODELS_SCHEMA_VERSION = 1
+# RG-01：rubric 指导协议版本。v1 = 旧 TaskRubric 适配记录（宽松只读兼容），
+# v2 = 新写入（严格不变量：权重上限/必需准则/权重和），旧记录仍可按 v1 读取。
+RUBRIC_SCHEMA_VERSION = 2
 
 EXECUTION_STATUS = Literal["succeeded", "failed", "cancelled", "unknown"]
 VERIFICATION_STATUS = Literal["passed", "failed", "unknown", "not_run"]
+
+# RG-01（rubric-guidance-followup §4.4）：rubric 指导协议的冻结枚举。
+# source 记录准则来源（受控固定配置 / 模型生成 / 确定性回退），用于审计；
+# phase 为 RubricBuilder 的确定性阶段提示；pre_action 区分动作前建议门的
+# 强制级别（off=不运行，advisory=建议性，required=违反即不得派发）。
+RUBRIC_SOURCE = Literal["model", "deterministic_fallback", "fixed"]
+RUBRIC_PHASE = Literal["explore", "deepen", "synthesize"]
+PRE_ACTION_MODE = Literal["off", "advisory", "required"]
+PRE_ACTION_STATUS = Literal["pass", "fail", "unknown", "not_run"]
+CHECK_KIND = Literal[
+    "evidence_presence", "source_policy", "output_schema",
+    "claim_support", "no_duplicate_query",
+]
+
+
+def pre_action_blocks(mode: str, status: str) -> bool:
+    """protocol helper：required 模式下 fail/unknown 必须阻止派发（RG-03 落实）。
+
+    advisory/off 模式不阻止（advisory unknown 只记录 degraded，不是验证通过）。
+    """
+    return str(mode) == "required" and str(status) in {"fail", "unknown"}
+
+
+def text_sha256(text: str) -> str:
+    """稳定内容哈希（canonical UTF-8；注入记录与 rubric 指纹共用）。"""
+    return hashlib.sha256(str(text or "").encode("utf-8")).hexdigest()
+
+
+def canonical_sha256(payload: Any) -> str:
+    """对 JSON 可序列化 payload 的确定性哈希（sort_keys + 紧凑分隔符）。"""
+    rendered = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
 
 class ActionSpec(BaseModel):
@@ -80,38 +118,158 @@ class ActionSpec(BaseModel):
         return ActionSpec.model_validate(payload)
 
 
+class GuidanceCriterion(BaseModel):
+    """单条原子准则（RG-01 结构化 schema）。
+
+    - check_kind 与 CoreActVerifier 的确定性检查种类对齐（kind 为旧 TaskRubric
+      字段名的兼容别名）；
+    - weight 有限非负、required 至少一条（硬门不得被清空）；
+    - min_evidence/required_terms 是确定性检查参数（旧 TaskRubric dump 兼容）。
+    网页/模型输出只能补充研究质量标准，不能借此删除 SourcePolicy/预算等硬门
+    （由 RubricBuilder 的固定准则合并与 required 校验保证）。
+    """
+
+    # frozen：准则内容是 content_hash 的一部分——冻结保证嵌套内容在哈希计算后
+    # 不可变（RG-01 review：外层 frozen 不传递，必须嵌套一并冻结）。
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, frozen=True)
+
+    # 注意：不在字段层做长度/strip 约束——历史 v1 记录必须原样保留（空串、
+    # 空白、带空格的 ID/描述均不得被改写或拒绝）；v2 新写入的空白校验在
+    # ActionRubric 版本分支执行（min_length 等共享约束同样移除）。
+    criterion_id: str = ""
+    description: str = ""
+    weight: float = Field(default=1.0, ge=0.0, allow_inf_nan=False)
+    required: bool = True
+    check_kind: CHECK_KIND = Field(validation_alias=AliasChoices("check_kind", "kind"))
+    expected_evidence: str = ""
+    min_evidence: int = Field(default=0, ge=0)
+    required_terms: tuple[str, ...] = Field(default_factory=tuple)
+    # 单条准则来源（混合 rubric 审计：模型补充 + 受控固定硬门）
+    origin: RUBRIC_SOURCE | None = None
+
+
 class ActionRubric(BaseModel):
-    """动作验收 rubric（冻结接口；由 TaskRubric/确定性生成器适配）。
+    """动作验收 rubric（冻结接口；由 TaskRubric/确定性生成器/RubricBuilder 适配）。
 
     objective/expected_output/evidence_requirements 进入模型执行上下文；
     语义检查是可选判断类型（verifier_kind），不可用/非法输出记 unknown，
     不得以关键词覆盖冒充语义支持（T-405 落实）。
+
+    RG-01 增量（output-contract §4.1）：content_hash 为准则内容的稳定指纹
+    （不含 task_id 绑定），动作前建议与动作后验收必须携带同一 hash；
+    source/phase/generator_model/prompt_version/trajectory_ref/hash 为来源审计
+    字段；fallback_reason 记录模型生成失败回退确定性生成的原因。
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: int = Field(default=ACTION_MODELS_SCHEMA_VERSION, ge=1)
+    schema_version: int = Field(default=RUBRIC_SCHEMA_VERSION, ge=1)
     rubric_id: str
-    task_id: str
+    task_id: str = ""
     version: int = 1
     objective: str = ""
     expected_output: str = ""
-    evidence_requirements: list[str] = Field(default_factory=list)
-    criteria: list[dict[str, Any]] = Field(min_length=1)
+    # 哈希内容不可变（transitively frozen）：冻结字段 + tuple 序列，嵌套内容
+    # 在 content_hash 计算后无法原地修改（RG-01 review finding 1）
+    evidence_requirements: tuple[str, ...] = Field(default_factory=tuple)
+    criteria: tuple[GuidanceCriterion, ...] = Field(min_length=1)
     threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     max_retries: int = Field(default=1, ge=0, le=1)
     verifier_kind: Literal["deterministic", "semantic_optional", "semantic_required"] = "deterministic"
     generator: str = "deterministic_v1"
+    # RG-01：指导协议增量（均有默认值，旧记录/旧 payload 兼容）
+    content_hash: str = ""
+    source: RUBRIC_SOURCE = "deterministic_fallback"
+    phase: RUBRIC_PHASE | None = None
+    generator_model: str | None = None
+    prompt_version: str | None = None
+    trajectory_ref: str | None = None
+    trajectory_hash: str | None = None
+    pre_action: PRE_ACTION_MODE = "off"
+    fallback_reason: str | None = None
+    # RG-02：phase 规则版本持久化（§4.1 审计字段；旧记录为 None）
+    phase_rule_version: str | None = None
 
     @field_validator("schema_version")
     @classmethod
     def _check_schema_version(cls, value: int) -> int:
-        _reject_unknown_version("action_rubric", value, ACTION_MODELS_SCHEMA_VERSION)
+        _reject_unknown_version("action_rubric", value, RUBRIC_SCHEMA_VERSION)
         return value
+
+    def _hash_payload(self) -> dict[str, Any]:
+        """参与 content_hash 的稳定内容（排除绑定与审计字段）。"""
+        return {
+            "rubric_id": self.rubric_id,
+            "version": self.version,
+            "objective": self.objective,
+            "expected_output": self.expected_output,
+            "evidence_requirements": list(self.evidence_requirements),
+            "criteria": [criterion.model_dump(mode="json") for criterion in self.criteria],
+            "threshold": self.threshold,
+            "verifier_kind": self.verifier_kind,
+            "phase": self.phase,
+            "source": self.source,
+            "pre_action": self.pre_action,
+        }
+
+    def compute_content_hash(self) -> str:
+        """准则内容指纹：动作前/后同 rubric 必须相同（不含 task_id 绑定）。"""
+        return canonical_sha256(self._hash_payload())
+
+    def bind(self, *, task_id: str, rubric_id: str | None = None) -> "ActionRubric":
+        """把 step 级 rubric 绑定到具体动作：只改绑定字段，content_hash 不变。"""
+        payload = self.model_dump(mode="json")
+        payload["task_id"] = task_id
+        if rubric_id:
+            # 绑定不得改变准则内容；rubric_id 变更需显式重建而非绑定
+            raise ValueError("bind() 不允许改写 rubric_id（同一准则身份必须稳定）")
+        return ActionRubric.model_validate(payload)
+
+    @model_validator(mode="after")
+    def _finalize_content_hash(self) -> "ActionRubric":
+        # v2（新写入）严格不变量；v1（旧 TaskRubric 适配/历史快照）只读兼容：
+        # 历史 rubric 可能有权重 >10、超过 8 个判词或全员 optional——这些记录
+        # 仍须可恢复（不因新约束被拒绝），严格性由 RubricBuilder/新写入保证。
+        if self.schema_version >= 2:
+            total_weight = sum(criterion.weight for criterion in self.criteria)
+            if total_weight <= 0:
+                raise ValueError("criteria 权重之和必须大于 0（空评测条件不得通过）")
+            if not any(criterion.required for criterion in self.criteria):
+                raise ValueError("至少一条准则必须 required（SourcePolicy/完成硬门不得被清空）")
+            for criterion in self.criteria:
+                # v2 新写入：空白归一化校验（v1 历史记录原样保留，不在此改写）
+                if not str(criterion.criterion_id).strip() or not str(criterion.description).strip():
+                    raise ValueError("criterion_id/description 不得为空白")
+                if any(not str(term).strip() for term in criterion.required_terms):
+                    raise ValueError("required_terms 不得包含空白词项")
+                if criterion.weight > 10.0:
+                    raise ValueError(f"criterion {criterion.criterion_id!r} 权重超过 10")
+                if len(criterion.required_terms) > 8:
+                    raise ValueError(f"criterion {criterion.criterion_id!r} 判词超过 8 条")
+        computed = self.compute_content_hash()
+        if self.content_hash and self.content_hash != computed:
+            raise ValueError(
+                f"content_hash 与 rubric 内容不一致（声明 {self.content_hash[:12]}…，"
+                f"实算 {computed[:12]}…）"
+            )
+        if not self.content_hash:
+            object.__setattr__(self, "content_hash", computed)
+        return self
+
+
+class ActionCriterionVerdict(BaseModel):
+    """单条准则的判定（动作前建议与动作后验收共用形状）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    criterion_id: str
+    status: Literal["pass", "fail", "unknown", "not_run"] = "not_run"
+    reason: str = ""
+    evidence_ids: list[str] = Field(default_factory=list)
 
 
 class ActionVerdict(BaseModel):
-    """动作验证结论（独立于执行状态）。"""
+    """动作验收结论（独立于执行状态；RG-01 增补 rubric 关联与逐条判定）。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -120,6 +278,61 @@ class ActionVerdict(BaseModel):
     failed_criteria: list[str] = Field(default_factory=list)
     retry_reason: str | None = None
     weighted_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    # RG-01：动作前后必须可核对同一 rubric 身份
+    rubric_id: str = ""
+    rubric_hash: str = ""
+    criteria: list[ActionCriterionVerdict] = Field(default_factory=list)
+    usage: dict[str, Any] = Field(default_factory=dict)
+    degraded_reason: str | None = None
+
+
+class PreActionVerification(BaseModel):
+    """动作前建议门判定（RG-03 使用；RG-01 只冻结形状）。
+
+    status：pass=全部已判定准则通过；fail=存在失败准则；unknown=无失败但存在
+    无法事前判定的准则（或建议器不可用）；not_run=未运行（默认/旧记录）。
+    degraded=true 表示建议性降级继续（不是验证通过）；required 模式下
+    fail/unknown 均不得派发。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int = Field(default=ACTION_MODELS_SCHEMA_VERSION, ge=1)
+    status: PRE_ACTION_STATUS = "not_run"
+    rubric_id: str = ""
+    rubric_hash: str = ""
+    verifier: str = ""
+    verifier_version: str = ""
+    criteria: list[ActionCriterionVerdict] = Field(default_factory=list)
+    advice: list[str] = Field(default_factory=list)
+    degraded: bool = False
+    degraded_reason: str | None = None
+    usage: dict[str, Any] = Field(default_factory=dict)
+    proposal_revision_used: bool = False
+
+    @field_validator("schema_version")
+    @classmethod
+    def _check_schema_version(cls, value: int) -> int:
+        _reject_unknown_version("pre_action_verification", value, ACTION_MODELS_SCHEMA_VERSION)
+        return value
+
+
+class RubricInjectionRecord(BaseModel):
+    """Rubric 注入证据（§4.4：不能只写 injected=true）。
+
+    记录实际注入目标的 messages 哈希/引用，用于证明注入生效而非声明式标记。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    injection_id: str = Field(min_length=1)
+    rubric_id: str = Field(min_length=1)
+    rubric_hash: str = Field(min_length=1)
+    action_id: str = ""
+    targets: list[Literal["controller", "worker"]] = Field(min_length=1)
+    messages_hash: str = Field(pattern=r"^[0-9a-f]{16,128}$")
+    messages_ref: str | None = None
+    step_index: int = Field(default=0, ge=0)
 
 
 class ObservationFinding(BaseModel):
@@ -210,7 +423,10 @@ class ActionResult(BaseModel):
     attempt_id: str
     attempt: int = Field(default=1, ge=1)
     execution_status: EXECUTION_STATUS = "unknown"
+    # 动作后验收（既有字段；RG-01 起携带 rubric_id/hash 与逐条判定）
     verification: ActionVerdict = Field(default_factory=ActionVerdict)
+    # 动作前建议（RG-01 冻结；缺省 not_run，旧记录缺该字段即解释为未运行）
+    pre_action_verification: PreActionVerification = Field(default_factory=PreActionVerification)
     evidence_refs: list[str] = Field(default_factory=list)
     observation: ObservationSummary | None = None
     record_refs: list[str] = Field(default_factory=list)
@@ -261,6 +477,15 @@ class ExecutionState(BaseModel):
     active_result_refs: dict[str, str] = Field(default_factory=dict)
     observations: list[ObservationSummary] = Field(default_factory=list)
     assessments: list[EvidenceAssessment] = Field(default_factory=list)
+    # RG-01：rubric 注入证据（有界；每步最多一条 controller + 每条动作 worker）
+    rubric_injections: list[RubricInjectionRecord] = Field(default_factory=list)
+
+    @field_validator("rubric_injections")
+    @classmethod
+    def _bounded_injections(cls, value: list[RubricInjectionRecord]) -> list[RubricInjectionRecord]:
+        if len(value) > 32:
+            raise ValueError("rubric_injections 超过硬上限 32 条")
+        return value
     # 只读升级适配时无法映射的旧字段清单（audit-only；不参与新路径执行）
     unmapped: dict[str, Any] = Field(default_factory=dict)
 
@@ -440,6 +665,8 @@ def action_rubric_from_task_rubric(rubric: Any, *, objective: str = "") -> Actio
     if not isinstance(rubric, TaskRubric):
         rubric = TaskRubric.model_validate(rubric)
     return ActionRubric(
+        # 旧 TaskRubric 适配属于只读兼容路径：按 v1 宽松校验（不因新约束拒绝历史）
+        schema_version=1,
         rubric_id=rubric.rubric_id,
         task_id=rubric.task_id,
         version=rubric.version,

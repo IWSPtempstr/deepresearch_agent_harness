@@ -98,3 +98,10 @@ Harness：状态机 / Lease / Checkpoint / Ledger / Artifact / final Contract
 正确性测试优先，无需性能/质量比较实验。覆盖：真实工厂入口、隔离/稳定合并、非空观察影响下一动作、rubric 不外发、required semantic unknown、批次 intent 崩溃/重试恢复、lease/pause/cancel、报告修复与最终合同、旧已完成 Run 可读、旧活动快照转换或安全拒绝。沿用本项目 pytest/前端构建与 CI。
 
 不采用一次性删旧数据库/无版本替换、全量工具输出塞入 prompt、额外自由对话 Reflector、移植外部 Agent Runtime、纯行数 Mixin 分割。保留现有报告上下文压缩与 GraphRAG，避免破坏已独立验证的能力。
+
+
+## 后续扩展：Prompt-only Rubric 与业务余项
+
+详见 [rubric-guidance-followup.md](rubric-guidance-followup.md)。该文档是本规范的拟议兼容增量，记录 RG-01～RG-04 和 BC-01～BC-05（全部 pending），不重置 T-401～T-409 的历史完成状态。
+
+区分动作前指导/建议性验证与动作后验收；advisory unknown 允许显式降级，required unknown 仍不得通过。RACE 风格质量维度不是官方 DRB 分数；不承诺复现论文增益。本次仅写文档，尚未实现这些后续项。

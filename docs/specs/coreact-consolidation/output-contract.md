@@ -153,3 +153,65 @@ ResearchRunResult 可附 revision metadata（base_run_id、base_artifact_id/hash
 4. ActionResult execution/verification 可独立失败；保留失败 attempt 与实际费用。
 5. ObservationSummary 与 rubric 不外发为 Provider 参数，不泄露私域权限/内部提示。
 6. 修订结果能通过新 Run ledger 检查，且来源继承链可审计。
+
+
+## 后续扩展：Prompt-only Rubric 与业务余项
+
+详见 [rubric-guidance-followup.md](rubric-guidance-followup.md)。该文档是本规范的拟议兼容增量，记录 RG-01～RG-04 和 BC-01～BC-05（全部 pending），不重置 T-401～T-409 的历史完成状态。
+
+区分动作前指导/建议性验证与动作后验收；advisory unknown 允许显式降级，required unknown 仍不得通过。RACE 风格质量维度不是官方 DRB 分数；不承诺复现论文增益。本次仅写文档，尚未实现这些后续项。
+
+## 4.1 Rubric 指导协议（RG-01 增量，兼容旧记录）
+
+动作前指导与动作后验收共用同一 rubric 身份（`rubric_id` + `content_hash`），
+但判定独立保存、不得混同。字段定义见 `harness/action_models.py`：
+
+| 类型 | 字段 | 语义 |
+|---|---|---|
+| ActionRubric | `content_hash` | 准则内容稳定指纹（不含 task 绑定）；前后判定须一致 |
+| ActionRubric | `source` | `model` / `deterministic_fallback` / `fixed`（受控配置），用于来源审计 |
+| ActionRubric | `phase` | `explore` / `deepen` / `synthesize`（确定性规则产生，版本随 rubric 固定） |
+| ActionRubric | `generator_model` / `prompt_version` / `trajectory_ref` / `trajectory_hash` | 生成来源审计（可空） |
+| ActionRubric | `phase_rule_version` | phase 规则版本（RG-02 持久化；审计字段，不入 content_hash） |
+| ActionRubric | `pre_action` | `off` / `advisory` / `required`：动作前建议门强制级别 |
+| ActionRubric | `fallback_reason` | 模型生成失败/非法/超预算时回退确定性生成的原因 |
+| GuidanceCriterion | `check_kind` / `weight` / `required` / `expected_evidence` / `min_evidence` / `required_terms` | 原子准则；权重有限非负、至少一条必需、权重和 > 0 |
+
+- `ActionVerdict`（动作后）与 `PreActionVerification`（动作前）均记录
+  `rubric_id` / `rubric_hash` / verifier 版本 / status / 逐条准则判定 / usage；
+  动作前另有 `advice`、`degraded` / `degraded_reason`、`proposal_revision_used`。
+- `ActionResult.pre_action_verification` 缺省 `not_run`：旧记录缺该字段即解释为
+  “未运行”，不回溯改写历史判定。
+- `RubricInjectionRecord` 记录注入目标、实际 messages 哈希（≥16 hex）与可选引用；
+  不允许只用 `injected=true` 声明注入生效。
+- `ExecutionState.rubric_injections` 为有界注入证据列表（持久化，供恢复/审计）。
+- **版本化读取**：`schema_version=1`（历史 TaskRubric 适配记录）按宽松语义只读
+  兼容（权重 >10、判词 >8、全员 optional、空 ID/描述、带空白的原文均原样保留，
+  不 strip、不改写身份）；`schema_version=2`（新写入）才执行严格不变量（空白
+  拒绝、权重 ≤10、判词 ≤8、至少一条 required、权重和 > 0、嵌套内容冻结且
+  tuple 不可变，content_hash 覆盖全部判定语义字段）。
+- `source=fixed` 的准则来自受控配置（SourcePolicy/预算/完成硬门），模型输出只能
+  补充研究质量标准，不能删除或降级这些硬门；`required` 的 unknown/fail 在
+  required 模式下不得放行（RG-03 落实）。
+
+### 来源固定、许可与流程时序（RG-01 核对）
+
+- 上游参考固定为 Co-ReAct 仓库 `ZBWpro/Co-ReAct` **commit
+  `ff5540a6ba69090c7b41b81c7fa7f4b5b9627a3a`**（committer date 2026-06-24），
+  许可证 **Apache-2.0**（`LICENSE`）。本仓库**未复制其代码、提示词模板或 YAML**，
+  仅借鉴机制思想，因此不附带上游 LICENSE/NOTICE 副本；若未来复制任何上游
+  代码/模板，必须重新固定 commit 并按 Apache-2.0 保留 LICENSE/NOTICE 与声明。
+- 上游流程时序在该 commit 的 `agent/workflows/co_react_eval.py` 文件头
+  （第 4–9 行）与调用点（`rubric_gen.generate` 328/417 → `verifier.verify`
+  366/453）核对：每步先按轨迹生成 3–5 条加权准则，注入 agent 提示词，
+  再生成动作，再对该动作做事前验证，失败反馈后重试一次。上游 phase 提示按
+  工具调用次数划分（`agent/dr_agent/rubric_generator.py` 第 322–334 行）。
+- 本项目保留的关键差异（如实）：动作前建议门是可选项（`pre_action`
+  off/advisory/required，默认 off）；phase 规则使用剩余预算/未解决问题/工具
+  比例（`phase_rule_v1`），不复制上游的纯调用次数阈值；事后验收是本项目既有
+  工程层，不宣称与上游逐步一致。
+- 论文结果（如 prompt-only 变体在特定基准上的提升）不构成本项目收益承诺；
+  本项目不做效果复现或 A/B 对比。
+- 旧 rubric 记录按 `schema_version=1` 宽松只读兼容（历史上可能存在权重 >10、
+  判词 >8 或全员 optional 的记录）；新写入 `schema_version=2` 才强制严格
+  不变量（权重上限、必需准则、权重和 > 0）。

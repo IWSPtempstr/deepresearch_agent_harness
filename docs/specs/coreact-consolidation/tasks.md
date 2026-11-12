@@ -121,3 +121,10 @@
 ## 进度
 
 已完成 9（T-401..T-409 全部）；进行中 0；阻塞 0；待执行 0。T-017 实施完成：唯一 coreact 生产路径（最终验收矩阵见 acceptance.md §2；已知限制与回滚交接见 §4）。
+
+
+## 后续扩展：Prompt-only Rubric 与业务余项
+
+详见 [rubric-guidance-followup.md](rubric-guidance-followup.md)。该文档是本规范的拟议兼容增量，记录 RG-01～RG-04 和 BC-01～BC-05（全部 pending），不重置 T-401～T-409 的历史完成状态。
+
+区分动作前指导/建议性验证与动作后验收；advisory unknown 允许显式降级，required unknown 仍不得通过。RACE 风格质量维度不是官方 DRB 分数；不承诺复现论文增益。本次仅写文档，尚未实现这些后续项。
