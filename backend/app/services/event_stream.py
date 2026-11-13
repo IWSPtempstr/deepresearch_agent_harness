@@ -35,9 +35,27 @@ class EventStreamService:
         payload.update({key: event.get(key) for key in ("event_id", "run_id", "event_type", "stage", "created_at")})
         return {"id": str(event.get("event_id")), "event": str(event.get("event_type")), "data": json.dumps(payload, ensure_ascii=False)}
 
+    async def _replay(self, run_id: str, cursor: int, *, page_size: int = 500) -> AsyncIterator:
+        """按游标翻页直到数据库无更多事件（list_after 单次上限 1000）。
+
+        BC-03：终态 Run 可能积累 >1000 事件；只读一页会让断线重连/首次加载
+        静默丢事件。翻页以 event_id 严格递增，天然去重。
+        """
+        while True:
+            batch = await self.events.list_after(
+                run_id, after_event_id=cursor, limit=page_size,
+            )
+            if not batch:
+                return
+            for event in batch:
+                cursor = event.event_id
+                yield event
+            if len(batch) < page_size:
+                return
+
     async def stream(self, run_id: str, *, after_event_id: int = 0) -> AsyncIterator[dict[str, str]]:
         cursor = max(0, after_event_id)
-        for event in await self.events.list_after(run_id, after_event_id=cursor):
+        async for event in self._replay(run_id, cursor):
             cursor = event.event_id
             yield self.serialize(event)
         run = await self.runs.get(run_id)
@@ -68,22 +86,37 @@ class EventStreamService:
 
         pump_task = asyncio.create_task(pump())
         try:
-            for event in await self.events.list_after(run_id, after_event_id=cursor):
+            async for event in self._replay(run_id, cursor):
                 cursor = event.event_id
                 yield self.serialize(event)
+            # 终态状态可能先于终态事件落库（_transition 先写状态、再 PUBLISH）。
+            # 心跳看到终态但本轮补读为空时，再等一个心跳周期，避免在两次提交
+            # 之间关闭流而丢掉终态事件。
+            terminal_empty = 0
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=self.heartbeat_seconds)
                 except asyncio.TimeoutError:
                     yield {"event": "heartbeat", "data": json.dumps({"run_id": run_id, "after_event_id": cursor})}
                     # 评审遗留修复：Redis 扇出是 at-most-once，终态事件可能丢失——
-                    # 心跳周期顺带查库，终态则做最后一次 DB 补读后结束，流不再悬挂
+                    # 心跳周期顺带查库，终态则做最后一次 DB 补读后结束，流不再悬挂。
+                    # BC-03：补读必须翻页（终态 Run 可能积压 >1000 条事件）。
+                    drained = 0
+                    async for event in self._replay(run_id, cursor):
+                        drained += 1
+                        cursor = event.event_id
+                        yield self.serialize(event)
                     refreshed = await self.runs.get(run_id)
-                    if refreshed is None or refreshed.status in TERMINAL_STATUSES:
-                        for event in await self.events.list_after(run_id, after_event_id=cursor):
-                            cursor = event.event_id
-                            yield self.serialize(event)
+                    if refreshed is None:
                         return
+                    if refreshed.status in TERMINAL_STATUSES:
+                        if drained:
+                            return
+                        terminal_empty += 1
+                        if terminal_empty >= 2:
+                            return
+                        continue
+                    terminal_empty = 0
                     continue
                 if int(event.get("event_id") or 0) <= cursor:
                     continue
@@ -108,12 +141,13 @@ class EventStreamService:
 
         unsubscribe = self.event_bus.subscribe(run_id, on_event)
         try:
-            for event in await self.events.list_after(run_id, after_event_id=cursor):
+            async for event in self._replay(run_id, cursor):
                 cursor = event.event_id
                 yield self.serialize(event)
+            terminal_empty = 0
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=20)
+                    event = await asyncio.wait_for(queue.get(), timeout=self.heartbeat_seconds)
                     if event.event_id <= cursor:
                         continue
                     cursor = event.event_id
@@ -123,5 +157,24 @@ class EventStreamService:
                         return
                 except asyncio.TimeoutError:
                     yield {"event": "heartbeat", "data": json.dumps({"run_id": run_id, "after_event_id": cursor})}
+                    # BC-03：无 fanout 时实时通知只在本进程内有效（重启/丢通知
+                    # 会静默漏事件）。心跳周期用数据库补齐并正常结束终态流。
+                    drained = 0
+                    async for event in self._replay(run_id, cursor):
+                        drained += 1
+                        cursor = event.event_id
+                        yield self.serialize(event)
+                    refreshed = await self.runs.get(run_id)
+                    if refreshed is None:
+                        return
+                    if refreshed.status in TERMINAL_STATUSES:
+                        if drained:
+                            return
+                        # 状态先于终态事件落库：再等一个心跳周期，避免提前关闭
+                        terminal_empty += 1
+                        if terminal_empty >= 2:
+                            return
+                        continue
+                    terminal_empty = 0
         finally:
             unsubscribe()

@@ -117,7 +117,7 @@ rubric 生成、事前建议、修订和事后语义检查全部计入统一预�
 |---|---|---|---|
 | BC-01 | done（2026-11-13） | clarifications 写 config_snapshot 后没有消费端；brief_builder/context builder/ClarificationCard | 实际问题展示→答案进会话与规划→继续研究，不重复澄清；幂等提交 |
 | BC-02 | done（2026-11-13） | run_service.pause 在队列API本地无 task 时直接 finalize_pause | API仅请求、远端worker确认；分离实例测试；取消优先且中断可恢复 |
-| BC-03 | pending | event_stream.list_after 无全量翻页；提交去重翻页不等于 SSE 翻页 | terminal >1100事件完整重放，游标重连，无fanout数据库心跳补齐 |
+| BC-03 | done（2026-11-13） | event_stream.list_after 无全量翻页；提交去重翻页不等于 SSE 翻页 | terminal >1100事件完整重放，游标重连，无fanout数据库心跳补齐 |
 | BC-04 | pending | artifact_edit 章节保留已做，旧引用继承/映射未做 | 显式修订目标、旧证据合法归入新Run、citation mapping/provenance、Contract通过、越权/hash变更拒绝 |
 | BC-05 | pending | 历史/活动Run UI分离、来源可用性、错误/下载与会话分页交付链需专项验收 | 再盘点当前UI/API，未验证不宣称缺失全部已确诊；真实用户链路浏览器验收 |
 
@@ -133,6 +133,18 @@ BriefBuilder 将问答对并入 `PlanContext.clarification_history` 且已有回
 ClarificationCard 展示实际问题。`tests/harness/test_clarifications.py` 8 项 +
 API/context/runtime 用例；独立 review 1 轮（APPROVE，3 项 LOW：无唯一约束的并发
 重复、落库失败日志、测试覆盖）已补测试与日志。门禁：pytest 613 passed/4 skipped。
+
+BC-03 实际证据（2026-11-13）：`EventStreamService._replay` 以 `event_id` 游标
+分页（每页 500，短页/空页终止）直到数据库耗尽；首次重放、fanout 订阅后的补读、
+fanout 心跳补读、无 fanout 进程内心跳补读全部走同一翻页实现。无 fanout 路径不再
+只发心跳：每个心跳周期查库补齐（覆盖进程重启/丢失的进程内通知），终态时完整补读
+后结束流。终态状态可能先于终态事件落库（状态更新与事件 PUBLISH 分两步），心跳
+看到终态但本轮补读为空时再等一个心跳周期（最多 2 次）才关闭，避免丢终态事件。
+`tests/api/test_sse_fanout.py` 新增 4 项：1105 条 progress + 终态共 1107 条事件的
+连续完整重放（真实触发 3 页）、游标 50 重连跨页（51..602 无重复）、无 fanout 心跳
+补齐 600 条错过事件并结束、状态先于终态事件落库时延迟关闭。独立 review 1 轮
+APPROVE（2 项 LOW：游标用例命名夸大、状态先于事件的对称用例——均已补测）。
+门禁：pytest 628 passed/4 skipped。
 
 BC-01～05 依赖已完成的 T-017 执行底座，互相可独立修复；BC-04 必须先冻结修订输出协议，BC-05 在相关后端行为确定后收尾。不存在授权清库、取消历史任务或访问付费服务的隐含许可。
 

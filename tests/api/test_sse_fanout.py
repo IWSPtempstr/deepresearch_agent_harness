@@ -154,6 +154,118 @@ async def test_stream_ends_after_heartbeat_when_terminal_event_lost(database):
     assert kinds[-1] == "run.failed", "流必须在终态事件后自然结束"
 
 
+async def test_terminal_run_replays_all_events_across_pages(database):
+    """BC-03：终态 Run 积压 >1100 条事件时，首次重放必须翻页补齐。"""
+    from backend.app.schemas import RunEventCreate
+
+    run = await _create_active_run(database)
+    repo = EventRepository(database)
+    for index in range(1105):
+        await repo.append(RunEventCreate(
+            run_id=run.run_id, event_type="run.progress", stage="executing", payload={"index": index},
+        ))
+    await repo.append(RunEventCreate(
+        run_id=run.run_id, event_type="run.failed", stage="failed", payload={"status": "failed"},
+    ))
+    await RunRepository(database).update_status(run.run_id, status="failed", error_code="X")
+    service = EventStreamService(repo, RunRepository(database), EventBus(repo))
+
+    items = [item async for item in service.stream(run.run_id)]
+    ids = [json.loads(item["data"])["event_id"] for item in items]
+    assert len(items) == 1107, "queued + 1105 progress + failed"
+    assert ids == list(range(1, 1108)), "重放必须连续且无重复"
+    assert items[-1]["event"] == "run.failed"
+
+
+async def test_cursor_reconnect_resumes_across_pages(database):
+    """BC-03：游标重连只补游标之后的事件，且同样翻页。"""
+    from backend.app.schemas import RunEventCreate
+
+    run = await _create_active_run(database)
+    repo = EventRepository(database)
+    for index in range(600):
+        await repo.append(RunEventCreate(
+            run_id=run.run_id, event_type="run.progress", stage="executing", payload={"index": index},
+        ))
+    await repo.append(RunEventCreate(
+        run_id=run.run_id, event_type="run.failed", stage="failed", payload={"status": "failed"},
+    ))
+    await RunRepository(database).update_status(run.run_id, status="failed", error_code="X")
+    items = [item async for item in EventStreamService(
+        repo, RunRepository(database), EventBus(repo),
+    ).stream(run.run_id, after_event_id=50)]
+    ids = [json.loads(item["data"])["event_id"] for item in items]
+    assert ids == list(range(51, 603)) and items[-1]["event"] == "run.failed"
+
+
+async def test_status_before_terminal_event_does_not_close_early(database):
+    """终态状态先落库、终态事件稍后落库：心跳补读必须再等一个周期，不丢事件。"""
+    from backend.app.schemas import RunEventCreate
+
+    run = await _create_active_run(database)
+    repo = EventRepository(database)
+    service = EventStreamService(
+        repo, RunRepository(database), EventBus(repo), heartbeat_seconds=0.2,
+    )
+    stream = service.stream(run.run_id, after_event_id=0)
+    received: list[dict] = [await anext(stream)]
+
+    async def pump() -> None:
+        try:
+            while True:
+                received.append(await asyncio.wait_for(anext(stream), timeout=3.0))
+        except (StopAsyncIteration, asyncio.TimeoutError):
+            return
+
+    pump_task = asyncio.create_task(pump())
+    await asyncio.sleep(0.3)
+    await RunRepository(database).update_status(run.run_id, status="failed", error_code="X")
+    await asyncio.sleep(0.05)
+    await repo.append(RunEventCreate(
+        run_id=run.run_id, event_type="run.failed", stage="failed", payload={"status": "failed"},
+    ))
+    await asyncio.wait_for(pump_task, timeout=5.0)
+    assert received[-1]["event"] == "run.failed"
+
+
+async def test_inprocess_heartbeat_replays_missed_events_and_ends(database):
+    """BC-03：无 fanout 时实时通知可能丢失；心跳必须查库翻页补齐并结束终态流。"""
+    from backend.app.schemas import RunEventCreate
+
+    run = await _create_active_run(database)
+    repo = EventRepository(database)
+    service = EventStreamService(
+        repo, RunRepository(database), EventBus(repo), heartbeat_seconds=0.2,
+    )
+    stream = service.stream(run.run_id, after_event_id=0)
+    received: list[dict] = [await anext(stream)]
+    assert received[0]["event"] == "run.queued"
+
+    async def pump() -> None:
+        try:
+            while True:
+                received.append(await asyncio.wait_for(anext(stream), timeout=3.0))
+        except (StopAsyncIteration, asyncio.TimeoutError):
+            return
+
+    pump_task = asyncio.create_task(pump())
+    await asyncio.sleep(0.5)
+    for index in range(600):
+        await repo.append(RunEventCreate(
+            run_id=run.run_id, event_type="run.progress", stage="executing", payload={"index": index},
+        ))
+    await repo.append(RunEventCreate(
+        run_id=run.run_id, event_type="run.failed", stage="failed", payload={"status": "failed"},
+    ))
+    await RunRepository(database).update_status(run.run_id, status="failed", error_code="X")
+    await asyncio.wait_for(pump_task, timeout=5.0)
+
+    kinds = [item["event"] for item in received]
+    assert "heartbeat" in kinds
+    assert kinds.count("run.progress") == 600, "心跳补读必须翻页补齐全部错过事件"
+    assert kinds[-1] == "run.failed"
+
+
 async def test_stream_replays_then_serves_cross_instance_events(database):
     fanout = FakeFanout()
     run = await _create_active_run(database)
