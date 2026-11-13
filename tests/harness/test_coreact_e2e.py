@@ -311,6 +311,8 @@ class TestCoreActE2E:
         orchestrator_b = FakeOrchestrator(llm_b)
         orchestrator_b.extra_ev_ids = [ev1_id]
         runtime_b = make_runtime(database, tmp_path, lambda context, events: make_driver(context, orchestrator_b))
+        # BC-02：paused 只由显式 resume 恢复（重复唤醒信号不得自动续跑）
+        assert await RunRepository(database).resume(run_id)
         final_context = await runtime_b.execute_run(run_id)
         assert final_context.status.value == "completed", (final_context.workflow_state, (await RunRepository(database).get(run_id)).error_message)
         # 不重做动作 1：本段只执行 plan_2

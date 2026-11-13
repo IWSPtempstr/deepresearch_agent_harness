@@ -368,6 +368,7 @@ class RunRepository:
                 resume_from = "queued"
             snapshot["pause_resume_status"] = resume_from
             snapshot["pause_requested"] = False
+            snapshot["resume_requested"] = False
             run.status = "paused"
             run.current_stage = resume_from
             run.config_snapshot_json = json_text(snapshot)
@@ -384,6 +385,87 @@ class RunRepository:
             run.config_snapshot_json = json_text(snapshot)
             run.updated_at = utc_now_iso()
             return True
+
+    async def set_pause_resume_status(self, run_id: str, resume_status: str) -> bool:
+        """在暂停状态落库前先持久化续跑阶段（崩溃后仍能从安全阶段恢复）。"""
+        async with self.database.transaction() as session:
+            run = await session.get(RunModel, run_id)
+            if run is None:
+                return False
+            snapshot = json.loads(run.config_snapshot_json or "{}")
+            snapshot["pause_resume_status"] = resume_status
+            # 暂停即撤销旧的恢复授权，避免下一次重复唤醒信号自动续跑。
+            snapshot["resume_requested"] = False
+            run.config_snapshot_json = json_text(snapshot)
+            run.updated_at = utc_now_iso()
+            return True
+
+    async def clear_resume_request(self, run_id: str) -> bool:
+        """清除一次性恢复授权（成功从 paused 转入续跑阶段后调用）。"""
+        async with self.database.transaction() as session:
+            run = await session.get(RunModel, run_id)
+            if run is None:
+                return False
+            snapshot = json.loads(run.config_snapshot_json or "{}")
+            snapshot["resume_requested"] = False
+            run.config_snapshot_json = json_text(snapshot)
+            run.updated_at = utc_now_iso()
+            return True
+
+    async def cancel_if_unowned(self, run_id: str) -> bool:
+        """原子取消：仅当没有 worker 持有租约时本地落终态。
+
+        条件更新把「无租约」与「非终态」放进同一条 UPDATE 的 WHERE，避免
+        SELECT 后再写之间的竞态（SQLite 不支持 SELECT ... FOR UPDATE）。
+        """
+        now = utc_now_iso()
+        async with self.database.transaction() as session:
+            result = await session.execute(
+                update(RunModel)
+                .where(
+                    RunModel.run_id == run_id,
+                    RunModel.lease_owner.is_(None),
+                    RunModel.status.notin_(("completed", "failed", "cancelled", "budget_exhausted")),
+                )
+                .values(
+                    status="cancelled", current_stage="cancelled",
+                    completed_at=now, updated_at=now,
+                )
+            )
+            return result.rowcount == 1
+
+    async def release_lease_and_cancel_paused(self, run_id: str, owner: str) -> bool:
+        """释放租约时原子仲裁：paused + cancellation_requested → cancelled。
+
+        覆盖「worker 检查取消后、释放租约前」到达的取消请求——否则 Run 停在
+        paused，而 paused 不参与恢复扫描，取消会被永久搁置。
+
+        两步都是 owner 条件/状态条件 UPDATE，不依赖 Python 侧读到的旧快照：
+        1) 只有仍持有租约的本实例才能释放（防止清掉接管者的租约）；
+        2) 释放后对「当前已 paused 且已被请求取消」的行落 cancelled。
+        """
+        now = utc_now_iso()
+        async with self.database.transaction() as session:
+            released = await session.execute(
+                update(RunModel)
+                .where(RunModel.run_id == run_id, RunModel.lease_owner == owner)
+                .values(lease_owner=None, lease_expires_at=None, updated_at=now)
+            )
+            if released.rowcount != 1:
+                return False
+            cancelled = await session.execute(
+                update(RunModel)
+                .where(
+                    RunModel.run_id == run_id,
+                    RunModel.status == "paused",
+                    RunModel.cancellation_requested == 1,
+                )
+                .values(
+                    status="cancelled", current_stage="cancelled",
+                    completed_at=now, updated_at=now,
+                )
+            )
+            return cancelled.rowcount == 1
 
     async def latest_paused_for_session(self, session_id: str) -> Optional[RunModel]:
         """Return the latest Run only when it is paused or waiting to pause."""
@@ -504,6 +586,9 @@ class RunRepository:
             if run.status == "needs_user_input":
                 run.status = "queued"
                 run.current_stage = "queued"
+            elif run.status == "paused":
+                # 一次性授权：重复的唤醒信号不得把仍处于 paused 的 Run 自动续跑。
+                snapshot["resume_requested"] = True
             elif run.status == "pausing":
                 # The stage operation is still alive. Cancelling the pending
                 # pause lets that same task continue without scheduling a

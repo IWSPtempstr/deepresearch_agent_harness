@@ -86,6 +86,7 @@ class HarnessRuntime(RuntimeExecutionMixin, RuntimePersistMixin):
         if run is None:
             raise ValueError(f"Run 不存在: {run_id}")
         restored = await self.checkpoints.restore(run_id)
+        config_snapshot = json.loads(run.config_snapshot_json or "{}")
         if restored is not None:
             persisted_status = None if run.status == "pausing" else RunStatus(run.status)
             if persisted_status is RunStatus.INTERRUPTED:
@@ -100,16 +101,24 @@ class HarnessRuntime(RuntimeExecutionMixin, RuntimePersistMixin):
                 restored.status = RunStatus.INTERRUPTED
             elif persisted_status is RunStatus.PAUSED:
                 restored.status = RunStatus.PAUSED
+                # 暂停确认与 checkpoint 分开提交，可能出现「Run 已 paused、快照
+                # 仍是旧阶段」。以 Run 行的 pause_resume_status 为准，避免从
+                # queued 重跑已提交阶段。
+                target = config_snapshot.get("pause_resume_status")
+                if isinstance(target, str):
+                    try:
+                        restored.resume_from_status = RunStatus(target)
+                    except ValueError:
+                        pass
             elif persisted_status is not None:
                 restored.status = persisted_status
             restored.cancellation_requested = bool(run.cancellation_requested)
-            restored.config_snapshot.update(json.loads(run.config_snapshot_json or "{}"))
+            restored.config_snapshot.update(config_snapshot)
             return restored
         message = await self.messages.get(run.trigger_message_id)
         if message is None:
             raise ValueError(f"Run {run_id} 的触发消息不存在")
         limits = json.loads(run.budget_json or "{}") or {}
-        config_snapshot = json.loads(run.config_snapshot_json or "{}")
         return RunContext(
             run_id=run.run_id, session_id=run.session_id, trigger_message_id=run.trigger_message_id,
             source_mode=SourceMode(run.source_mode), workflow_mode=WorkflowMode(run.workflow_mode),
@@ -179,12 +188,19 @@ class HarnessRuntime(RuntimeExecutionMixin, RuntimePersistMixin):
 
     async def _pause_at_safe_boundary(self, context: RunContext) -> bool:
         run = await self.runs.get(context.run_id)
+        # BC-02：取消优先。pause 与 cancel 同时存在时不得先落 PAUSED，否则
+        # 取消请求会被暂停终态掩盖；交回主循环的 _assert_not_cancelled 处理。
+        if run is not None and run.cancellation_requested:
+            return False
         pause_requested = bool(
             run and json.loads(run.config_snapshot_json or "{}").get("pause_requested")
         )
         if run is None or (run.status != "pausing" and not pause_requested):
             return False
         context.resume_from_status = context.status
+        # 先持久化续跑阶段，再写暂停状态：两者分开提交时，崩溃窗口内最多是
+        # 「仍在运行但已记录安全阶段」，不会出现「paused 但不知道从哪继续」。
+        await self.runs.set_pause_resume_status(context.run_id, context.resume_from_status.value)
         await self._transition(context, RunStatus.PAUSED, event_type="run.paused")
         await self.checkpoints.save(context, "paused")
         await self.runs.clear_pause_request(context.run_id)

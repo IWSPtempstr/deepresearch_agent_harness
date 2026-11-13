@@ -20,6 +20,7 @@ from deepresearch_agent.harness.budgets import BudgetLimits
 from deepresearch_agent.harness.errors import AppError, ErrorCode
 from deepresearch_agent.observability import RUN_TOTAL
 from deepresearch_agent.harness.runtime import HarnessRuntime
+from deepresearch_agent.harness.run_context import RunContext
 from deepresearch_agent.persistence import ArtifactStore, Database
 from deepresearch_agent.persistence.repositories import (
     ArtifactRepository, CheckpointRepository, ContractRepository, EventRepository,
@@ -276,6 +277,30 @@ async def test_needs_user_input_routes_by_exception_type_not_message(database, t
     assert context.status is RunStatus.NEEDS_USER_INPUT
     persisted = await RunRepository(database).get(run.run_id)
     assert persisted.status == "needs_user_input"
+
+
+async def test_paused_run_uses_row_resume_target_over_stale_checkpoint(database, tmp_path):
+    """BC-02 崩溃窗口：paused 已落库但 paused checkpoint 未写成时，续跑目标
+    必须来自 Run 行的 pause_resume_status，而不是旧的 checkpoint 阶段。"""
+    run = await create_queued_run(database)
+    runtime = build_runtime(
+        database, tmp_path,
+        lambda context, events=None: CompletedFakeDriver(context, events=events),
+        lease_seconds=5,
+    )
+    stale = RunContext(
+        run_id=run.run_id, session_id=run.session_id, trigger_message_id=run.trigger_message_id,
+        source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH,
+        status=RunStatus.PLANNING, original_query="lease takeover",
+    )
+    await runtime.checkpoints.save(stale, "planning")
+    runs = RunRepository(database)
+    assert await runs.set_pause_resume_status(run.run_id, "executing")
+    assert await runs.update_status(run.run_id, status="paused", current_stage="executing")
+
+    loaded = await runtime._load_context(run.run_id)
+    assert loaded.status is RunStatus.PAUSED
+    assert loaded.resume_from_status is RunStatus.EXECUTING
 
 
 async def test_needs_user_input_during_context_build_routes_to_clarification(database, tmp_path):

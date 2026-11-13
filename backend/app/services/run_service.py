@@ -362,14 +362,31 @@ class RunService:
         task = self._tasks.get(run_id)
         if task is not None and not task.done():
             task.cancel()
-        else:
-            run = await self.runs.get(run_id)
-            if run is not None:
-                await self.runs.update_status(
-                    run_id, status="cancelled", current_stage="cancelled",
-                    usage=json.loads(run.usage_json or "{}"),
+            return True
+        if self.queue is not None:
+            # BC-02：检查租约与写终态必须原子。行锁内若发现远端 worker 已持有
+            # 租约，则只保留 cancellation_requested，由 worker 确认；否则本地
+            # 安全落 cancelled（queued/paused/无执行权）。
+            if await self.runs.cancel_if_unowned(run_id):
+                await self.event_bus.publish(
+                    run_id, "run.cancelled", stage="cancelled", payload={"status": "cancelled"},
                 )
-                await self.event_bus.publish(run_id, "run.cancelled", stage="cancelled", payload={"status": "cancelled"})
+            else:
+                current = await self.runs.get(run_id)
+                await self.event_bus.publish(
+                    run_id, "run.cancel_requested",
+                    stage=(current.current_stage if current else None) or "cancelling",
+                    payload={"status": current.status if current else "cancelling", "reason": "remote_worker_owns_lease"},
+                )
+            return True
+        run = await self.runs.get(run_id)
+        if run is not None:
+            await self.runs.clear_pause_request(run_id)
+            await self.runs.update_status(
+                run_id, status="cancelled", current_stage="cancelled",
+                usage=json.loads(run.usage_json or "{}"),
+            )
+            await self.event_bus.publish(run_id, "run.cancelled", stage="cancelled", payload={"status": "cancelled"})
         return True
 
     async def pause(self, run_id: str) -> bool:
@@ -379,6 +396,15 @@ class RunService:
         await self.event_bus.publish(
             run_id, "run.pause_requested", stage="pausing", payload={"status": "pausing"},
         )
+        # BC-02：队列模式下 API 只登记请求，绝不在本地确认 paused——执行权在
+        # 持有租约的 worker，由它在安全边界写 run.paused。没有租约时投递唤醒
+        # 信号（让 worker 消费并在边界确认）；已有租约时运行中的 worker 会
+        # 在下一边界自行观察 pause_requested，重复入队只会制造无用的租约冲突。
+        if self.queue is not None:
+            run = await self.runs.get(run_id)
+            if run is not None and not run.lease_owner:
+                self.schedule(run_id)
+            return True
         task = self._tasks.get(run_id)
         if task is None or task.done():
             if await self.runs.finalize_pause(run_id):

@@ -58,11 +58,20 @@ class RuntimeExecutionMixin(RuntimeStepHooksMixin):
         set_current_run(run_id)
         try:
             context = await self._load_context(run_id)
+            # BC-02：paused 只允许由显式 resume 恢复。队列的重复唤醒信号
+            # （pause 前后各一次投递）不得把仍暂停的 Run 自动跑完。
+            resumed_from_pause = context.status is RunStatus.PAUSED
+            if resumed_from_pause and not context.config_snapshot.get("resume_requested"):
+                return context
             if context.status in {RunStatus.INTERRUPTED, RunStatus.PAUSED}:
                 resume_target = context.resume_from_status or RunStatus.QUEUED
                 context.resume_from_status = None
                 await self._transition(context, resume_target, event_type="run.resumed")
                 recovery_target = resume_target
+                if resumed_from_pause:
+                    # 转入续跑阶段后才撤销授权：此前崩溃时标记仍在，下一次
+                    # 唤醒仍可安全恢复；此后即使崩溃也已不是 paused 语义。
+                    await self.runs.clear_resume_request(run_id)
             if context.status in {RunStatus.QUEUED, RunStatus.CONTEXT_BUILDING}:
                 if context.status is RunStatus.QUEUED:
                     await self._transition(context, RunStatus.CONTEXT_BUILDING, event_type="run.started")
@@ -465,7 +474,21 @@ class RuntimeExecutionMixin(RuntimeStepHooksMixin):
             return context
         finally:
             set_current_run(None)
-            await self.runs.release_lease(run_id, owner)
+            # BC-02：暂停确认与「取消在检查后到达」之间用租约释放事务仲裁；
+            # 否则 Run 会停在 paused，而 paused 不参与恢复扫描，取消被搁置。
+            try:
+                cancelled = await self.runs.release_lease_and_cancel_paused(run_id, owner)
+            except Exception:  # noqa: BLE001 —— 释放失败不得掩盖原始异常
+                cancelled = False
+                await self.runs.release_lease(run_id, owner)
+            if cancelled:
+                try:
+                    await self.events.publish(
+                        run_id, "run.cancelled", stage="cancelled",
+                        payload={"status": "cancelled", "reason": "cancel_requested_at_pause_boundary"},
+                    )
+                except Exception:  # noqa: BLE001 —— 事件尽力而为，状态已落库
+                    pass
 
     async def _persist_clarification_request(self, context: RunContext) -> None:
         """BC-01：把实际问题写入 Run 行（API/前端据此展示，不依赖 checkpoint）。

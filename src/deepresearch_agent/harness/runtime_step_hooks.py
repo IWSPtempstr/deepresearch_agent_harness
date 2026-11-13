@@ -109,6 +109,8 @@ class RuntimeStepHooksMixin:
             await self._transition(context, RunStatus.CANCELLED, event_type="run.cancelled")
             return RunStatus.CANCELLED
         context.resume_from_status = RunStatus.EXECUTING
+        # 先持久化续跑目标，再写 paused（见 _pause_at_safe_boundary 的崩溃窗口说明）
+        await self.runs.set_pause_resume_status(context.run_id, "executing")
         await self._transition(context, RunStatus.PAUSED, event_type="run.paused")
         await self.runs.clear_pause_request(context.run_id)
         return RunStatus.PAUSED

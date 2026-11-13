@@ -116,7 +116,7 @@ rubric 生成、事前建议、修订和事后语义检查全部计入统一预�
 | ID | 状态 | 当前缺口/触点 | 验收目标 |
 |---|---|---|---|
 | BC-01 | done（2026-11-13） | clarifications 写 config_snapshot 后没有消费端；brief_builder/context builder/ClarificationCard | 实际问题展示→答案进会话与规划→继续研究，不重复澄清；幂等提交 |
-| BC-02 | pending | run_service.pause 在队列API本地无 task 时直接 finalize_pause | API仅请求、远端worker确认；分离实例测试；取消优先且中断可恢复 |
+| BC-02 | done（2026-11-13） | run_service.pause 在队列API本地无 task 时直接 finalize_pause | API仅请求、远端worker确认；分离实例测试；取消优先且中断可恢复 |
 | BC-03 | pending | event_stream.list_after 无全量翻页；提交去重翻页不等于 SSE 翻页 | terminal >1100事件完整重放，游标重连，无fanout数据库心跳补齐 |
 | BC-04 | pending | artifact_edit 章节保留已做，旧引用继承/映射未做 | 显式修订目标、旧证据合法归入新Run、citation mapping/provenance、Contract通过、越权/hash变更拒绝 |
 | BC-05 | pending | 历史/活动Run UI分离、来源可用性、错误/下载与会话分页交付链需专项验收 | 再盘点当前UI/API，未验证不宣称缺失全部已确诊；真实用户链路浏览器验收 |
@@ -135,6 +135,27 @@ API/context/runtime 用例；独立 review 1 轮（APPROVE，3 项 LOW：无唯�
 重复、落库失败日志、测试覆盖）已补测试与日志。门禁：pytest 613 passed/4 skipped。
 
 BC-01～05 依赖已完成的 T-017 执行底座，互相可独立修复；BC-04 必须先冻结修订输出协议，BC-05 在相关后端行为确定后收尾。不存在授权清库、取消历史任务或访问付费服务的隐含许可。
+
+BC-02 实际证据（2026-11-13）：`RunService.pause` 在队列模式（`queue is not None`）
+只登记 `pause_requested` 并发布 `run.pause_requested`，不再本地 `finalize_pause`；
+无租约时投递一次唤醒信号，已有租约时由运行中的 worker 在下一边界自行观察。确认
+路径在 worker 的 `_pause_at_safe_boundary`/`_resolve_coreact_pause`：先把
+`pause_resume_status` 写入 Run 行，再落 paused（崩溃窗口内最多是“仍在运行但已记录
+安全阶段”），进程重启时 `_load_context` 以 Run 行的目标覆盖旧 checkpoint。paused
+只允许显式 resume 恢复（`resume_requested` 一次性授权，重复唤醒信号直接返回），
+避免队列重复投递把暂停 Run 自动跑完。`RunService.cancel` 在队列模式使用单条条件
+UPDATE（`lease_owner IS NULL AND status NOT IN terminal`）原子落 cancelled；远端
+仍持有租约时只登记请求，由 worker 确认。`release_lease_and_cancel_paused` 用两条
+条件 UPDATE 在同一事务内先做 owner-fenced 释放、再对 paused+cancelled 请求落终态，
+关闭“取消在检查后、释放租约前到达”的窗口；旧 worker 不会清掉接管者的租约。
+`_pause_at_safe_boundary` 先检查 `cancellation_requested`，取消优先于暂停。
+`tests/harness/test_run_queue.py` 新增 10 项（分离实例 pause、重复唤醒不自动续跑、
+远端持租约不确认、cancel 覆盖 pause、queued/paused 本地取消、边界释放仲裁、
+租约持有拒绝取消、接管者租约不被清、过期租约→interrupted→重新确认 pause 等），
+`test_lease_heartbeat.py` 增加“旧 checkpoint + paused 行目标覆盖”1 项。独立 review
+3 轮（round1 4 HIGH：暂停后取消搁置/取消与租约获取竞态/重复唤醒自动续跑/暂停确认
+崩溃窗口；round2 3 HIGH：释放读旧快照、无条件清除接管者租约、SQLite 无行锁；
+全部改为条件 UPDATE 后 APPROVE）。门禁：pytest 628 passed/4 skipped。
 
 ## 7. 验收矩阵与范围声明（实施后）
 

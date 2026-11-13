@@ -12,6 +12,7 @@
 """
 
 import asyncio
+import json
 import os
 
 import pytest
@@ -153,6 +154,196 @@ async def test_local_mode_without_queue_keeps_inprocess_scheduling(database, tmp
     assert service.queue is None
     persisted = await RunRepository(database).get(run.run_id)
     assert persisted.status == "completed"
+
+
+# ---------- BC-02：API 只请求，worker 确认；取消优先 ----------
+
+def _queue_service(database, tmp_path, queue):
+    return RunService(
+        database,
+        workflow_factory=lambda context, events=None: CompletedFakeDriver(context, events=events),
+        artifact_root=tmp_path / "artifacts", queue=queue,
+    )
+
+
+async def test_queue_pause_is_requested_then_confirmed_by_worker(database, tmp_path):
+    run = await create_queued_run(database)
+    queue = RecordingQueue()
+    api = _queue_service(database, tmp_path, queue)
+    worker = RunService(
+        database,
+        workflow_factory=lambda context, events=None: CompletedFakeDriver(context, events=events),
+        artifact_root=tmp_path / "worker-artifacts",
+    )
+
+    assert await api.pause(run.run_id) is True
+    persisted = await RunRepository(database).get(run.run_id)
+    # API 实例没有确认 paused：执行权不在它手里
+    assert persisted.status == "pausing"
+    assert json.loads(persisted.config_snapshot_json)["pause_requested"] is True
+    assert queue.enqueued == [run.run_id]
+
+    context = await worker.execute_now(run.run_id)
+    assert context.status is RunStatus.PAUSED
+    persisted = await RunRepository(database).get(run.run_id)
+    snapshot = json.loads(persisted.config_snapshot_json)
+    assert persisted.status == "paused"
+    assert snapshot["pause_requested"] is False
+    # 安全续跑阶段随 Run 行持久化（不是只存在 checkpoint 内存里）
+    assert snapshot["pause_resume_status"] == "planning"
+
+    # 暂停后恢复：同一 worker 从 planning 继续并完成
+    assert await api.resume(run.run_id) is True
+    resumed = await worker.execute_now(run.run_id)
+    assert resumed.status is RunStatus.COMPLETED
+    assert (await RunRepository(database).get(run.run_id)).status == "completed"
+
+
+async def test_duplicate_wake_signal_does_not_auto_resume_paused_run(database, tmp_path):
+    run = await create_queued_run(database)
+    queue = RecordingQueue()
+    api = _queue_service(database, tmp_path, queue)
+    worker = RunService(
+        database,
+        workflow_factory=lambda context, events=None: CompletedFakeDriver(context, events=events),
+        artifact_root=tmp_path / "worker-artifacts",
+    )
+    assert await api.pause(run.run_id) is True
+    assert (await worker.execute_now(run.run_id)).status is RunStatus.PAUSED
+    # 原始 schedule 信号 + pause 唤醒信号的重复投递：没有显式 resume 不得续跑
+    context = await worker.execute_now(run.run_id)
+    assert context.status is RunStatus.PAUSED
+    assert (await RunRepository(database).get(run.run_id)).status == "paused"
+
+    assert await api.resume(run.run_id) is True
+    assert (await worker.execute_now(run.run_id)).status is RunStatus.COMPLETED
+
+
+async def test_queue_pause_does_not_finalize_while_remote_worker_holds_lease(database, tmp_path):
+    run = await create_queued_run(database)
+    queue = RecordingQueue()
+    api = _queue_service(database, tmp_path, queue)
+    runs = RunRepository(database)
+    assert await runs.acquire_lease(run.run_id, "remote-worker", ttl_seconds=60)
+
+    assert await api.pause(run.run_id) is True
+    persisted = await runs.get(run.run_id)
+    assert persisted.status == "pausing", "API 不得在远端持有租约时本地确认 paused"
+    assert queue.enqueued == [], "已有 worker 执行时不应重复投递唤醒信号"
+
+
+async def test_cancel_wins_over_pause_and_remote_worker_confirms(database, tmp_path):
+    run = await create_queued_run(database)
+    queue = RecordingQueue()
+    api = _queue_service(database, tmp_path, queue)
+    worker = RunService(
+        database,
+        workflow_factory=lambda context, events=None: CompletedFakeDriver(context, events=events),
+        artifact_root=tmp_path / "worker-artifacts",
+    )
+    runs = RunRepository(database)
+    assert await runs.acquire_lease(run.run_id, "remote-worker", ttl_seconds=60)
+
+    assert await api.pause(run.run_id) is True
+    assert await api.cancel(run.run_id) is True
+    persisted = await runs.get(run.run_id)
+    # 取消只登记请求，不覆盖 pause 的可见状态；worker 确认后落 cancelled
+    assert persisted.status == "pausing" and bool(persisted.cancellation_requested)
+
+    assert await runs.release_lease(run.run_id, "remote-worker")
+    context = await worker.execute_now(run.run_id)
+    assert context.status is RunStatus.CANCELLED
+    assert (await runs.get(run.run_id)).status == "cancelled"
+
+
+async def test_queue_cancel_of_queued_run_finalizes_without_worker(database, tmp_path):
+    run = await create_queued_run(database)
+    api = _queue_service(database, tmp_path, RecordingQueue())
+    assert await api.cancel(run.run_id) is True
+    assert (await RunRepository(database).get(run.run_id)).status == "cancelled"
+
+
+async def test_cancel_paused_run_without_lease_finalizes(database, tmp_path):
+    run = await create_queued_run(database)
+    api = _queue_service(database, tmp_path, RecordingQueue())
+    worker = RunService(
+        database,
+        workflow_factory=lambda context, events=None: CompletedFakeDriver(context, events=events),
+        artifact_root=tmp_path / "worker-artifacts",
+    )
+    assert await api.pause(run.run_id) is True
+    assert (await worker.execute_now(run.run_id)).status is RunStatus.PAUSED
+    assert await api.cancel(run.run_id) is True
+    assert (await RunRepository(database).get(run.run_id)).status == "cancelled"
+
+
+async def test_cancel_at_pause_boundary_is_arbitrated_at_lease_release(database, tmp_path):
+    """取消在 worker 检查暂停后、释放租约前到达：释放事务必须落 cancelled。"""
+    run = await create_queued_run(database)
+    runs = RunRepository(database)
+    assert await runs.acquire_lease(run.run_id, "boundary-worker", ttl_seconds=60)
+    assert await runs.update_status(run.run_id, status="paused", current_stage="planning")
+    assert await runs.request_cancel(run.run_id)
+    assert await runs.release_lease_and_cancel_paused(run.run_id, "boundary-worker") is True
+    persisted = await runs.get(run.run_id)
+    assert persisted.status == "cancelled" and persisted.lease_owner is None
+
+
+async def test_cancel_if_unowned_refuses_while_worker_holds_lease(database, tmp_path):
+    """条件 UPDATE：租约仍被持有时 API 不得原子落 cancelled。"""
+    run = await create_queued_run(database)
+    runs = RunRepository(database)
+    assert await runs.acquire_lease(run.run_id, "live-worker", ttl_seconds=60)
+    assert await runs.cancel_if_unowned(run.run_id) is False
+    persisted = await runs.get(run.run_id)
+    assert persisted.status != "cancelled" and persisted.lease_owner == "live-worker"
+
+
+async def test_release_does_not_clear_replacement_worker_lease(database, tmp_path):
+    """owner fencing：旧 worker 释放时必须带 lease_owner==owner 条件。"""
+    run = await create_queued_run(database)
+    runs = RunRepository(database)
+    assert await runs.acquire_lease(run.run_id, "old-worker", ttl_seconds=-1)  # 已过期
+    assert await runs.acquire_lease(run.run_id, "new-worker", ttl_seconds=60)
+    assert await runs.release_lease_and_cancel_paused(run.run_id, "old-worker") is False
+    persisted = await runs.get(run.run_id)
+    assert persisted.lease_owner == "new-worker", "旧 worker 不得清掉接管者的租约"
+
+
+async def test_interrupted_pausing_run_is_recovered_and_confirms_pause(database, tmp_path):
+    """worker 在 pause 确认前死亡：租约过期 → interrupted → 新 worker 重新确认 pause。"""
+    from deepresearch_agent.harness.recovery import RecoveryManager
+
+    session = await SessionRepository(database).create(SessionCreate(title="pausing-recovery"))
+    _, run, _ = await RunRepository(database).create_for_user_message(
+        MessageCreate(session_id=session.session_id, role="user", content="recovery", client_message_id="recovery-1"),
+        RunCreate(
+            session_id=session.session_id, trigger_message_id="atomic",
+            source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT,
+            config_snapshot={"min_evidence": 1}, budget=BudgetLimits().model_dump(),
+        ),
+    )
+    runs = RunRepository(database)
+    api = _queue_service(database, tmp_path, RecordingQueue())
+    worker = RunService(
+        database,
+        workflow_factory=lambda context, events=None: CompletedFakeDriver(context, events=events),
+        artifact_root=tmp_path / "worker-artifacts",
+    )
+    # 死掉的 worker 留下已过期租约
+    assert await runs.acquire_lease(run.run_id, "dead-worker", ttl_seconds=-1)
+    assert await api.pause(run.run_id) is True
+    assert (await runs.get(run.run_id)).status == "pausing"
+
+    recovered = await RecoveryManager(runs).scan(auto_resume=True)
+    assert recovered == [run.run_id]
+    assert (await runs.get(run.run_id)).status == "interrupted"
+
+    context = await worker.execute_now(run.run_id)
+    assert context.status is RunStatus.PAUSED
+    snapshot = json.loads((await runs.get(run.run_id)).config_snapshot_json)
+    assert snapshot["pause_requested"] is False
+    assert snapshot["pause_resume_status"]
 
 
 @pytest.mark.skipif(not REDIS_URL, reason="set TEST_REDIS_URL to verify the Redis Streams queue")
