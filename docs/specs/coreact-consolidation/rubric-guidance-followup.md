@@ -118,7 +118,7 @@ rubric 生成、事前建议、修订和事后语义检查全部计入统一预�
 | BC-01 | done（2026-11-13） | clarifications 写 config_snapshot 后没有消费端；brief_builder/context builder/ClarificationCard | 实际问题展示→答案进会话与规划→继续研究，不重复澄清；幂等提交 |
 | BC-02 | done（2026-11-13） | run_service.pause 在队列API本地无 task 时直接 finalize_pause | API仅请求、远端worker确认；分离实例测试；取消优先且中断可恢复 |
 | BC-03 | done（2026-11-13） | event_stream.list_after 无全量翻页；提交去重翻页不等于 SSE 翻页 | terminal >1100事件完整重放，游标重连，无fanout数据库心跳补齐 |
-| BC-04 | pending | artifact_edit 章节保留已做，旧引用继承/映射未做 | 显式修订目标、旧证据合法归入新Run、citation mapping/provenance、Contract通过、越权/hash变更拒绝 |
+| BC-04 | done（2026-11-13） | artifact_edit 章节保留已做，旧引用继承/映射未做 | 显式修订目标、旧证据合法归入新Run、citation mapping/provenance、Contract通过、越权/hash变更拒绝 |
 | BC-05 | pending | 历史/活动Run UI分离、来源可用性、错误/下载与会话分页交付链需专项验收 | 再盘点当前UI/API，未验证不宣称缺失全部已确诊；真实用户链路浏览器验收 |
 
 BC-01 实际证据（2026-11-13）：`harness/clarifications.py` 冻结请求/回答协议
@@ -145,6 +145,27 @@ fanout 心跳补读、无 fanout 进程内心跳补读全部走同一翻页实�
 补齐 600 条错过事件并结束、状态先于终态事件落库时延迟关闭。独立 review 1 轮
 APPROVE（2 项 LOW：游标用例命名夸大、状态先于事件的对称用例——均已补测）。
 门禁：pytest 628 passed/4 skipped。
+
+BC-04 实际证据（2026-11-13）：`ArtifactEditContextBuilder` 契约新增 schema/version、
+`artifact_id`、`target_sha256`、`outline`、`base_citations`；显式修订请求若存在可读
+基线但目标不唯一/未指定，抛 `ArtifactEditTargetAmbiguous`，ContextBuilder 转结构化
+澄清（不静默退化成普通研究）；重复章节标题同样要求澄清。Runtime
+`_prepare_artifact_edit` 在拼接前强制校验：同一会话 completed 基线、artifact_id/
+路径/摘要、唯一目标章节与 target_sha256、outline、保留章节集合与各自 sha256、
+base_citations 与基线实际引用一致；契约缺少任一必需身份字段即拒绝。保留内容中的
+旧证据以**新 ID**（`new_run:inherit:old_id:content_hash` 稳定哈希）写入新 Run，
+metadata 带 inherited/base_run_id/base_evidence_id/origin_run_id/base_task_id/
+base_tool_call_id/base_content_hash/target_heading/inherited_at；基线行不移动。
+`citation_mapping` 只改写基线保留内容（含导语），新生成目标章节保持原样；
+`mapped_sha256` 供章节保留校验与 `/context` inspector 使用（存在 mapping 时只认
+mapped 摘要）。`EvidenceRepository.inherit` 对已存在 ID 校验 run/content/source/
+provenance，冲突拒绝。Contract 覆盖检查把继承 ID 从本 Run 处理流水线中单列
+（inherited_ids），不伪造 Card/路由覆盖；min_evidence/source_diversity 分别披露
+produced/inherited。`tests/harness/test_artifact_revision.py` 8 项：完整修订闭包
+（继承/映射/Contract 通过）、跨会话与 hash 拒绝、保留章节篡改、preserve/identity/
+base_citations 篡改、缺失基线证据、幂等重放与 ID 冲突、目标歧义澄清、映射只作用
+于保留内容。独立 review 2 轮（BLOCKER preserve 未校验 + 3 HIGH；全部修复后
+APPROVE，剩余 1 项 LOW 诊断计数已修）。门禁：pytest 636 passed/4 skipped。
 
 BC-01～05 依赖已完成的 T-017 执行底座，互相可独立修复；BC-04 必须先冻结修订输出协议，BC-05 在相关后端行为确定后收尾。不存在授权清库、取消历史任务或访问付费服务的隐含许可。
 

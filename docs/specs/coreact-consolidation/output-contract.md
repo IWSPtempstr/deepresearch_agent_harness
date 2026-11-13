@@ -173,6 +173,26 @@ ResearchRunResult 可附 revision metadata（base_run_id、base_artifact_id/hash
 - 基线 hash 变化、章节不唯一、来源不匹配、越权必须明确拒绝或澄清，不静默退化为普通研究。
 - 下载是已授权已验收 Markdown artifact；草稿下载若支持，应明确未验证且使用不同文件标识。
 
+### 修订契约实现（BC-04）
+
+Context 快照中的 `artifact_edit` 契约至少包含：`schema_version`、`operation=replace_section`、
+`base_run_id`、`artifact_id`/`relative_path`/`base_sha256`、`target_heading`/`target_sha256`、
+`outline`、`base_citations`、`preserve_sections[{heading,sha256,mapped_sha256}]`、
+`citation_mapping{old_evidence_id:new_evidence_id}`、`inherited_evidence_ids`。
+
+- 运行时在报告拼接前校验：基线必须是**同一会话的 completed Run**；artifact 路径与登记
+  摘要一致；目标章节与 `target_sha256` 未变化；保留内容引用的每条旧证据都存在于基线
+  Run 账本。任一不符 → `ARTIFACT_INTEGRITY_FAILED`（明确失败，不静默退化）。
+- 继承证据写入新 Run 时使用**新 evidence_id**（`new_run:inherit:old_id:content_hash`
+  的稳定哈希），保留 source/provider/source_id/summary/content_hash，并在 metadata 写入
+  `inherited=true`、`base_run_id`、`base_evidence_id`、`origin_run_id`、`base_task_id`、
+  `base_tool_call_id`、`target_heading`、`inherited_at`；基线行不移动、不改写。
+- 保留章节（含首个标题前的导语）中的旧引用按 `citation_mapping` 改写为新 ID；
+  Contract 的 citation_integrity/claim_support 因此针对新 Run 证据成立。证据卡覆盖检查
+  只统计本 Run 实际处理的证据，继承 ID 单列 `inherited_ids`，不伪造覆盖。
+- 章节保留校验使用 `mapped_sha256`（映射后的期望值）；`/runs/{id}/context` 的
+  `artifact_verification` 同时返回 base/mapped/actual 哈希。
+
 ## 6. 必须验证的协议不变量
 
 1. JSON roundtrip、状态/字段组合、未知版本处理与旧 API 兼容。

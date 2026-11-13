@@ -308,11 +308,19 @@ async def get_context_inspector(
             for section in ArtifactEditContextBuilder.parse_sections(message.content if message else "")
         }
         preserved = []
+        mapped = bool(artifact_edit.get("citation_mapping"))
         for section in artifact_edit.get("preserve_sections", []):
             actual = current_sections.get(section["heading"])
+            # BC-04：一旦存在 citation mapping，保留章节必须与映射后摘要一致；
+            # 仅匹配基线摘要意味着旧引用未被改写，不能算通过。
+            base_sha = section["sha256"]
+            mapped_sha = section.get("mapped_sha256")
+            expected = mapped_sha if mapped else base_sha
+            passed = actual == expected if expected else False
             preserved.append({
-                "heading": section["heading"], "expected_sha256": section["sha256"],
-                "actual_sha256": actual, "passed": actual == section["sha256"],
+                "heading": section["heading"], "expected_sha256": expected,
+                "base_sha256": base_sha, "mapped_sha256": mapped_sha,
+                "actual_sha256": actual, "passed": passed,
             })
         target_before = hashlib.sha256(artifact_edit.get("target_content", "").encode("utf-8")).hexdigest()
         target_after = current_sections.get(artifact_edit.get("target_heading"))

@@ -279,6 +279,8 @@ class RuntimeExecutionMixin(RuntimeStepHooksMixin):
                 elif context.status is RunStatus.REPORTING:
                     await self._assert_not_cancelled(context)
                     generated_report = await self._run_with_heartbeat(context, budget, driver.report(), owner=owner)
+                    # BC-04：先校验修订目标并把旧证据/引用合法归入新 Run，再拼接
+                    await self._prepare_artifact_edit(context)
                     context.report = sanitize_report(self._apply_artifact_edit(context, generated_report))
                     await self._assert_not_cancelled(context)
                     context.workflow_state = driver.snapshot()

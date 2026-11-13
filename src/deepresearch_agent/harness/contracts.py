@@ -1,5 +1,6 @@
 """Frozen stage-0 domain contracts used by persistence and later runtime stages."""
 
+import json
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
@@ -129,11 +130,30 @@ class ContractEvaluator:
             # The immutable ledger is authoritative; never accept reporter-provided
             # ledger IDs as proof of its own completeness.
             coverage = dict(evidence_card_coverage)
-            coverage["ledger_ids"] = [
+            ledger_ids = [
                 str(item.get("evidence_id", "") if isinstance(item, dict) else getattr(item, "evidence_id", ""))
                 for item in evidence
                 if str(item.get("evidence_id", "") if isinstance(item, dict) else getattr(item, "evidence_id", ""))
             ]
+            # BC-04：继承证据来自基线 Run 的 Card/路由/处理流水线，本 Run 的
+            # reporter 从未处理它们。证书覆盖检查只针对本 Run 实际处理的证据，
+            # 继承 ID 单独记录，避免既伪造覆盖又误判修订失败。
+            inherited_ids: set[str] = set()
+            for item in evidence:
+                raw_meta = item.get("metadata_json") if isinstance(item, dict) else getattr(item, "metadata_json", None)
+                if raw_meta is None and isinstance(item, dict):
+                    raw_meta = item.get("metadata")
+                if isinstance(raw_meta, str):
+                    try:
+                        raw_meta = json.loads(raw_meta or "{}")
+                    except (TypeError, ValueError):
+                        raw_meta = {}
+                if isinstance(raw_meta, dict) and raw_meta.get("inherited") is True:
+                    inherited_ids.add(
+                        str(item.get("evidence_id", "") if isinstance(item, dict) else getattr(item, "evidence_id", ""))
+                    )
+            coverage["inherited_ids"] = sorted(inherited_ids)
+            coverage["ledger_ids"] = [item_id for item_id in ledger_ids if item_id not in inherited_ids]
             checks.append(verifier.evidence_card_coverage(coverage))
         if rubrics:
             # 步级 rubric 的主张词必须被"报告已引用的账本证据"覆盖——

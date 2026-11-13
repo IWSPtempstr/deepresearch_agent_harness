@@ -14,6 +14,7 @@ from deepresearch_agent.harness.clarifications import (
     parse_answers,
     store_request,
 )
+from .artifact_edit import ArtifactEditTargetAmbiguous
 from deepresearch_agent.harness.errors import NeedsUserInput
 from deepresearch_agent.harness.run_context import RunContext
 from .resolver import QueryResolver
@@ -132,10 +133,20 @@ class ContextBuilder:
             skills["selected"] = forced_skill
         artifact_edit = None
         if self.artifact_context_builder is not None:
-            artifact_edit = await self.artifact_context_builder.build(
-                session_id=context.session_id, current_run_id=context.run_id,
-                query=context.original_query,
-            )
+            try:
+                artifact_edit = await self.artifact_context_builder.build(
+                    session_id=context.session_id, current_run_id=context.run_id,
+                    query=context.original_query,
+                )
+            except ArtifactEditTargetAmbiguous as exc:
+                # 显式修订请求但目标不唯一：转澄清，不静默退化成普通研究
+                request = build_request(
+                    context.config_snapshot, questions=exc.questions or ["请明确要修改的章节。"],
+                    source="context_builder",
+                    now=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                )
+                store_request(context.config_snapshot, request)
+                raise NeedsUserInput("needs_user_input") from exc
         if resolution.confidence < 0.7 and not historical_results and not clarifications:
             question = (
                 "当前问题包含无法消解的指代，请明确要继续的主题、报告或章节"

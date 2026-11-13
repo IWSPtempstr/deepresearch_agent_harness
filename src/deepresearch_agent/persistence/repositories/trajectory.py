@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any, Optional
 
 from sqlalchemy import func, select, update
@@ -101,6 +102,53 @@ class EvidenceRepository:
             from backend.app.tenancy import current_tenant_id
 
             model = EvidenceModel(evidence_id=data.evidence_id, tenant_id=current_tenant_id(), run_id=data.run_id, task_id=data.task_id, tool_call_id=data.tool_call_id, source_mode=data.source_mode.value, provider=data.provider, source_id=data.source_id, title=data.title, summary=data.summary, metadata_json=json_text(metadata or {}), content_hash=data.content_hash, artifact_id=data.artifact_id, score=data.score, created_at=utc_now_iso())
+            session.add(model)
+            return model
+
+    async def inherit(
+        self, base: EvidenceModel, *, run_id: str, evidence_id: str, metadata: dict[str, Any],
+    ) -> EvidenceModel:
+        """BC-04：把基线 Run 的证据合法归入新 Run（新 ID + 明确 provenance）。
+
+        不复制/移动基线行；新行保留原 source/summary/content_hash 与来源元数据，
+        额外写入 inherited/base_run_id/base_evidence_id 等字段供审计。
+        """
+        async with self.database.transaction() as session:
+            existing = await session.get(EvidenceModel, evidence_id)
+            if existing:
+                # 幂等重放必须对应同一新 Run / 同一基线内容；否则是 ID 碰撞或
+                # 损坏数据，静默复用会把引用指向错误证据。
+                from deepresearch_agent.harness.errors import AppError, ErrorCode
+
+                try:
+                    existing_meta = json.loads(existing.metadata_json or "{}")
+                except (TypeError, ValueError):
+                    existing_meta = {}
+                if (
+                    existing.run_id != run_id
+                    or existing.content_hash != base.content_hash
+                    or existing.source_id != base.source_id
+                    or not isinstance(existing_meta, dict)
+                    or existing_meta.get("inherited") is not True
+                    or existing_meta.get("base_evidence_id") != metadata.get("base_evidence_id")
+                ):
+                    raise AppError(
+                        ErrorCode.ARTIFACT_INTEGRITY_FAILED,
+                        "继承证据 ID 冲突：已有记录与本次基线不一致",
+                        details={"evidence_id": evidence_id},
+                    )
+                return existing
+            from backend.app.tenancy import current_tenant_id
+
+            model = EvidenceModel(
+                evidence_id=evidence_id, tenant_id=current_tenant_id(), run_id=run_id,
+                task_id=(f"inherited:{base.task_id}" if base.task_id else "inherited")[:64],
+                tool_call_id=base.tool_call_id, source_mode=base.source_mode,
+                provider=base.provider, source_id=base.source_id, title=base.title,
+                summary=base.summary, metadata_json=json_text(metadata),
+                content_hash=base.content_hash, artifact_id=base.artifact_id,
+                score=base.score, created_at=utc_now_iso(),
+            )
             session.add(model)
             return model
 

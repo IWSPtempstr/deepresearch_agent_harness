@@ -26,6 +26,18 @@ class DeterministicVerifiers:
             return item.get(key, default)
         return getattr(item, key, default)
 
+    @classmethod
+    def _is_inherited(cls, item: Any) -> bool:
+        raw = cls._get(item, "metadata_json")
+        if raw is None:
+            raw = cls._get(item, "metadata")
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw or "{}")
+            except (TypeError, ValueError):
+                return False
+        return isinstance(raw, dict) and raw.get("inherited") is True
+
     def _check(self, kind: str, passed: bool, *, expected: Any, observed: Any, explanation: str, required: bool = True, threshold: float | None = None) -> ContractCheckData:
         return ContractCheckData(
             check_id=f"contract_{self.run_id}_{kind}", run_id=self.run_id, kind=kind,
@@ -41,7 +53,14 @@ class DeterministicVerifiers:
 
     def min_evidence(self, minimum: int) -> ContractCheckData:
         count = len(self.evidence)
-        return self._check("min_evidence", count >= minimum, expected=minimum, observed=count, threshold=float(minimum), explanation="有效 Evidence Ledger 记录数量")
+        inherited = sum(1 for item in self.evidence if self._is_inherited(item))
+        # 继承证据属于新 Run 的权威台账（用于保留章节的既有引用），但单独披露
+        # produced 数量，避免把"本 Run 新检索"与"合法继承"混为一谈。
+        return self._check(
+            "min_evidence", count >= minimum, expected=minimum,
+            observed={"count": count, "inherited": inherited, "produced": count - inherited},
+            threshold=float(minimum), explanation="有效 Evidence Ledger 记录数量（继承/新产生分别计数）",
+        )
 
     def citation_integrity(self) -> ContractCheckData:
         citations = _CITATION.findall(self.report)
@@ -69,6 +88,7 @@ class DeterministicVerifiers:
 
     def source_diversity(self) -> ContractCheckData:
         sources = set()
+        produced_sources = set()
         cited = set(_CITATION.findall(self.report))
         for item in self.evidence:
             if str(self._get(item, "evidence_id", "")) not in cited:
@@ -80,13 +100,27 @@ class DeterministicVerifiers:
                     payload = metadata if isinstance(metadata, dict) else json.loads(metadata or "{}")
                 except (TypeError, ValueError):
                     payload = {}
-                sources.add(str(payload.get("domain") or source_id))
+                source_key = str(payload.get("domain") or source_id)
             else:
-                sources.add(source_id)
+                source_key = source_id
+            sources.add(source_key)
+            if not self._is_inherited(item):
+                produced_sources.add(source_key)
         sources.discard("")
+        produced_sources.discard("")
         limitation = bool(re.search(r"局限|限制|single[- ]source|limited", self.report, re.I))
         passed = len(sources) >= 2 or (bool(sources) and limitation)
-        return self._check("source_diversity", passed, expected="至少两个独立来源，或明确披露单一来源局限", observed={"sources": sorted(sources), "limitation_disclosed": limitation}, explanation="来源不足不得伪造多样性")
+        return self._check(
+            "source_diversity", passed,
+            expected="至少两个独立来源，或明确披露单一来源局限",
+            observed={
+                "sources": sorted(sources),
+                "produced_sources": sorted(produced_sources),
+                "inherited_source_count": len(sources - produced_sources),
+                "limitation_disclosed": limitation,
+            },
+            explanation="来源不足不得伪造多样性（继承来源与新来源分别披露）",
+        )
 
     def evidence_card_coverage(self, coverage: dict[str, Any]) -> ContractCheckData:
         ledger_ids = set(coverage.get("ledger_ids") or [])
@@ -122,6 +156,7 @@ class DeterministicVerifiers:
                 "processed_count": len(processed_ids),
                 "annex_count": len(annex_ids),
                 "missing_by_stage": missing,
+                "inherited_count": len(set(coverage.get("inherited_ids") or [])),
             },
             explanation="全量 Evidence Card 保存在结构化证据台账中；正文只需引用支撑结论的证据",
         )
