@@ -549,3 +549,27 @@ def test_pipeline_charges_failed_judge_cost_to_shared_budget():
         assert driver.context.budget_usage.llm_tokens >= assessment["usage"]["estimated_tokens"]
     finally:
         report_pipeline.REPORT_QUALITY_ASSESSMENT_ENABLED = original
+
+
+def test_judge_empty_received_response_is_known_prompt_only_cost():
+    """收到空响应：response_known=True、按 prompt-only 已知成本（非保守估算）。"""
+    from deepresearch_agent.harness.quality_assessment import (
+        DEFAULT_ALLOCATION_TOKENS, build_quality_judge,
+    )
+
+    class EmptyLLM:
+        def bind(self, **kwargs):
+            return self
+
+        def invoke(self, messages):
+            return _Content("")
+
+    result = assess_report_quality(
+        judge=build_quality_judge(EmptyLLM()), report="# 报告", query="问题",
+        remaining_tokens=100_000,
+    )
+    assert result.usage["response_known"] is True
+    # 已知口径：prompt-only（空响应贡献 0）——应显著低于"半配额保守估算"路径
+    # （prompt 至少含固定指令段，估算 ≥ 数百 token）
+    assert result.usage["estimated_tokens"] >= 100
+    assert result.usage["estimated_tokens"] < DEFAULT_ALLOCATION_TOKENS // 2 + 100

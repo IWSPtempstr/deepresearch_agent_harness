@@ -85,13 +85,21 @@ def _clip(text: Any, limit: int) -> str:
 
 
 class _QualityJudgeError(RuntimeError):
-    """质量诊断失败（携带已知 prompt/响应与是否已派发，供成本口径如实记录）。"""
+    """质量诊断失败（携带已知 prompt/响应与是否已派发，供成本口径如实记录）。
 
-    def __init__(self, message: str, *, prompt: str = "", raw: str = "", dispatched: bool) -> None:
+    received 区分"收到了响应（哪怕为空）"与"没有响应"（超时/传输失败）——
+    前者按已知 prompt-only 成本记账，后者按保守配额估算。
+    """
+
+    def __init__(
+        self, message: str, *, prompt: str = "", raw: str = "",
+        dispatched: bool, received: bool = False,
+    ) -> None:
         super().__init__(message)
         self.prompt = prompt
         self.raw = raw
         self.dispatched = dispatched
+        self.received = received
 
 
 def build_quality_judge(llm: Any, *, model_id: str | None = None) -> Any:
@@ -118,27 +126,32 @@ def build_quality_judge(llm: Any, *, model_id: str | None = None) -> Any:
         try:
             future = executor.submit(bound.invoke, [{"role": "user", "content": prompt}])
             response = future.result(timeout=DEFAULT_TIMEOUT_SECONDS)
-        except Exception as exc:  # noqa: BLE001 —— 已派发但响应未知
+        except Exception as exc:  # noqa: BLE001 —— 已派发但响应未知（received=False）
             raise _QualityJudgeError(
                 f"{type(exc).__name__}", prompt=prompt, raw="", dispatched=True,
+                received=False,
             ) from exc
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
         content = response.content if hasattr(response, "content") else str(response)
         raw = str(content or "")
         if not raw or len(raw) > MAX_RESPONSE_CHARS:
+            # 响应已收到（即便为空/超限）：按已知口径记账（空响应贡献 0 token）
             raise _QualityJudgeError(
-                "质量诊断输出为空或超限", prompt=prompt, raw=raw, dispatched=True,
+                "质量诊断输出为空或超限", prompt=prompt, raw=raw[:MAX_RESPONSE_CHARS],
+                dispatched=True, received=True,
             )
         try:
             payload = json.loads(raw.strip().removeprefix("```json").removesuffix("```").strip())
         except (TypeError, ValueError) as exc:
             raise _QualityJudgeError(
                 "质量诊断输出不是合法 JSON", prompt=prompt, raw=raw, dispatched=True,
+                received=True,
             ) from exc
         if not isinstance(payload, dict):
             raise _QualityJudgeError(
                 "质量诊断输出不是对象", prompt=prompt, raw=raw, dispatched=True,
+                received=True,
             )
         return payload, raw, prompt
 
@@ -218,7 +231,7 @@ def assess_report_quality(
                 "usage": {"calls": 0, "estimated_tokens": 0,
                           "reason": exc.args[0].split(":", 1)[0][:60]},
             })
-        known = bool(exc.raw)
+        known = exc.received
         tokens = count_tokens(exc.prompt) + (
             count_tokens(exc.raw) if known else DEFAULT_ALLOCATION_TOKENS // 2
         )
