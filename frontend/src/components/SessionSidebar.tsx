@@ -11,10 +11,12 @@ interface SessionSidebarProps {
   onCreate: () => void;
   onArchive: (id: string) => void;
   onRename: (session: Session) => void;
+  hasMore?: boolean;
+  onLoadMore?: () => void;
 }
 
 /** 会话侧栏：可收缩成 64px 图标条（宽度由 motion 动画驱动，内容随宽度淡出） */
-export function SessionSidebar({ sessions, selected, collapsed, onToggle, onSelect, onCreate, onArchive, onRename }: SessionSidebarProps) {
+export function SessionSidebar({ sessions, selected, collapsed, onToggle, onSelect, onCreate, onArchive, onRename, hasMore = false, onLoadMore }: SessionSidebarProps) {
   return <motion.aside
     className={`sidebar${collapsed ? " collapsed" : ""}`}
     initial={false}
@@ -38,6 +40,7 @@ export function SessionSidebar({ sessions, selected, collapsed, onToggle, onSele
           {!collapsed && session.status === "active" && <><button className="archive" onClick={() => onRename(session)} title="重命名">✎</button><button className="archive" onClick={() => onArchive(session.session_id)} title="归档">⌁</button></>}
         </div>
       ))}
+      {hasMore && !collapsed && <button type="button" className="load-more-sessions" onClick={onLoadMore}>加载更多会话</button>}
     </div>
     <nav>
       <NavLink to="/"><span className="nav-icon">⌁</span>{!collapsed && <span className="nav-label">聊天研究</span>}</NavLink>

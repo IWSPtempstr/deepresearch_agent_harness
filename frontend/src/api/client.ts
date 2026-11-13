@@ -53,7 +53,7 @@ export const api = {
   capabilities: () => request<Capabilities>("/capabilities"),
   health: () => request<{status: string; checked_at: string; components: Record<string, {status: string; configured?: boolean; reason?: string | null; check_level?: string}>}>("/health"),
   cacheStats: () => request<CacheStats>("/cache/stats"),
-  sessions: () => request<{items: Session[]; total: number}>("/sessions?include_archived=true"),
+  sessions: (limit = 30, offset = 0) => request<{items: Session[]; total: number; next_offset?: number | null}>(`/sessions?include_archived=true&limit=${limit}&offset=${offset}`),
   session: (id: string) => request<SessionDetail>(`/sessions/${id}`),
   whiteboard: (id: string) => request<WhiteboardLog>(`/sessions/${id}/whiteboard`),
   createSession: (title = "新对话") => request<Session>("/sessions", { method: "POST", body: JSON.stringify({ title }) }),
@@ -69,6 +69,15 @@ export const api = {
     request(`/runs/${id}/clarifications`, { method: "POST", body: JSON.stringify({ content, client_clarification_id: clientClarificationId, question_id: questionId }) }),
   evidence: (id: string) => request<{items: Evidence[]; total: number}>(`/runs/${id}/evidence`),
   report: (id: string) => request<Report>(`/runs/${id}/report`),
+  downloadReport: async (id: string) => {
+    const response = await fetch(`${API_BASE}/runs/${id}/report/download`, { headers: authHeaders() });
+    if (!response.ok) {
+      if (response.status === 401) for (const listener of [...unauthorizedListeners]) listener();
+      const payload = await response.json().catch(() => ({ error: { code: "HTTP_ERROR", message: response.statusText } }));
+      throw new ApiError(payload.error ?? { code: "HTTP_ERROR", message: response.statusText });
+    }
+    return response.blob();
+  },
   context: (id: string) => request<ContextInspector>(`/runs/${id}/context`),
   memories: () => request<{items: CuratedMemory[]; total: number}>("/memories"),
   memoryCapacity: () => request<{targets: Record<"user" | "project", MemoryCapacity>}>("/memories/capacity"),

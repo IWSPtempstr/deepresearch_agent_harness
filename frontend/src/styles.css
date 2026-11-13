@@ -98,6 +98,8 @@ button { cursor: pointer; }
 .new-session:hover { background: var(--accent-soft); border-color: var(--accent-border); }
 .sidebar-label { color: var(--text-tertiary); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; margin: 16px 10px 10px; font-family: var(--font-mono); }
 .session-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; min-height: 0; padding: 4px 6px 14px; }
+.load-more-sessions { flex-shrink: 0; border: 1px dashed var(--border-strong); background: transparent; color: var(--text-tertiary); border-radius: var(--radius-md); padding: 8px; font-size: 11px; }
+.load-more-sessions:hover { color: var(--accent); border-color: var(--accent-border); }
 .session-row { display: flex; flex-shrink: 0; border-radius: var(--radius-md); overflow: hidden; background: color-mix(in srgb, var(--surface) 55%, transparent); border: 1px solid var(--border); transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast); }
 .session-row.selected { background: var(--surface); box-shadow: var(--shadow-xs); border-color: var(--accent-border); }
 .session-row:not(.selected):hover { background: color-mix(in srgb, var(--surface) 90%, transparent); border-color: var(--border-strong); }
@@ -164,6 +166,8 @@ button { cursor: pointer; }
 .report-tabs button span { margin-left: 5px; font: 500 9px var(--font-mono); opacity: .75; }
 .report-mode { color: var(--success); background: var(--success-soft); border: 1px solid color-mix(in srgb, var(--success) 24%, var(--surface)); border-radius: var(--radius-pill); padding: 4px 10px; font-size: 9px; font-family: var(--font-mono); }
 .report-mode.fallback { color: var(--warning); background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 28%, var(--surface)); }
+.report-download { margin-left: auto; border: 1px solid var(--accent-border); background: var(--accent-soft); color: var(--accent); border-radius: var(--radius-sm); padding: 6px 12px; font-size: 11px; font-weight: 600; }
+.report-download:disabled { opacity: .5; cursor: progress; }
 .report-reading-layout { display: grid; grid-template-columns: 190px minmax(0, 760px) 210px; justify-content: center; align-items: start; gap: 24px; padding: 26px; }
 .report-toc, .report-citation-rail { position: sticky; top: 78px; display: grid; gap: 4px; max-height: calc(100vh - 150px); overflow-y: auto; }
 .report-toc > strong, .report-citation-rail > strong { margin-bottom: 7px; color: var(--text-tertiary); font: 600 10px var(--font-mono); letter-spacing: .11em; text-transform: uppercase; }
@@ -254,7 +258,7 @@ button { cursor: pointer; }
 .empty-chat p { color: var(--text-tertiary); }
 
 /* ---------- 抽屉 ---------- */
-.drawer-backdrop { position: fixed; inset: 0; background: rgba(15, 28, 46, 0.2); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); z-index: 10; animation: fade-in var(--dur-fast) var(--ease-out); }
+.drawer-backdrop { position: fixed; inset: 0; background: rgba(15, 28, 46, 0.2); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); z-index: 950; animation: fade-in var(--dur-fast) var(--ease-out); }
 .evidence-drawer { position: absolute; right: 0; top: 0; bottom: 0; width: 430px; background: var(--surface); border-left: 1px solid var(--border); border-radius: var(--radius-lg) 0 0 var(--radius-lg); padding: 38px 31px; box-shadow: var(--shadow-lg); animation: slide-in var(--dur-med) var(--ease-out); }
 .evidence-drawer h2 { font: 500 22px var(--font-serif); letter-spacing: -0.01em; }
 .evidence-drawer p { line-height: 1.7; color: var(--text-secondary); font-size: var(--text-sm); max-height: 48vh; overflow-y: auto; white-space: pre-wrap; }
@@ -517,6 +521,8 @@ button { cursor: pointer; }
 
 /* ---------- 头部动作 ---------- */
 .chat-header-actions { display: flex; align-items: center; gap: 10px; }
+.run-switcher { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text-tertiary); }
+.run-switcher select { max-width: 210px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); border-radius: var(--radius-sm); padding: 5px 8px; font-size: 10px; }
 .cache-stats { font-size: 10px; font-family: var(--font-mono); color: var(--text-tertiary); background: var(--surface-sunken); border: 1px solid var(--border); border-radius: 999px; padding: 5px 11px; white-space: nowrap; }
 .cache-stats b { font-weight: 600; }
 .cache-pct { font-family: var(--font-mono); font-weight: 600; color: var(--text-faint); }
@@ -564,7 +570,7 @@ button { cursor: pointer; }
 .fab:hover { background: var(--accent-strong); }
 
 /* ---------- 卡片详情抽屉 ---------- */
-.card-detail-drawer { position: absolute; right: 0; top: 0; bottom: 0; width: 520px; max-width: 92vw; background: var(--surface); border-left: 1px solid var(--border); border-radius: var(--radius-lg) 0 0 var(--radius-lg); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; z-index: 11; }
+.card-detail-drawer { position: absolute; right: 0; top: 0; bottom: 0; width: 520px; max-width: 92vw; background: var(--surface); border-left: 1px solid var(--border); border-radius: var(--radius-lg) 0 0 var(--radius-lg); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; z-index: 951; }
 .card-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 22px 26px 14px; border-bottom: 1px solid var(--divider); }
 .card-detail-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .card-detail-title h2 { font: 500 21px var(--font-serif); letter-spacing: -0.01em; color: var(--text-primary); margin: 0; }

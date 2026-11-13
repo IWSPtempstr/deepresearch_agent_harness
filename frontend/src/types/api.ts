@@ -49,6 +49,7 @@ export interface Report {
   sections?: ReportSection[]; evidence_index?: ReportEvidenceIndex[];
   verification: Array<{kind: string; required: boolean; passed?: boolean | null; evidence: Record<string, unknown>}>;
   quality_assessment?: ReportQualityAssessment | null;
+  artifact?: {artifact_id: string; relative_path: string; sha256: string; size_bytes: number} | null;
 }
 export interface RunEvent { event_id?: number; event_type: string; stage?: string; [key: string]: unknown; }
 export interface WhiteboardEntry {

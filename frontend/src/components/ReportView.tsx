@@ -2,6 +2,7 @@ import { ReactNode, useEffect, useMemo, useState } from "react";
 import DOMPurify from "dompurify";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { api } from "../api/client";
 import { VERIFICATION_LABELS } from "./stageMeta";
 import { Evidence, Report } from "../types/api";
 
@@ -9,6 +10,7 @@ type ReportTab = "report" | "evidence" | "verification";
 
 export function ReportView({ report, evidence, onEvidence }: {report?: Report | null; evidence: Evidence[]; onEvidence: (item: Evidence) => void}) {
   const [tab, setTab] = useState<ReportTab>("report");
+  const [downloading, setDownloading] = useState(false);
   useEffect(() => setTab("report"), [report?.run_id]);
   const sanitized = useMemo(() => DOMPurify.sanitize(report?.content ?? "", { ALLOWED_TAGS: [] }), [report?.content]);
   const citationIds = useMemo(() => {
@@ -30,6 +32,18 @@ export function ReportView({ report, evidence, onEvidence }: {report?: Report | 
   function jumpToHeading(index: number) {
     document.querySelectorAll(".report-article h1, .report-article h2, .report-article h3, .report-article h4")[index]?.scrollIntoView({behavior: "smooth", block: "start"});
   }
+  async function download() {
+    if (!report || downloading) return;
+    setDownloading(true);
+    try {
+      const blob = await api.downloadReport(report.run_id);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url; anchor.download = `report-${report.run_id}.md`;
+      document.body.appendChild(anchor); anchor.click(); anchor.remove();
+      URL.revokeObjectURL(url);
+    } finally { setDownloading(false); }
+  }
 
   return <section className="report-view">
     <div className="report-toolbar">
@@ -39,6 +53,7 @@ export function ReportView({ report, evidence, onEvidence }: {report?: Report | 
         <button className={tab === "verification" ? "active" : ""} onClick={() => setTab("verification")}>验证 <span>{report.verification.filter((item) => item.passed).length}/{report.verification.length}</span></button>
       </div>
       <span className={`report-mode ${report.report_mode === "budget_fallback" ? "fallback" : ""}`}>{report.report_mode === "budget_fallback" ? "预算保护报告" : "完整研究报告"}</span>
+      {report.status === "completed" && report.artifact && <button type="button" className="report-download" disabled={downloading} onClick={download}>{downloading ? "下载中…" : "下载 Markdown"}</button>}
     </div>
 
     {tab === "report" && <div className="report-reading-layout">

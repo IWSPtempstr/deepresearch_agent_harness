@@ -2,7 +2,7 @@
 
 ## 1. 状态与证据边界
 
-- 状态：proposed；本次只新增文档，不实现、不提交、不推送。
+- 状态：implemented（RG-01～04 与 BC-01～05 已按阶段实现、测试、独立 review 与本地提交；不自动部署/推送）。
 - 核实基线：HEAD `87a1bc3`。T-401～T-409 的历史实施记录不回退为 pending；下列是独立后续任务。
 - 依据：本次源码只读检查与既有对话中的 Co-ReAct 论文/仓库调查；本次未重跑 pytest。测试收集数量不当作测试通过结果。
 - 来源：[Co-ReAct 专页](https://brenchcc.github.io/llm-compass/agent/deep-research/co-react)、[论文](https://arxiv.org/abs/2605.23590)、[官方仓库](https://github.com/ZBWpro/Co-ReAct)。复制代码/模板前固定 commit、核查 LICENSE/NOTICE 并保留必要声明。
@@ -119,7 +119,7 @@ rubric 生成、事前建议、修订和事后语义检查全部计入统一预�
 | BC-02 | done（2026-11-13） | run_service.pause 在队列API本地无 task 时直接 finalize_pause | API仅请求、远端worker确认；分离实例测试；取消优先且中断可恢复 |
 | BC-03 | done（2026-11-13） | event_stream.list_after 无全量翻页；提交去重翻页不等于 SSE 翻页 | terminal >1100事件完整重放，游标重连，无fanout数据库心跳补齐 |
 | BC-04 | done（2026-11-13） | artifact_edit 章节保留已做，旧引用继承/映射未做 | 显式修订目标、旧证据合法归入新Run、citation mapping/provenance、Contract通过、越权/hash变更拒绝 |
-| BC-05 | pending | 历史/活动Run UI分离、来源可用性、错误/下载与会话分页交付链需专项验收 | 再盘点当前UI/API，未验证不宣称缺失全部已确诊；真实用户链路浏览器验收 |
+| BC-05 | done（2026-11-13） | 历史/活动Run UI分离、来源可用性、错误/下载与会话分页交付链需专项验收 | 再盘点当前UI/API，未验证不宣称缺失全部已确诊；真实用户链路浏览器验收 |
 
 BC-01 实际证据（2026-11-13）：`harness/clarifications.py` 冻结请求/回答协议
 （问题≤5/条≤500 字、回答≤10000 字、历史≤16；revision 在已回答后 +1；旧
@@ -167,6 +167,27 @@ base_citations 篡改、缺失基线证据、幂等重放与 ID 冲突、目标�
 于保留内容。独立 review 2 轮（BLOCKER preserve 未校验 + 3 HIGH；全部修复后
 APPROVE，剩余 1 项 LOW 诊断计数已修）。门禁：pytest 636 passed/4 skipped。
 
+BC-05 实际证据（2026-11-13）：先盘点当前 UI/API，确认的具体缺口是——会话列表 API
+已支持 limit/offset/next_offset 但前端只取默认 30 条且无"加载更多"；已验收报告没有
+下载端点/按钮；活动 Run 与历史 Run 只有隐式选择（最新非终态优先），无显式切换；
+完成 Run 的报告需要用户在画布中找卡片，完成后不会自动打开；报告抽屉 close 按钮被
+固定定位的 API Key 按钮（z-index 900）遮挡。均已修复：
+`/runs/{id}/report/download` 仅 completed 返回 Markdown（Content-Disposition +
+X-Content-SHA256，artifact 读时校验摘要），前端 ReportView 显示"下载 Markdown"
+（fetch + blob，带 X-API-Key）；`api.sessions(limit, offset)` + App 增量 limit 30、
+SessionSidebar "加载更多会话"，并避免"选中会话在未加载页时误切走"；
+ChatPage 头部 Run 切换器标注"活动/历史 · status · 时间"，仅当本次查看中 Run 由
+非完成变为 completed 时自动打开报告抽屉（打开历史完成 Run 不弹窗）；drawer
+backdrop/z-index 提到 API Key 触发器之上。来源可用性由 capabilities 驱动并自动回退
+（浏览器验收中 graphrag 不可用时选择 web）。真实浏览器验收：`tests/acceptance/
+browser_acceptance.py`（本地 fake driver，无外部 LLM/Provider）新建会话→选中联网
+搜索→提交→等待完成→报告渲染→验证页 7 项全部通过→真实下载事件（文件名/内容
+校验）→系统状态页，RESULT PASS；另以 Playwright 验证会话分页 30→42 行与
+"历史 · completed"双 Run 切换器。明确边界：本轮验收使用确定性 fake driver，
+**未**验证真实 LLM/Provider 端到端；只对已盘点并实测的链路声称修复，不宣称其余
+UI 全部无缺失。`tests/api/test_api_phase4.py` 新增会话分页与 completed-only 下载
+用例。门禁：pytest 638 passed/4 skipped、ruff、`npm run build`、浏览器验收 PASS。
+
 BC-01～05 依赖已完成的 T-017 执行底座，互相可独立修复；BC-04 必须先冻结修订输出协议，BC-05 在相关后端行为确定后收尾。不存在授权清库、取消历史任务或访问付费服务的隐含许可。
 
 BC-02 实际证据（2026-11-13）：`RunService.pause` 在队列模式（`queue is not None`）
@@ -202,7 +223,7 @@ UPDATE（`lease_owner IS NULL AND status NOT IN terminal`）原子落 cancelled�
 | 同 rubric 一次提案修订，advisory unknown 显式降级 | RG-03 | PASS（整批口径一次修订；detached 确定性准入；degraded/advisory_unknown_continued；预约精确对账；原判定与成本归档 pre_action_history） |
 | required unknown 不放行；前后 verdict 不混同 | RG-01/03/04 | PASS（pre_action_blocks 协议层 + 门内阻断派发；record 元数据 pre/post 独立保存；前后 rubric_hash 相同断言 test_report_quality.py；失败尝试历史保留） |
 | RACE 风格维度与官方评测分数不混淆 | RG-04 | PASS（协议无分数字段；响应级/维度级 score 字段按 unknown；默认 not_run 零调用；仅 completed 暴露；白名单 DTO 不透出异常文本；advisory_only 不参与 Contract/completed） |
-| 澄清/控制/SSE/修订/历史交付闭环 | BC-01～05 | 未执行（独立排期，不属本轮） |
+| 澄清/控制/SSE/修订/历史交付闭环 | BC-01～05 | PASS（BC-01 实际问答+幂等+消费；BC-02 队列 pause/cancel 由 worker 确认且竞态关闭；BC-03 >1100 事件翻页/游标/心跳补齐；BC-04 修订证据继承+映射+Contract；BC-05 分页/下载/活动历史切换+浏览器 PASS；pytest 638 passed/4 skipped） |
 
 范围声明（如实）：本轮未做效果对比实验/A/B/基准分数；未验证真实 LLM/Provider 服务
 端到端（测试以 scripted 模型 + 真实执行器栈为主）；上游 Co-ReAct 代码/模板未复制

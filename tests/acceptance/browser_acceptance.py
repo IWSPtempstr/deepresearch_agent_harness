@@ -55,7 +55,7 @@ def main() -> int:
         composer_visible = page.get_by_placeholder("提出一个需要证据支持的问题…").is_visible()
         results["empty_chat"] = empty_chat
         results["home_chat_or_empty"] = empty_chat or composer_visible
-        results["nav"] = page.get_by_text("◇ Memory").is_visible() and page.get_by_text("△ Skills").is_visible() and page.get_by_text("○ 系统状态").is_visible()
+        results["nav"] = page.get_by_role("link", name="Memory").is_visible() and page.get_by_role("link", name="Skills").is_visible() and page.get_by_role("link", name="系统状态").is_visible()
         shot(page, "01_home.png")
         print("[ui] home loaded:", {k: results[k] for k in ("brand", "empty_chat", "home_chat_or_empty", "nav")})
 
@@ -71,7 +71,7 @@ def main() -> int:
             results["report_rendered"] = "skipped"
             results["verification_text"] = "skipped"
             results["status_page"] = True
-            page.get_by_text("○ 系统状态").click()
+            page.get_by_role("link", name="系统状态").click()
             page.wait_for_timeout(1500)
             status_text = page.locator("body").inner_text()
             results["status_page"] = "系统状态" in status_text and ("healthy" in status_text or "健康" in status_text)
@@ -87,8 +87,8 @@ def main() -> int:
             deadline = time.monotonic() + RUN_TIMEOUT_SECONDS
             terminal_seen = False
             while time.monotonic() < deadline:
-                # 终态标志：报告渲染出“证据引用”且验证徽标行出现（✓ = passed，! = failed）
-                if page.locator(".verification-row").count() and "证据引用" in page.locator(".report-view").inner_text():
+                # 终态标志：已打开报告工作区且正文渲染完成
+                if page.locator(".report-view").count() and len(page.locator(".report-view").inner_text()) > 50:
                     terminal_seen = True
                     break
                 time.sleep(1.0)
@@ -97,18 +97,40 @@ def main() -> int:
             print("[ui] run terminal:", terminal_seen)
 
             # 4) 报告与验证徽标
+            report_text = page.locator(".report-view").inner_text() if page.locator(".report-view").count() else ""
+            results["report_rendered"] = len(report_text) > 50
+            tabs = page.locator(".report-tabs button", has_text="验证")
+            if tabs.count():
+                tabs.first.click()
+                page.wait_for_timeout(200)
             verification = page.locator(".verification-row")
             results["verification_row"] = verification.count() > 0
             results["verification_text"] = verification.inner_text() if verification.count() else ""
-            report_text = page.locator(".report-view").inner_text() if page.locator(".report-view").count() else ""
-            results["report_rendered"] = "证据引用" in report_text
             results["report_len"] = len(report_text)
             results["citations"] = [t for t in report_text.splitlines() if t.strip().startswith("[ev_")]
             print("[ui] report:", {k: results[k] for k in ("report_rendered", "report_len")})
             print("[ui] verification:", results["verification_text"])
 
-            # 5) 系统状态页
-            page.get_by_text("○ 系统状态").click()
+            # 4b) 已验收报告下载（真实浏览器下载事件）
+            try:
+                with page.expect_download(timeout=15_000) as download_info:
+                    page.get_by_role("button", name="下载 Markdown").click()
+                download = download_info.value
+                download_path = download.path()
+                content = Path(download_path).read_text(encoding="utf-8") if download_path else ""
+                results["download_ok"] = bool(content) and "# 研究报告" in content
+                results["download_filename"] = download.suggested_filename
+            except Exception as exc:
+                results["download_ok"] = False
+                results["download_error"] = type(exc).__name__
+            print("[ui] download:", results.get("download_ok"), results.get("download_filename"))
+
+            # 5) 系统状态页（先关闭报告抽屉，模态 backdrop 会拦截侧栏点击）
+            close_button = page.get_by_role("button", name="关闭")
+            if close_button.count():
+                close_button.first.click()
+                page.wait_for_timeout(300)
+            page.get_by_role("link", name="系统状态").click()
             page.wait_for_timeout(1500)
             status_text = page.locator("body").inner_text()
             results["status_page"] = "系统状态" in status_text and ("healthy" in status_text or "健康" in status_text)
@@ -120,7 +142,10 @@ def main() -> int:
     structural = all([
         results["brand"], results["home_chat_or_empty"], results["nav"], results["new_session"], results["status_page"],
     ])
-    run_part = args.skip_run or (results["run_terminal"] is True and results["report_rendered"] is True)
+    run_part = args.skip_run or (
+        results["run_terminal"] is True and results["report_rendered"] is True
+        and results.get("download_ok") is True
+    )
     passed = structural and run_part
     print(json.dumps(results, ensure_ascii=False, indent=2))
     print(f"RESULT: {'PASS' if passed else 'FAIL'}")

@@ -143,6 +143,7 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
   const [cancelling, setCancelling] = useState(false);
   const [resuming, setResuming] = useState(false);
   const dragMovedRef = useRef(false);
+  const previousRunStatus = useRef<{runId?: string; status?: string}>({});
 
   const capabilities = useQuery({ queryKey: ["capabilities"], queryFn: api.capabilities });
   const detail = useQuery({ queryKey: ["session", sessionId], queryFn: () => api.session(sessionId!), enabled: Boolean(sessionId) });
@@ -170,6 +171,17 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
     if (run.status === "cancelled") setCancelling(false);
     if (run.status !== "paused" && run.status !== "pausing") setResuming(false);
   }, [run?.run_id, run?.status, run?.pause_requested]);
+  useEffect(() => {
+    if (!run) return;
+    const previous = previousRunStatus.current;
+    previousRunStatus.current = { runId: run.run_id, status: run.status };
+    // BC-05：仅当本次查看中 Run 从非完成变为 completed 时自动打开报告；
+    // 打开历史已完成 Run 不应弹出抽屉遮挡画布。
+    if (
+      previous.runId === run.run_id && previous.status !== "completed"
+      && run.status === "completed" && selectedStage === null
+    ) setSelectedStage("completed");
+  }, [run?.run_id, run?.status, selectedStage]);
   useEffect(() => {
     if (!capabilities.data || capabilities.data.sources[source]?.available) return;
     const fallback = ([capabilities.data.default_source_mode, "graphrag", "web"] as SourceMode[]).find((mode) => capabilities.data!.sources[mode]?.available);
@@ -302,6 +314,16 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
     <header className="chat-header">
       <div><span className="eyebrow">PERSISTENT RESEARCH SESSION</span><h1>{detail.data?.title ?? "加载中…"}</h1></div>
       <div className="chat-header-actions">
+        {detail.data && detail.data.runs.length > 1 && runId && (
+          <label className="run-switcher" title="在活动 Run 与历史 Run 之间切换">
+            <span>Run</span>
+            <select value={runId} onChange={(event) => { setRunId(event.target.value); setSelectedEvidence(null); }}>
+              {detail.data.runs.map((item) => <option key={item.run_id} value={item.run_id}>
+                {TERMINAL.includes(item.status) ? "历史" : "活动"} · {item.status} · {new Date(item.created_at).toLocaleString()}
+              </option>)}
+            </select>
+          </label>
+        )}
         {cacheStats.data && cacheStats.data.totals.requests > 0 && (
           <span className="cache-stats" title="进程级前缀缓存累计（服务端自动命中，跨 Run 共享）">
             前缀缓存 <b className={`cache-pct${cacheStats.data.hit_rate >= 0.5 ? " is-good" : ""}`}>{(cacheStats.data.hit_rate * 100).toFixed(1)}%</b>

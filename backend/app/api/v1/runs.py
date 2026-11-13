@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from sse_starlette.sse import EventSourceResponse
 
 from backend.app.dependencies import get_database, get_event_stream, get_run_service
@@ -248,6 +248,30 @@ async def _quality_assessment_for(database, run_id: str, run_status: str) -> dic
         return _public_quality_view(assessment)
     except Exception:  # noqa: BLE001 —— 诊断读取全程容错
         return None
+
+
+@router.get("/{run_id}/report/download")
+async def download_report(
+    run_id: str, database=Depends(get_database), run_service=Depends(get_run_service),
+):
+    """BC-05：仅 completed（Contract 已通过）的已验收报告可下载 Markdown。"""
+    run = await require_run(database, run_id)
+    if run.status != "completed":
+        raise AppError(ErrorCode.CONFLICT, "仅已验收完成的报告可下载")
+    artifact = await ArtifactRepository(database).get_report(run_id)
+    if artifact is None:
+        raise AppError(ErrorCode.NOT_FOUND, "报告 artifact 不存在")
+    content = run_service.artifact_store.read_verified(
+        artifact.relative_path, artifact.sha256,
+    )
+    return Response(
+        content=content, media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="report-{run_id}.md"',
+            "X-Content-SHA256": artifact.sha256,
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.get("/{run_id}/report")

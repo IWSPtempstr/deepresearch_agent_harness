@@ -172,6 +172,43 @@ def test_run_report_evidence_and_durable_sse_replay(client):
     assert tool["payload"]["result"] == {"ok": True}
 
 
+def test_session_pagination_contract(client):
+    for index in range(3):
+        client.post("/api/v1/sessions", json={"title": f"page-{index}"})
+    first = client.get("/api/v1/sessions", params={"limit": 2, "include_archived": True}).json()
+    assert len(first["items"]) == 2 and first["next_offset"] == 2 and first["total"] == 3
+    second = client.get("/api/v1/sessions", params={"limit": 2, "offset": 2, "include_archived": True}).json()
+    assert len(second["items"]) == 1 and second["next_offset"] is None
+    assert {item["session_id"] for item in first["items"]}.isdisjoint(
+        {item["session_id"] for item in second["items"]}
+    )
+
+
+def test_report_download_only_for_completed_run(client):
+    session_id = new_session(client)
+    run_id = send(client, session_id).json()["run_id"]
+    assert wait_terminal(client, run_id)["status"] == "completed"
+    response = client.get(f"/api/v1/runs/{run_id}/report/download")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/markdown")
+    assert "attachment; filename=" in response.headers["content-disposition"]
+    assert len(response.headers["x-content-sha256"]) == 64
+    assert "# 研究报告" in response.text
+
+    async def create_queued():
+        _, run, _ = await RunRepository(client.app.state.database).create_for_user_message(
+            MessageCreate(session_id=session_id, role="user", content="draft", client_message_id="download-draft"),
+            RunCreate(
+                session_id=session_id, trigger_message_id="atomic", source_mode=SourceMode.GRAPHRAG,
+                workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT, config_snapshot={}, budget={},
+            ),
+        )
+        return run.run_id
+
+    draft_run = client.portal.call(create_queued)
+    assert client.get(f"/api/v1/runs/{draft_run}/report/download").status_code == 409
+
+
 def test_context_inspector_verifies_preserved_report_sections(client):
     run_id = send(client, new_session(client)).json()["run_id"]
     assert wait_terminal(client, run_id)["status"] == "completed"
