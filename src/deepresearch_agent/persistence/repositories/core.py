@@ -399,7 +399,96 @@ class RunRepository:
             pause_requested = bool(json.loads(latest.config_snapshot_json or "{}").get("pause_requested"))
             return latest if latest.status in {"paused", "pausing"} or pause_requested else None
 
-    async def resume(self, run_id: str, *, clarification: Optional[str] = None) -> bool:
+    async def set_clarification_request(self, run_id: str, request: dict[str, Any]) -> bool:
+        """BC-01：把结构化澄清请求写入 Run 快照（Runtime 在 needs_user_input 前调用）。"""
+        async with self.database.transaction() as session:
+            run = await session.get(RunModel, run_id)
+            if run is None:
+                return False
+            snapshot = json.loads(run.config_snapshot_json or "{}")
+            snapshot["clarification_request"] = request
+            questions = request.get("questions") if isinstance(request, dict) else None
+            if isinstance(questions, list) and questions:
+                snapshot["clarification_question"] = str(questions[0])
+            run.config_snapshot_json = json_text(snapshot)
+            run.updated_at = utc_now_iso()
+            return True
+
+    async def record_clarification_answer(
+        self, run_id: str, *,
+        message_id: str,
+        client_message_id: str,
+        content: str,
+        clarification_id: str,
+        question_id: Optional[str] = None,
+    ) -> tuple[str, str]:
+        """BC-01：原子记录澄清回答 + 会话消息 + Run 恢复。
+
+        返回 ``(outcome, message_id)``：recorded / duplicate / conflict /
+        question_mismatch / not_waiting / missing。同一幂等键重复提交返回
+        duplicate 且不再写消息/历史；同键不同内容返回 conflict（API 409）。
+        """
+        from deepresearch_agent.harness.clarifications import apply_answer, parse_answers
+
+        async with self.database.transaction() as session:
+            run = await session.get(RunModel, run_id)
+            if run is None:
+                return "missing", ""
+            snapshot = json.loads(run.config_snapshot_json or "{}")
+            existing_answer = next(
+                (answer for answer in parse_answers(snapshot) if answer.clarification_id == clarification_id),
+                None,
+            )
+            if existing_answer is not None:
+                if existing_answer.content != content:
+                    raise AppError(
+                        ErrorCode.IDEMPOTENCY_CONFLICT,
+                        "client_clarification_id 已被不同的回答内容使用",
+                    )
+                return "duplicate", existing_answer.message_id or ""
+            if run.status != "needs_user_input":
+                return "not_waiting", ""
+            outcome, updated = apply_answer(
+                snapshot, clarification_id=clarification_id, content=content,
+                message_id=message_id, question_id=question_id, created_at=utc_now_iso(),
+            )
+            if outcome == "conflict":
+                raise AppError(
+                    ErrorCode.IDEMPOTENCY_CONFLICT,
+                    "client_clarification_id 已被不同的回答内容使用",
+                )
+            if outcome == "question_mismatch":
+                return "question_mismatch", ""
+            # 消息幂等键与 Run 更新同事务：进程中断不会留下"已恢复但无回答"或
+            # 重复消息（client_message_id 在 Session 内唯一）。
+            existing_message = (
+                await session.execute(select(MessageModel).where(
+                    MessageModel.session_id == run.session_id,
+                    MessageModel.client_message_id == client_message_id,
+                ))
+            ).scalar_one_or_none()
+            if existing_message is None:
+                session.add(MessageModel(
+                    message_id=message_id, tenant_id=run.tenant_id,
+                    session_id=run.session_id, run_id=run_id,
+                    client_message_id=client_message_id, role="user", content=content,
+                    metadata_json=json_text({
+                        "clarification": True,
+                        "clarification_id": clarification_id,
+                        "question_id": question_id or (updated.get("clarification_request") or {}).get("question_id"),
+                    }),
+                    created_at=utc_now_iso(),
+                ))
+            run.config_snapshot_json = json_text(updated)
+            run.status = "queued"
+            run.current_stage = "queued"
+            run.cancellation_requested = 0
+            run.error_code = None
+            run.error_message = None
+            run.updated_at = utc_now_iso()
+            return "recorded", message_id
+
+    async def resume(self, run_id: str) -> bool:
         async with self.database.transaction() as session:
             run = await session.get(RunModel, run_id)
             if run is None:
@@ -409,10 +498,6 @@ class RunRepository:
             if run.status not in {"interrupted", "needs_user_input", "paused", "pausing"} and not pending_pause:
                 return False
             snapshot["pause_requested"] = False
-            if clarification:
-                entries = list(snapshot.get("clarifications", []))
-                entries.append({"content": clarification, "created_at": utc_now_iso()})
-                snapshot["clarifications"] = entries
             # Interrupted Runs keep their marker until Harness loads the latest
             # checkpoint and selects the safe continuation stage. Clarification
             # resumes intentionally rebuild context from queued.

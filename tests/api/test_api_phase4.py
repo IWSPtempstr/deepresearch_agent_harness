@@ -1,5 +1,4 @@
 import json
-import json
 import time
 import uuid
 
@@ -278,6 +277,8 @@ def test_resume_intent_rejects_cancel_or_changed_task_language():
 
 
 def test_clarification_resumes_same_run(client):
+    from deepresearch_agent.harness.clarifications import build_request
+
     client.app.state.run_service.schedule = lambda _run_id: None
     session_id = new_session(client)
 
@@ -286,13 +287,40 @@ def test_clarification_resumes_same_run(client):
             MessageCreate(session_id=session_id, role="user", content="它呢？", client_message_id="clarify-original"),
             RunCreate(session_id=session_id, trigger_message_id="atomic", source_mode=SourceMode.GRAPHRAG, workflow_mode=WorkflowMode.DEEP_RESEARCH, config_snapshot={}, budget={}),
         )
+        request = build_request({}, questions=["请明确主体？", "时间范围？"], source="brief", now="2026-01-01T00:00:00Z")
+        await RunRepository(client.app.state.database).set_clarification_request(run.run_id, request.model_dump(mode="json"))
         await RunRepository(client.app.state.database).update_status(run.run_id, status="needs_user_input", current_stage="needs_user_input")
-        return run.run_id
+        return run.run_id, request.question_id
 
-    run_id = client.portal.call(create_waiting)
-    response = client.post(f"/api/v1/runs/{run_id}/clarifications", json={"content": "主体是阶段4 API"})
+    run_id, question_id = client.portal.call(create_waiting)
+    detail = client.get(f"/api/v1/runs/{run_id}").json()
+    assert detail["clarification"]["questions"] == ["请明确主体？", "时间范围？"]
+    assert detail["clarification"]["status"] == "pending"
+
+    wrong = client.post(f"/api/v1/runs/{run_id}/clarifications", json={
+        "content": "主体是阶段4 API", "question_id": "other",
+    })
+    assert wrong.status_code == 409
+
+    response = client.post(f"/api/v1/runs/{run_id}/clarifications", json={
+        "content": "主体是阶段4 API", "client_clarification_id": "clarify-1", "question_id": question_id,
+    })
     assert response.status_code == 200 and response.json()["run_id"] == run_id
+    assert response.json()["status"] == "queued"
     assert client.get(f"/api/v1/runs/{run_id}").json()["status"] == "queued"
+
+    duplicate = client.post(f"/api/v1/runs/{run_id}/clarifications", json={
+        "content": "主体是阶段4 API", "client_clarification_id": "clarify-1", "question_id": question_id,
+    })
+    assert duplicate.status_code == 200 and duplicate.json()["status"] == "queued"
+    conflict = client.post(f"/api/v1/runs/{run_id}/clarifications", json={
+        "content": "换一个回答", "client_clarification_id": "clarify-1", "question_id": question_id,
+    })
+    assert conflict.status_code == 409
+
+    session_detail = client.get(f"/api/v1/sessions/{session_id}").json()
+    clarifications = [item for item in session_detail["messages"] if "clarification" in (item.get("metadata_json") or "")]
+    assert len(clarifications) == 1 and clarifications[0]["content"] == "主体是阶段4 API"
 
 
 def test_capabilities_and_openapi_are_complete(client, monkeypatch):

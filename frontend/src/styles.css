@@ -271,6 +271,8 @@ button { cursor: pointer; }
 .clarification-card, .error-state { background: var(--warning-soft); border: 1px solid color-mix(in srgb, var(--warning) 22%, var(--surface)); border-radius: var(--radius-md); padding: 15px 17px; margin-bottom: 18px; animation: fade-slide-in var(--dur-med) var(--ease-out); }
 .clarification-card strong { font-size: var(--text-sm); }
 .clarification-card p { font-size: var(--text-sm); color: var(--text-secondary); }
+.clarification-questions { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 4px; font-size: var(--text-sm); color: var(--text-primary); }
+.clarification-questions li { line-height: 1.5; }
 .clarification-card div { display: flex; gap: 8px; margin-top: 10px; }
 .clarification-card input { flex: 1; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--surface)); border-radius: var(--radius-sm); padding: 9px 11px; background: var(--surface); }
 .clarification-card input:focus { outline: 2px solid var(--accent-border); border-color: var(--accent); }

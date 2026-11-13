@@ -301,6 +301,9 @@ async def test_needs_user_input_during_context_build_routes_to_clarification(dat
     assert context.config_snapshot.get("clarification_question") == "请明确要继续的主题"
     persisted = await RunRepository(database).get(run.run_id)
     assert persisted.status == "needs_user_input"
+    import json as _json
+    snapshot = _json.loads(persisted.config_snapshot_json)
+    assert snapshot["clarification_request"]["questions"] == ["请明确要继续的主题"]
 
 
 async def test_load_failure_is_persisted_and_reraised_without_assert_masking(database, tmp_path):

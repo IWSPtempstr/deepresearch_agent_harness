@@ -389,7 +389,7 @@ class RunService:
                 )
         return True
 
-    async def resume(self, run_id: str, *, clarification: str | None = None) -> bool:
+    async def resume(self, run_id: str) -> bool:
         before = await self.runs.get(run_id)
         pending_pause = bool(
             before and json.loads(before.config_snapshot_json or "{}").get("pause_requested")
@@ -397,14 +397,13 @@ class RunService:
         cancelling_pending_pause = bool(
             pending_pause and before and before.status != "paused"
         )
-        resumed = await self.runs.resume(run_id, clarification=clarification)
+        resumed = await self.runs.resume(run_id)
         if resumed:
             current = await self.runs.get(run_id)
             await self.event_bus.publish(
-                run_id, "run.clarification_received" if clarification else "run.resume_requested",
+                run_id, "run.resume_requested",
                 stage=current.current_stage if current else "queued",
                 payload={
-                    "has_clarification": bool(clarification),
                     "status": current.status if current else "queued",
                     "cancelled_pending_pause": cancelling_pending_pause,
                 },
@@ -418,6 +417,65 @@ class RunService:
             else:
                 self.schedule(run_id)
         return resumed
+
+    async def submit_clarification(
+        self, run_id: str, *, content: str,
+        client_clarification_id: str | None = None,
+        question_id: str | None = None,
+    ) -> tuple[bool, str]:
+        """BC-01：幂等提交澄清回答——写入会话、更新 Run 快照、唤醒继续。
+
+        同一 client_clarification_id（或同内容重复提交）不重复写消息/历史；
+        同键不同内容返回 409（IDEMPOTENCY_CONFLICT）；Run 不在等待澄清时
+        只有已记录过的同一提交按幂等成功返回。
+        """
+        from deepresearch_agent.harness.clarifications import clarification_key, request_from_config
+        from deepresearch_agent.harness.errors import AppError, ErrorCode
+        from deepresearch_agent.persistence.repositories.utils import new_id
+
+        run = await self.runs.get(run_id)
+        if run is None:
+            return False, "missing"
+        request = request_from_config(json.loads(run.config_snapshot_json or "{}"))
+        clarification_id = clarification_key(
+            run_id, client_id=client_clarification_id,
+            revision=request.revision if request is not None else None,
+            content=content,
+        )
+        outcome, stored_message_id = await self.runs.record_clarification_answer(
+            run_id,
+            message_id=new_id("msg"),
+            client_message_id=f"clarification-{clarification_id[-40:]}",
+            content=content,
+            clarification_id=clarification_id,
+            question_id=question_id,
+        )
+        if outcome == "missing":
+            return False, "missing"
+        if outcome == "not_waiting":
+            return False, run.status
+        if outcome == "question_mismatch":
+            raise AppError(
+                ErrorCode.CONFLICT,
+                "question_id 与当前澄清请求不匹配；请刷新 Run 后重试",
+                retryable=False,
+            )
+        current = await self.runs.get(run_id)
+        if outcome == "recorded":
+            await self.event_bus.publish(
+                run_id, "run.clarification_received",
+                stage=current.current_stage if current else "queued",
+                payload={
+                    "status": current.status if current else "queued",
+                    "question_id": request.question_id if request is not None else None,
+                    "revision": request.revision if request is not None else None,
+                    "message_id": stored_message_id,
+                },
+            )
+        # duplicate 同样（重新）投递：首次提交可能已入队但进程重启后未消费，
+        # schedule 在两种模式下都是幂等的唤醒（队列消费方以 runs 表为事实源）。
+        self.schedule(run_id)
+        return True, current.status if current is not None else "queued"
 
     async def shutdown(self) -> None:
         # T-006：释放 router 内 provider 资源（scholar httpx 客户端等）

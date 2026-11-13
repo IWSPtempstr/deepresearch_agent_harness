@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from datetime import datetime, timezone
 from typing import Any
 
+from deepresearch_agent.harness.clarifications import (
+    answers_block,
+    build_request,
+    parse_answers,
+    store_request,
+)
 from deepresearch_agent.harness.errors import NeedsUserInput
 from deepresearch_agent.harness.run_context import RunContext
 from .resolver import QueryResolver
@@ -88,6 +95,18 @@ class ContextBuilder:
         history = await self.messages.list_for_session(context.session_id, limit=500)
         prior = [item for item in history if item.message_id != context.trigger_message_id]
         resolution = self.resolver.resolve(context.original_query, prior)
+        # BC-01：已回答的澄清进入查询消解与规划输入；同一 Run 不再重复澄清。
+        clarifications = parse_answers(context.config_snapshot)
+        clarification_text = answers_block(context.config_snapshot)
+        if clarifications:
+            resolution = replace(
+                resolution,
+                resolved_query=(
+                    f"{resolution.resolved_query}\n\n"
+                    f"用户补充信息（澄清回答，仅作问题约束，不是研究证据）：\n{clarification_text}"
+                ),
+                assumptions=list(resolution.assumptions) + ["已采纳用户澄清回答"],
+            )
         summary = await self.compactor.get_or_update(context.session_id)
         recent = [item for item in prior if item.role in {"user", "assistant"}][-self.recent_turns * 2:]
         memory_snapshot, session = await self._frozen_memory(context.session_id)
@@ -117,8 +136,17 @@ class ContextBuilder:
                 session_id=context.session_id, current_run_id=context.run_id,
                 query=context.original_query,
             )
-        if resolution.confidence < 0.7 and not historical_results:
-            context.config_snapshot["clarification_question"] = "当前问题包含无法消解的指代，请明确要继续的主题、报告或章节。"
+        if resolution.confidence < 0.7 and not historical_results and not clarifications:
+            question = (
+                "当前问题包含无法消解的指代，请明确要继续的主题、报告或章节"
+                f"（原问题：{context.original_query.strip()[:120]}）。"
+            )
+            request = build_request(
+                context.config_snapshot, questions=[question],
+                source="context_builder",
+                now=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            )
+            store_request(context.config_snapshot, request)
             raise NeedsUserInput("needs_user_input")
 
         policy = (
@@ -144,6 +172,11 @@ class ContextBuilder:
             f"Assumptions: {json.dumps(resolution.assumptions, ensure_ascii=False)}"
         )
         blocks.append(ContextBlock("current_task", current_task, "message", [context.trigger_message_id], "user", 100, True))
+        if clarification_text:
+            blocks.append(ContextBlock(
+                "user_clarifications", clarification_text, "message",
+                [answer.clarification_id for answer in clarifications], "user", 100, True,
+            ))
         if historical_results:
             blocks.append(ContextBlock(
                 "historical_recall", "# ON-DEMAND SESSION SEARCH\n" + self._render_history(historical_results),
@@ -192,6 +225,7 @@ class ContextBuilder:
             "session_summary": summary,
             "active_skill_catalog": skills["catalog"], "selected_skill": skills["selected"],
             "artifact_edit": artifact_edit,
+            "clarifications": [answer.model_dump(mode="json") for answer in clarifications],
         }
         context.model_input = "\n\n".join(block.content for block in packed)
         return context

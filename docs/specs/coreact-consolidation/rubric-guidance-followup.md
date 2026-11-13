@@ -115,11 +115,24 @@ rubric 生成、事前建议、修订和事后语义检查全部计入统一预�
 
 | ID | 状态 | 当前缺口/触点 | 验收目标 |
 |---|---|---|---|
-| BC-01 | pending | clarifications 写 config_snapshot 后没有消费端；brief_builder/context builder/ClarificationCard | 实际问题展示→答案进会话与规划→继续研究，不重复澄清；幂等提交 |
+| BC-01 | done（2026-11-13） | clarifications 写 config_snapshot 后没有消费端；brief_builder/context builder/ClarificationCard | 实际问题展示→答案进会话与规划→继续研究，不重复澄清；幂等提交 |
 | BC-02 | pending | run_service.pause 在队列API本地无 task 时直接 finalize_pause | API仅请求、远端worker确认；分离实例测试；取消优先且中断可恢复 |
 | BC-03 | pending | event_stream.list_after 无全量翻页；提交去重翻页不等于 SSE 翻页 | terminal >1100事件完整重放，游标重连，无fanout数据库心跳补齐 |
 | BC-04 | pending | artifact_edit 章节保留已做，旧引用继承/映射未做 | 显式修订目标、旧证据合法归入新Run、citation mapping/provenance、Contract通过、越权/hash变更拒绝 |
 | BC-05 | pending | 历史/活动Run UI分离、来源可用性、错误/下载与会话分页交付链需专项验收 | 再盘点当前UI/API，未验证不宣称缺失全部已确诊；真实用户链路浏览器验收 |
+
+BC-01 实际证据（2026-11-13）：`harness/clarifications.py` 冻结请求/回答协议
+（问题≤5/条≤500 字、回答≤10000 字、历史≤16；revision 在已回答后 +1；旧
+`clarification_question` 只读回退）；ContextBuilder 写入结构化请求并把回答并入
+`resolved_query` + 受保护上下文块，已有回答时不再抛 NeedsUserInput；
+BriefBuilder 将问答对并入 `PlanContext.clarification_history` 且已有回答时不再
+阻塞；driver 把 Run 行回答补合并进恢复快照；Runtime 在 needs_user_input 前把
+请求落库；`POST /runs/{id}/clarifications` 原子写入 user message + Run 快照，
+支持 `client_clarification_id` 幂等（同键同内容 duplicate、同键异内容 409）、
+`question_id` 版本校验；Run DTO 暴露白名单 `clarification.questions`，前端
+ClarificationCard 展示实际问题。`tests/harness/test_clarifications.py` 8 项 +
+API/context/runtime 用例；独立 review 1 轮（APPROVE，3 项 LOW：无唯一约束的并发
+重复、落库失败日志、测试覆盖）已补测试与日志。门禁：pytest 613 passed/4 skipped。
 
 BC-01～05 依赖已完成的 T-017 执行底座，互相可独立修复；BC-04 必须先冻结修订输出协议，BC-05 在相关后端行为确定后收尾。不存在授权清库、取消历史任务或访问付费服务的隐含许可。
 

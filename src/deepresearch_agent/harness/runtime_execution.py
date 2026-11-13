@@ -2,6 +2,7 @@
 # 本文件保留类声明与导入路径；未拆出的方法：execute_run, _execute_run_inner, _run_with_heartbeat。
 import asyncio
 import inspect
+import logging
 import time
 import uuid
 from typing import Any
@@ -16,6 +17,8 @@ from deepresearch_agent.models.prefix_cache import set_current_run
 from deepresearch_agent.harness.report_safety import sanitize_report
 
 from deepresearch_agent.harness.runtime_step_hooks import RuntimeStepHooksMixin
+
+logger = logging.getLogger(__name__)
 
 class RuntimeExecutionMixin(RuntimeStepHooksMixin):
 
@@ -451,6 +454,7 @@ class RuntimeExecutionMixin(RuntimeStepHooksMixin):
                 raise
             if not self.state_machine.is_terminal(context.status):
                 if isinstance(exc, NeedsUserInput):
+                    await self._persist_clarification_request(context)
                     await self._transition(context, RunStatus.NEEDS_USER_INPUT, event_type="run.needs_user_input", error_message=str(exc))
                 else:
                     # T-407：AppError 携带业务错误码（如 LEGACY_WORKFLOW_UNSUPPORTED），
@@ -462,6 +466,24 @@ class RuntimeExecutionMixin(RuntimeStepHooksMixin):
         finally:
             set_current_run(None)
             await self.runs.release_lease(run_id, owner)
+
+    async def _persist_clarification_request(self, context: RunContext) -> None:
+        """BC-01：把实际问题写入 Run 行（API/前端据此展示，不依赖 checkpoint）。
+
+        旧 builder 只写 ``clarification_question`` 时，``request_from_config``
+        生成兼容请求；落库失败不改变 NEEDS_USER_INPUT 语义（尽力而为）。
+        """
+        from deepresearch_agent.harness.clarifications import request_from_config, store_request
+
+        request = request_from_config(context.config_snapshot)
+        if request is None:
+            return
+        store_request(context.config_snapshot, request)
+        try:
+            await self.runs.set_clarification_request(context.run_id, request.model_dump(mode="json"))
+        except Exception as exc:  # noqa: BLE001 —— 展示信息落库失败不得掩盖澄清状态
+            # 状态仍进入 NEEDS_USER_INPUT；保留日志便于排查（不向用户伪造问题）
+            logger.warning("澄清请求落库失败（Run 仍进入 needs_user_input）: %s", exc)
 
     async def _run_with_heartbeat(self, context: RunContext, budget: BudgetManager, operation, *, owner: str | None = None):
         """Run one long stage while persisting usage and enforcing cancel/budget limits."""

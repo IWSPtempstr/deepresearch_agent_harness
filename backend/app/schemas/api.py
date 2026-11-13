@@ -49,6 +49,10 @@ class MessageSend(ApiModel):
 
 class ClarificationSubmit(ApiModel):
     content: str = Field(min_length=1, max_length=10000)
+    # BC-01：幂等键（客户端生成）；缺省时按 Run/修订/回答内容派生。
+    client_clarification_id: str | None = Field(default=None, min_length=1, max_length=128)
+    # 前端回传所回答的请求 ID；与服务端当前请求不一致时 409（避免回答错版本）。
+    question_id: str | None = Field(default=None, max_length=64)
 
 
 class RunAccepted(ApiModel):

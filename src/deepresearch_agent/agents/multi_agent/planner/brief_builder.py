@@ -30,6 +30,7 @@ from deepresearch_agent.agents.multi_agent.core.plan_spec import (
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.planner.result import PlannerResult
 from deepresearch_agent.harness.contracts import SourceMode
+from deepresearch_agent.harness.clarifications import has_answers, merge_into_history
 from deepresearch_agent.harness.research_brief import BudgetPolicy, ResearchBrief
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,7 @@ class BriefBuilder:
         context = self._ensure_plan_context(state)
         failures = list(assumptions or [])
         refined_query = (context.refined_query or context.original_query or "").strip()
+        clarified_before = has_answers(state.context_snapshot)
 
         # 1）简单请求捷径：短定义/摘要 → 单个有界检索任务（不凑长文）
         simple = self._simple_plan(state, context, failures)
@@ -101,6 +103,7 @@ class BriefBuilder:
                 not clarification.is_satisfied(context)
                 and not self.config.allow_unclarified_plan
                 and not failures
+                and not clarified_before
             ):
                 logger.info("BriefBuilder：澄清未满足，暂停计划生成")
                 return PlannerResult(
@@ -263,4 +266,7 @@ class BriefBuilder:
 
         if state.plan_context is None:
             state.plan_context = PlanContext(original_query=state.input or "")
+        # BC-01：已回答的澄清问答对进入规划上下文（Clarifier.is_satisfied 可见；
+        # 同一 Run 不重复要求同一声明）。
+        merge_into_history(state.context_snapshot, state.plan_context.clarification_history)
         return state.plan_context

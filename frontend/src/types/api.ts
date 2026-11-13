@@ -3,9 +3,14 @@ export type WorkflowMode = "deep_research" | "plan_execute_report";
 
 export interface Session { session_id: string; title: string; status: string; memory_snapshot_version?: number | null; memory_snapshot_created_at?: string | null; created_at: string; updated_at: string; }
 export interface Message { message_id: string; run_id?: string | null; role: string; content: string; metadata_json: string; created_at: string; }
+export interface ClarificationRequestView {
+  question_id: string; questions: string[]; revision: number;
+  status: "pending" | "answered"; asked_at?: string | null; answered_at?: string | null;
+}
 export interface Run {
   run_id: string; source_mode: SourceMode; workflow_mode: WorkflowMode; status: string; current_stage?: string | null;
   error_code?: string | null; error_message?: string | null; cancellation_requested?: boolean; pause_requested?: boolean; created_at: string; updated_at: string;
+  clarification?: ClarificationRequestView | null;
   usage?: RunUsage | null;
 }
 export interface RunUsage {

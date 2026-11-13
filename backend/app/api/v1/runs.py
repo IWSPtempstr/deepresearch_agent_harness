@@ -10,6 +10,7 @@ from sse_starlette.sse import EventSourceResponse
 from backend.app.dependencies import get_database, get_event_stream, get_run_service
 from backend.app.schemas import ClarificationSubmit, RunControl
 from deepresearch_agent.harness.errors import AppError, ErrorCode
+from deepresearch_agent.harness.clarifications import public_view, request_from_config
 from deepresearch_agent.persistence.repositories import (
     ArtifactRepository, CheckpointRepository, ContractRepository, EvidenceRepository,
     MessageRepository, RunRepository,
@@ -98,6 +99,8 @@ def run_dict(run):
         "cancellation_requested": bool(run.cancellation_requested),
         "pause_requested": bool(config.get("pause_requested")), "created_at": run.created_at,
         "started_at": run.started_at, "completed_at": run.completed_at, "updated_at": run.updated_at,
+        # BC-01：实际澄清问题（白名单视图；旧 Run 的通用提示作为回退）
+        "clarification": public_view(request_from_config(config)),
     }
 
 
@@ -146,9 +149,14 @@ async def resume_run(run_id: str, database=Depends(get_database), run_service=De
 @router.post("/{run_id}/clarifications", response_model=RunControl)
 async def clarify_run(run_id: str, payload: ClarificationSubmit, database=Depends(get_database), run_service=Depends(get_run_service)):
     await require_run(database, run_id)
-    if not await run_service.resume(run_id, clarification=payload.content):
+    accepted, status = await run_service.submit_clarification(
+        run_id, content=payload.content,
+        client_clarification_id=payload.client_clarification_id,
+        question_id=payload.question_id,
+    )
+    if not accepted:
         raise AppError(ErrorCode.CONFLICT, "Run 当前不等待澄清")
-    return RunControl(run_id=run_id, status="queued")
+    return RunControl(run_id=run_id, status=status)
 
 
 @router.get("/{run_id}/events")

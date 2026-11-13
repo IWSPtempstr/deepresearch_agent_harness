@@ -162,3 +162,6 @@ async def test_unresolved_reference_requests_clarification(database):
     with pytest.raises(ValueError, match="needs_user_input"):
         await make_builder(database, memory_service(database)).build(context)
     assert "clarification_question" in context.config_snapshot
+    # BC-01：同时写入结构化请求，供 Run DTO/前端展示实际问题
+    assert context.config_snapshot["clarification_request"]["questions"]
+    assert context.config_snapshot["clarification_request"]["status"] == "pending"

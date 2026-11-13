@@ -371,7 +371,14 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
       )}
     </AnimatePresence>
 
-    {run?.status === "needs_user_input" && <ClarificationCard onSubmit={async (content) => { await api.clarify(run.run_id, content); await refresh(); }} />}
+    {run?.status === "needs_user_input" && <ClarificationCard
+      questions={run.clarification?.questions ?? []}
+      onSubmit={async (content) => {
+        await api.clarify(run.run_id, content, crypto.randomUUID(), run.clarification?.question_id);
+        await queryClient.invalidateQueries({ queryKey: ["session", sessionId] });
+        await refresh();
+      }}
+    />}
     <AnimatePresence>{selectedStage && run && <CardDetailDrawer stageId={selectedStage} run={run} feed={feed} report={report.data} evidence={evidence.data?.items ?? []} context={contextInspector.data} onEvidence={openEvidence} onClose={() => setSelectedStage(null)} />}</AnimatePresence>
     <EvidenceDrawer item={selectedEvidence} onClose={() => setSelectedEvidence(null)} />
     <WhiteboardDrawer sessionId={sessionId} open={whiteboardOpen} live={Boolean(run && !TERMINAL.includes(run.status))} onClose={() => setWhiteboardOpen(false)} />

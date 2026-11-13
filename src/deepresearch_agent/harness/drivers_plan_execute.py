@@ -1,12 +1,14 @@
 # 由 harness/drivers_plan_execute.py 拆分（T-016），方法体与原位置逐行一致。
 # 本文件保留类声明与导入路径；未拆出的方法：__init__, _restore, plan, execute。
 import asyncio
+from datetime import datetime, timezone
 from typing import Any
 from deepresearch_agent.agents.multi_agent.core.execution_record import ExecutionRecord
 from deepresearch_agent.agents.multi_agent.core.plan_spec import PlanSpec
 from deepresearch_agent.agents.multi_agent.core.retrieval_result import RetrievalResult
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.orchestrator import MultiAgentOrchestrator
+from deepresearch_agent.harness.clarifications import build_request, parse_answers, store_request
 from deepresearch_agent.harness.coreact_controller import CoreActController
 from deepresearch_agent.harness.coreact_state import (
     CoreActLoopState,
@@ -60,6 +62,14 @@ class PlanExecuteReportDriver(CoreActLoopMixin, CoreActSupportMixin, ReportPipel
         self.report_result: ReportResult | None = None
         self._repair_pending = False
         self._restore(context.workflow_state)
+        # BC-01：Run 行上的澄清回答是权威输入；恢复的 checkpoint 快照可能早于
+        # 本次回答，合并后 BriefBuilder 才能消费（不覆盖已有快照字段）。
+        self.state.context_snapshot = {
+            **(self.state.context_snapshot or {}),
+            "clarifications": [
+                answer.model_dump(mode="json") for answer in parse_answers(context.config_snapshot)
+            ],
+        }
 
     def _restore(self, payload: dict[str, Any]) -> None:
         if not payload:
@@ -96,6 +106,16 @@ class PlanExecuteReportDriver(CoreActLoopMixin, CoreActSupportMixin, ReportPipel
         )
         if self.planner_result.plan_spec is None:
             if self.planner_result.needs_clarification():
+                # BC-01：把澄清器给出的**实际问题**写入 Run 请求（由 Runtime
+                # 落库并暴露给前端）；空问题退回一条可回答的通用问句，不造问题。
+                questions = list(self.planner_result.clarification.questions or [])
+                if not questions:
+                    questions = ["请补充研究范围、时间条件或期望的输出形式。"]
+                request = build_request(
+                    self.context.config_snapshot, questions=questions, source="brief",
+                    now=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                )
+                store_request(self.context.config_snapshot, request)
                 raise NeedsUserInput("needs_user_input")
             raise RuntimeError("Planner 未生成可执行 PlanSpec")
         # T-408：唯一 coreact 路径（orchestration != coreact_v1 的存量快照在

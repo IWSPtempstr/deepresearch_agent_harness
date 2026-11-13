@@ -65,7 +65,8 @@ export const api = {
   cancel: (id: string) => request(`/runs/${id}/cancel`, { method: "POST" }),
   pause: (id: string) => request(`/runs/${id}/pause`, { method: "POST" }),
   resume: (id: string) => request(`/runs/${id}/resume`, { method: "POST" }),
-  clarify: (id: string, content: string) => request(`/runs/${id}/clarifications`, { method: "POST", body: JSON.stringify({ content }) }),
+  clarify: (id: string, content: string, clientClarificationId?: string, questionId?: string) =>
+    request(`/runs/${id}/clarifications`, { method: "POST", body: JSON.stringify({ content, client_clarification_id: clientClarificationId, question_id: questionId }) }),
   evidence: (id: string) => request<{items: Evidence[]; total: number}>(`/runs/${id}/evidence`),
   report: (id: string) => request<Report>(`/runs/${id}/report`),
   context: (id: string) => request<ContextInspector>(`/runs/${id}/context`),

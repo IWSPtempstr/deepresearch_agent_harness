@@ -96,6 +96,34 @@
 - `error` 拟含 code/message/retryable/details；保留 AppError 业务码，不退化成类名。
 - `allowed_actions` 从持久状态和服务端能力派生，不由 LLM 任意给出；UI 与 API 的状态门一致。
 
+### 澄清协议（BC-01 实现）
+
+Run `config_snapshot` 持久化两个键（旧 Run 只有 `clarification_question` 时按只读回退）：
+
+```json
+{
+  "clarification_request": {
+    "schema_version": 1, "question_id": "clar_1_ab12cd34",
+    "questions": ["实际问题 1", "实际问题 2"], "revision": 1,
+    "source": "brief|context_builder|manual", "asked_at": "ISO8601",
+    "status": "pending|answered", "answered_at": null, "answer_id": null
+  },
+  "clarifications": [
+    {"schema_version": 1, "clarification_id": "clarify-<hash>", "content": "用户回答",
+     "question_id": "clar_1_ab12cd34", "questions": ["实际问题 1"],
+     "revision": 1, "message_id": "msg_...", "created_at": "ISO8601"}
+  ]
+}
+```
+
+- `POST /runs/{id}/clarifications` 接受 `content`、可选 `client_clarification_id`（幂等键）
+  与 `question_id`；同键同内容重复提交返回成功且不重复写消息/历史，同键不同内容或
+  回答错版本（question_id 不匹配）返回 409。
+- 回答作为 user message 原子写入会话（含 `clarification` 元数据），ContextBuilder 把它
+  并入 `resolved_query` 与受保护上下文块，BriefBuilder 并入
+  `PlanContext.clarification_history`；同一 Run 已有回答时不再重复要求澄清。
+- 回答只是用户输入约束，不是研究证据，不参与 Completion Contract。
+
 ## 4. ActionResult / ObservationSummary
 
 ```json
