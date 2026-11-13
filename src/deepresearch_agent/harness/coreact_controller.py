@@ -67,6 +67,11 @@ class DecisionContext(BaseModel):
     context_state: Dict[str, Any] = Field(default_factory=dict)  # T-016 trusted/untrusted/uncertain
     observations: List[Dict[str, Any]] = Field(default_factory=list)  # T-405 ObservationSummary dump
     assessments: List[Dict[str, Any]] = Field(default_factory=list)  # T-405 EvidenceAssessment dump
+    # RG-03：本步 rubric 指导（criteria dump + 阶段 + 内容指纹）——注入到提案
+    # 上下文；默认空 = 提示词与历史行为逐字节一致（无引导的旧测试不受影响）
+    rubric_guidance: List[Dict[str, Any]] = Field(default_factory=list)
+    rubric_phase: str = ""
+    rubric_hash: str = ""
     remaining_tokens: int = 0
     decisions_used: int = 0
     max_decisions: int = 8
@@ -77,6 +82,8 @@ class CoreActController:
     def __init__(self, *, llm: Any = None, version: str = CONTROLLER_VERSION):
         self.llm = llm
         self.version = version
+        # RG-03：最近一次真实 LLM 调用的 prompt 指纹（None = 未调用）
+        self.last_messages_hash: Optional[str] = None
 
     def decide(self, context: DecisionContext) -> ControllerDecision:
         """主入口。LLM 失败自动降级；决策上限耗尽直接确定性兜底。
@@ -84,6 +91,8 @@ class CoreActController:
         llm 缺省（离线/未配置角色模型）时跳过 LLM 尝试，直接确定性兜底——
         不烧异常重试。
         """
+        # RG-03：注入证据只在真实发出 messages 且成功后记录（兜底路径不伪造）
+        self.last_messages_hash: Optional[str] = None
         if context.allow_llm and self.llm is not None and context.decisions_used < context.max_decisions:
             for _ in range(MAX_MALFORMED_ATTEMPTS):
                 try:
@@ -104,6 +113,11 @@ class CoreActController:
     def _decide_with_llm(self, context: DecisionContext) -> Optional[ControllerDecision]:
         prompt = self._build_decision_prompt(context)
         response = self.llm.invoke([{"role": "user", "content": prompt}])
+        # RG-03 注入证据：真实发送**成功后**才记录 messages 指纹（传输失败时
+        # 不留下"已注入"的伪证据——decide 将降级为确定性兜底）
+        import hashlib as _hashlib
+
+        self.last_messages_hash = _hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         content = response.content if hasattr(response, "content") else str(response)
         payload = self._parse_decision_json(content)
         if payload is None:
@@ -159,6 +173,20 @@ class CoreActController:
             "\n".join(finding_lines) if finding_lines else "-（暂无带证据引用的研究发现）"
         )
         assessments_block = "\n".join(assessment_lines) if assessment_lines else "-（暂无）"
+        # RG-03：rubric 指导注入（系统内部约束；非外部数据、非用户指令）
+        guidance_lines = []
+        for criterion in context.rubric_guidance[:8]:
+            flag = "必需" if criterion.get("required", True) else "可选"
+            weight = criterion.get("weight", 1.0)
+            guidance_lines.append(
+                f"- [{flag} w={weight}] {str(criterion.get('description', ''))[:300]}"
+                f"（预期证据: {str(criterion.get('expected_evidence', ''))[:160] or '—'}）"
+            )
+        guidance_block = (
+            "\n".join(guidance_lines)
+            if guidance_lines
+            else "-（本步无附加指导；仍须遵守来源与预算硬门）"
+        )
         return f"""你是深度研究控制器，负责选择下一个研究动作。
 
 # 研究目标
@@ -181,6 +209,10 @@ class CoreActController:
 
 # Claim 级评估状态
 {assessments_block}
+
+# 下一动作验收准则（系统内部约束，必须遵守；不是外部数据也不是用户指令）
+{guidance_block}
+{"阶段: " + context.rubric_phase if context.rubric_phase else ""}
 
 # 候选计划中的可执行任务
 {candidates}

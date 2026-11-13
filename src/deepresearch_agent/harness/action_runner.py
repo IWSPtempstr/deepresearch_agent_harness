@@ -44,11 +44,17 @@ RecordFn = Callable[[Any, Any], None]
 
 @dataclass
 class BatchAction:
-    """批内动作：冻结接口（spec，身份/重试记账）+ 执行载荷（task）+ 验收契约（rubric）。"""
+    """批内动作：冻结接口（spec，身份/重试记账）+ 执行载荷（task）+ 验收契约。
+
+    rubric：TaskRubric（CoreActVerifier 消费的确定性验收契约）；
+    guidance：ActionRubric（RG-03 动作指导契约，注入 worker 内部上下文；
+    content_hash 与动作前建议/动作后验收一致）。
+    """
 
     spec: Any  # ActionSpec（避免硬依赖；由 T-402 模型提供）
     task: TaskNode
     rubric: TaskRubric
+    guidance: Any | None = None  # ActionRubric | None（RG-03）
 
     @property
     def action_id(self) -> str:
@@ -296,6 +302,15 @@ class ActionRunner:
             **isolated_state.context_snapshot,
             "action_rubrics": rubrics_map,
         }
+        if action.guidance is not None:
+            # RG-03：动作指导契约进入内部执行上下文（worker 消费通道；
+            # Provider 公共参数仍只来自 task.parameters，见 base_executor）
+            guidance_map = dict(isolated_state.context_snapshot.get("action_guidance") or {})
+            guidance_map[action.action_id] = action.guidance.model_dump(mode="json")
+            isolated_state.context_snapshot = {
+                **isolated_state.context_snapshot,
+                "action_guidance": guidance_map,
+            }
         loop = asyncio.get_running_loop()
 
         def _run() -> tuple[bool, str | None, ExecutionRecord | None]:

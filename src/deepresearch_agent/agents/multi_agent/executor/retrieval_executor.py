@@ -132,17 +132,44 @@ class RetrievalExecutor(BaseExecutor):
             tool_call_id=tool_call_id, provider=provider.provider_name,
         ) if success else []
 
+        environment = {
+            "execution_mode": signal.execution_mode,
+            "cache_key": cache_key,
+            "source_mode": state.source_mode,
+            "provider": provider.provider_name,
+        }
+        # RG-03：worker 真实消费注入的 rubric 指导（读取内部上下文通道，
+        # 计算判词匹配证据；Provider 公共参数不变——payload 未被 rubric 触碰）。
+        # 纯检索执行器无 LLM：这里做确定性的判词匹配标记，不伪称“读懂 rubric”。
+        guidance = ((state.context_snapshot or {}).get("action_guidance") or {}).get(f"action_{task.task_id}")
+        if isinstance(guidance, dict):
+            # 注入载荷 = guidance dump 原样（与 record 侧 worker_injection 的
+            # messages_hash 同一内容，审计可核对）
+            environment["guidance"] = dict(guidance)
+            required_terms = [
+                str(term) for criterion in guidance.get("criteria", []) or []
+                if isinstance(criterion, dict) for term in criterion.get("required_terms", []) or []
+                if str(term).strip()
+            ]
+            evidence_texts = [str(item.evidence or "") for item in evidence]
+            matched = [
+                evidence_id for evidence_id, text in zip(
+                    [str(getattr(item, "result_id", "") or "") for item in evidence], evidence_texts
+                )
+                if any(term.lower() in text.lower() for term in required_terms)
+            ] if required_terms else []
+            environment["guidance_consumption"] = {
+                "required_terms": required_terms[:8],
+                "matched_evidence_ids": matched[:8],
+                "consumed": True,
+            }
+
         metadata = ExecutionMetadata(
             worker_type=self.worker_type,
             latency_seconds=latency,
             tool_calls_count=1,
             evidence_count=len(evidence),
-            environment={
-                "execution_mode": signal.execution_mode,
-                "cache_key": cache_key,
-                "source_mode": state.source_mode,
-                "provider": provider.provider_name,
-            },
+            environment=environment,
         )
 
         record = ExecutionRecord(

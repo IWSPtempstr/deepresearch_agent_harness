@@ -18,7 +18,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from deepresearch_agent.harness.action_models import RubricInjectionRecord
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +33,20 @@ class CoreActPaused(RuntimeError):
 
 
 class PendingAction(BaseModel):
-    """已决定、正在执行或等待验证的动作（含其 rubric 与重试计数）。"""
+    """已决定、正在执行或等待验证的动作（含其 rubric 与重试计数）。
+
+    RG-03：guidance（ActionRubric dump）与 pre_verification
+    （PreActionVerification dump）随 intent 一并持久化——崩溃恢复后 worker
+    仍收到同一指导、记录仍携带动作前判定；旧快照缺字段时为 None（兼容）。
+    """
 
     task: Dict[str, Any]  # TaskNode.model_dump()——避免跨层模型耦合
     rubric: Dict[str, Any]  # TaskRubric.model_dump()
     attempt: int = Field(default=1, ge=1)
     # 上一次验证失败的定向反馈（attempt=2 时注入执行）
     retry_reason: Optional[str] = None
+    guidance: Optional[Dict[str, Any]] = None
+    pre_verification: Optional[Dict[str, Any]] = None
 
     @property
     def action_id(self) -> str:
@@ -90,6 +98,26 @@ class CoreActLoopState(BaseModel):
     observations: List[Dict[str, Any]] = Field(default_factory=list)
     # T-405：claim 级评估（EvidenceAssessment dump；supported≠事实认证）。
     assessments: List[Dict[str, Any]] = Field(default_factory=list)
+    # RG-03：失败/被丢弃的动作前判定历史（含成本；有界 ≤16，供审计）
+    pre_action_history: List[Dict[str, Any]] = Field(default_factory=list)
+
+    # RG-03：rubric 注入证据（controller/worker 实际 messages 指纹；有界 ≤32）。
+    # 类型化容器（RG-01 冻结模型）——序列化/恢复均为 RubricInjectionRecord。
+    rubric_injections: List[RubricInjectionRecord] = Field(default_factory=list)
+
+    @field_validator("pre_action_history")
+    @classmethod
+    def _bounded_pre_history(cls, value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if len(value) > 16:
+            raise ValueError("pre_action_history 超过硬上限 16 条")
+        return value
+
+    @field_validator("rubric_injections")
+    @classmethod
+    def _bounded_injections(cls, value: List[RubricInjectionRecord]) -> List[RubricInjectionRecord]:
+        if len(value) > 32:
+            raise ValueError("rubric_injections 超过硬上限 32 条")
+        return value
 
     @property
     def next_operation(self) -> Literal["execute", "report"]:

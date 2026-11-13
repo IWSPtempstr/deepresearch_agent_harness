@@ -250,6 +250,25 @@ class CoreActSupportMixin:
             "execution_error": error,
         }
 
+    @staticmethod
+    def _bounded_pre_reason(pre) -> str:
+        """把 PreActionVerification 压成一条有界失败原因（failure_reasons 用）。"""
+        status = getattr(pre, "status", "not_run")
+        reasons = [
+            f"{item.criterion_id}:{item.reason}" for item in getattr(pre, "criteria", []) or []
+            if getattr(item, "status", None) in {"fail", "unknown"} and item.reason
+        ]
+        advice = [str(item) for item in getattr(pre, "advice", []) or []]
+        parts = (reasons or advice) or ["无附加说明"]
+        return f"{status}: " + "；".join(parts)[:300]
+
+    def _coreact_append_injection(self, record: Any) -> None:
+        """RG-03：注入证据有界追加（模型层硬上限 32；超限丢最旧，保证不崩溃）。"""
+        if record is None:
+            return
+        injections = [*self.coreact_loop.rubric_injections, record]
+        self.coreact_loop.rubric_injections = injections[-32:]
+
     def coreact_semantic_gaps(self) -> list[dict[str, Any]]:
         """T-405：语义核验存在 unknown/fail 的**动作**清单（报告降级依据）。
 

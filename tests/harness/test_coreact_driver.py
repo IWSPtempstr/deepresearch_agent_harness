@@ -25,6 +25,13 @@ class ScriptedLLM:
     def __init__(self, answers):
         self.answers = list(answers)
         self.prompts = []
+        self.bound_max_tokens = None
+
+    def bind(self, **kwargs):
+        # RG-03：建议器要求可强制生成配额（bind max_tokens）；脚本模型按原样
+        # 返回自身并记录下发值，便于断言配额确实传递。
+        self.bound_max_tokens = kwargs.get("max_tokens")
+        return self
 
     def invoke(self, messages):
         self.prompts.append(messages[-1]["content"])

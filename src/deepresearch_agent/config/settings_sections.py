@@ -445,6 +445,11 @@ COREACT_RUBRIC_GENERATOR = _get_env_choice(
 COREACT_PRE_ACTION_MODE = _get_env_choice(
     "COREACT_PRE_ACTION_MODE", {"off", "advisory", "required"}, "off",
 )
+# RG-04：报告质量维度（RACE 风格诊断）。默认关闭；开启后仅作展示/开发诊断，
+# advisory-only——不替代确定 Contract、证据引用与语义检查，不参与 completed。
+REPORT_QUALITY_ASSESSMENT_ENABLED = _get_env_bool(
+    "REPORT_QUALITY_ASSESSMENT_ENABLED", False,
+)
 # T-408：MULTI_AGENT_WORKER_EXECUTION_MODE / MULTI_AGENT_WORKER_MAX_CONCURRENCY /
 # MA_REFLECTION_* 已随 staged 引擎删除（并发上限由 Harness 预算权威约束）。
 
@@ -553,6 +558,7 @@ __all__ = [
     "REPORT_BATCH_BUDGET_RATIO",
     "REPORT_BATCH_DIGEST_MAX_TOKENS",
     "REPORT_MAX_MODEL_CALLS",
+    "REPORT_QUALITY_ASSESSMENT_ENABLED",
     "REPORT_MAX_SECTIONS",
     "REPORT_RESERVED_TOKENS",
     "REPORT_SECTION_EVIDENCE_BUDGET",

@@ -96,11 +96,12 @@ rubric 生成、事前建议、修订和事后语义检查全部计入统一预�
 - 实际证据：`harness/rubric_builder.py`（PHASE_RULE_VERSION=phase_rule_v1 持久化到 rubric.phase_rule_version；phase 规则 = 剩余预算比 <0.20 或工具比 ≥0.80 → synthesize，无账本证据或未解决问题 ≥2 → explore，否则 deepen——不按固定步数判定；确定性生成与 build_task_rubric 同构（evidence/source/output/claim/nodup 权重一致）+ 固定硬门 origin=fixed 合并（模型文本整体替换，不冒充 fixed）；模型路径：bind(max_tokens=generation_allocation_tokens) 可强制下发——不支持/失败 → **零调用**回退（model_no_generation_cap），响应侧超配额拒绝（generation_over_allocation），真实 deadline（ThreadPoolExecutor+future.result(timeout)）；准入 = 报告/验证预留 + CJK 感知 prompt 估算（count_tokens）+ 生成配额；失败尝试计入 usage（calls≥1、estimated、response_known 区分超时/已知响应）；claim_support 判词缺失 → 从验收条件抽取，仍无 → 回退；计数门（merge 后裁剪至 max、受控填充至 min，config 校验 min≥3/max≤5/max≥min）。`tests/harness/test_rubric_builder.py` 44 项覆盖全部验收点。独立 review 两轮（round1：超时未强制/预留未保护/失败零成本/装配越界/判词丢失/计数门/尾部截断/规则版本/混合来源/ID 碰撞；round2：配额不可强制、min5 回退抛错、已知响应成本、header 超预算、CJK 低估）全部修复，终审 APPROVE（2 项 minor 随 RG-03 落地：source_mode clip、CJK est）。门禁：ruff 通过；pytest 567 passed/4 skipped。
 
 ### RG-03 — 注入消费与事前建议门
-- 状态：pending
+- 状态：done（2026-11-13）
 - 依赖：RG-02
 - 触点：coreact_controller.py、action_runner.py、executor内部输入适配、拟新增 pre_action_advisor.py。
 - 动作：Controller/模型worker实际消费 rubric；同 rubric 一次提案修订；内部通道与 Provider 参数隔离。
 - 验收：捕获实际发送 messages 证明注入；pass/fail/unknown/not_run、required 与 advisory、提案未变、来源越权、费用上限；仅写 context 字段不算完成。
+- 实际证据：`harness/pre_action_advisor.py`（确定性可判项 source_policy/no_duplicate_query；动作前不可判定 kind（evidence_presence/output_schema/claim_support）固定 unknown，模型增强**只能判 fail 不能判 pass**；模型调用须 bind(max_tokens=800)+真实 deadline（10s），不支持/失败 → 零调用确定性回退；失败调用如实计成本：已知响应计全量 token、传输失败按保守配额估算，bind 失败零成本）。`coreact_loop.py`：每步提案前用 RubricBuilder 构建 guidance（deterministic 默认）→ 注入 DecisionContext（controller prompt 新增"下一动作验收准则（系统内部约束）"段）→ 控制器真实调用后记录 `RubricInjectionRecord`（sha256(实际 prompt)，仅成功调用才记录）；动作级 bind（content_hash 不变）；**整批口径**动作前门——无问题保留（advisory unknown 记 degraded）、有问题先释放整批 tool 预约再做**一次**提案修订（同 rubric_id/hash；有实质变化且通过 detached 确定性准入 → 整批替换为单一动作并复检；未变/被拒/不存在 → 整批不派发、交控制器下一轮），原批次判定与成本归档到 `pre_action_history`（≤16）；每个动作前重算 LLM 许可并扣减/记账共享 `llm_tokens`；预约精确对账（各路径 reserved 归零）；pending intent 持久化 guidance+pre_verification（含修正重试），恢复重放还原并产出 worker 注入证据；worker 经隔离副本 `action_guidance` 消费（executor 记录 guidance 原样+匹配证据），Provider 公共参数不变。`tests/harness/test_rubric_guidance_injection.py` 24 项：prompt 实际含准则且注入哈希==sha256(captured prompt)、worker 消费证据与哈希一致、Provider 参数白名单、off/advisory unknown degraded/required 阻断/一次修订/修订被拒/提案未变/多问题 K=2/预算预约/共享预算/崩溃恢复/bind 失败零成本等。独立 review 四轮（round1 2 major+10 minor；round2 4 major；round3 5 项；round4 2 项计费）全部修复，终审 APPROVE。门禁：ruff、pytest 583 passed/4 skipped、git diff --check。
 
 ### RG-04 — 事后衔接与报告质量维度
 - 状态：pending
