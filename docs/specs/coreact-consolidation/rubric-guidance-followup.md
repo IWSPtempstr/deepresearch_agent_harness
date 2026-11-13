@@ -109,7 +109,7 @@ rubric 生成、事前建议、修订和事后语义检查全部计入统一预�
 - 触点：coreact_verifier.py、ReportService、结果DTO/前端、output-contract.md。
 - 动作：同 rubric 前后关联、分别审计；RACE 风格维度可选输出，明确非官方分数；required unknown 不可通过。
 - 验收：前后 hash 相同、失败历史保留、预算耗尽/畸形判分、草稿与最终结果隔离；运行完整 pytest 与前端构建（实际命令先核对 package.json）。
-- 实际证据：`_attach_coreact_verdict` 增加 `rubric_hash`（动作后 verdict 与动作前/指导同一 content_hash，绑定 task_id 不变）；`harness/quality_assessment.py`（四维度 comprehensiveness/insight/instruction_following/readability；RACE 风格但**非官方协议/无分数字段**——响应级与维度级的 score/rating/points 字段一律按 unknown 处理；默认 not_run；准入 = VERIFICATION 预留 + CJK prompt 估算 + 800 生成配额；bind(max_tokens)+真实 deadline，bind 失败=未派发零成本；失败尝试成本如实：已知响应计全量 prompt+response、传输失败按保守配额估算、未派发零调用；聚合 any-fail→fail / all-pass→pass / 已执行含 unknown→unknown（不伪装 not_run）；归一化全程 try/except 容器化——畸形 status 类型（[]/{}/3/None）不崩溃不外溢）；report_pipeline 在报告生成后写 `report_result.report_metrics.quality_assessment`（advisory_only，不参与 Contract/completed；消耗计入共享 llm_tokens）；`GET /runs/{id}/report` 仅 completed 运行从 checkpoint 只读暴露白名单视图（status/dimensions/judge_model/prompt_version/note/advisory_only/usage.calls；异常文本不出网；嵌套损坏形状一律 None）；前端 types + 报告页“质量诊断（非官方）”展示块（not_run 不显示）。`tests/harness/test_report_quality.py` 21 项：维度协议无分数/未执行 not_run/准入预留保护（CJK 长报告）/合法与畸形（类型级/响应级/维度级 score）/失败成本三口径（未派发零、传输保守、已知全量）/管线开关与共享预算记账/前后 hash 相同/失败尝试历史保留/DTO completed-only 与草稿隔离/损坏 checkpoint 容错/密钥不外泄。独立 review 一轮（3 HIGH + 4 MEDIUM）+ 复审 1 项（失败调用成本）全部修复。门禁：pytest 604 passed/4 skipped、ruff、git diff --check、`npm run build`。
+- 实际证据：`_attach_coreact_verdict` 增加 `rubric_hash`（动作后 verdict 与动作前/指导同一 content_hash，绑定 task_id 不变）；`harness/quality_assessment.py`（四维度 comprehensiveness/insight/instruction_following/readability；RACE 风格但**非官方协议/无分数字段**——响应级与维度级的 score/rating/points 字段一律按 unknown 处理；默认 not_run；准入 = VERIFICATION 预留 + CJK prompt 估算 + 800 生成配额；bind(max_tokens)+真实 deadline，bind 失败=未派发零成本；失败尝试成本如实：已知响应计全量 prompt+response、传输失败按保守配额估算、未派发零调用；聚合 any-fail→fail / all-pass→pass / 已执行含 unknown→unknown（不伪装 not_run）；归一化全程 try/except 容器化——畸形 status 类型（[]/{}/3/None）不崩溃不外溢）；report_pipeline 在报告生成后写 `report_result.report_metrics.quality_assessment`（advisory_only，不参与 Contract/completed；消耗计入共享 llm_tokens）；`GET /runs/{id}/report` 仅 completed 运行从 checkpoint 只读暴露白名单视图（status/dimensions/judge_model/prompt_version/note/advisory_only/usage.calls；异常文本不出网；嵌套损坏形状一律 None）；前端 types + 报告页“质量诊断（非官方）”展示块（not_run 不显示）。`tests/harness/test_report_quality.py` 21 项：维度协议无分数/未执行 not_run/准入预留保护（CJK 长报告）/合法与畸形（类型级/响应级/维度级 score）/失败成本三口径（未派发零、传输保守、已知全量）/管线开关与共享预算记账/前后 hash 相同/失败尝试历史保留/DTO completed-only 与草稿隔离/损坏 checkpoint 容错/密钥不外泄。独立 review 一轮（3 HIGH + 4 MEDIUM）+ 复审 1 项（失败调用成本）全部修复。门禁：pytest 605 passed/4 skipped、ruff、git diff --check、`npm run build`。
 
 ## 6. 之前业务计划的未完成项（独立排期，非本次实现）
 
@@ -125,7 +125,7 @@ BC-01～05 依赖已完成的 T-017 执行底座，互相可独立修复；BC-04
 
 ## 7. 验收矩阵与范围声明（实施后）
 
-实施提交链：`d7f278f`(RG-01) → `aff885a`(RG-02) → `33f1aee`(RG-03) → RG-04（本提交）。
+实施提交链：`d7f278f`(RG-01) → `aff885a`(RG-02) → `33f1aee`(RG-03) → `31db944`+`ee1fef6`(RG-04)。
 每阶段 实现→正确性测试→独立 review→修复/复审→本地提交。
 
 | 项 | 任务 | 当前结果 |
