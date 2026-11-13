@@ -215,3 +215,31 @@ ResearchRunResult 可附 revision metadata（base_run_id、base_artifact_id/hash
 - 旧 rubric 记录按 `schema_version=1` 宽松只读兼容（历史上可能存在权重 >10、
   判词 >8 或全员 optional 的记录）；新写入 `schema_version=2` 才强制严格
   不变量（权重上限、必需准则、权重和 > 0）。
+
+## 4.2 质量维度与前后判定衔接（RG-04 增量）
+
+### 动作前 / 动作后判定
+
+- 同一动作的 `guidance.content_hash`、`pre_action_verification.rubric_hash` 与
+  记录中的动作后 `rubric_hash` **必须一致**（同一 rubric 身份，绑定 task_id
+  不改 hash）；动作前 status（pass/fail/unknown/not_run）与动作后 verification
+  独立保存，不互相覆盖。
+- 失败尝试保留：每次 attempt 的记录携带自己的 hash 与 verdict，`active`
+  只指向最新有效尝试；原批次被修订替换时，其判定与 usage 归档到
+  `pre_action_history`（有界 16）。
+- required 的动作前判定：fail/unknown 不得派发（整批口径，一次提案修订后
+  仍不满足则整批不派发）；advisory 的 unknown 只记 degraded，不等于验证通过。
+
+### 报告质量维度（advisory-only）
+
+- 类型：`ReportQualityAssessment`（`harness/quality_assessment.py`），维度为
+  comprehensiveness / insight / instruction_following / readability；
+- **不是**官方 DRB/RACE 协议，不产生可比较官方分数；模型输出中的分数字段
+  一律按 unknown 处理（不采用任何数值），协议本身没有分数字段；
+- 默认关闭（`REPORT_QUALITY_ASSESSMENT_ENABLED=false`）；未启用/无模型/
+  预算不足/输出非法一律 `not_run`，不造分；
+- `advisory_only=true`：不替代确定性 Contract、证据引用与语义支持检查，
+  不参与 `completed` 判定；
+- 暴露方式：写入报告快照 `report_result.report_metrics.quality_assessment`
+  （随 checkpoint 持久化），`GET /runs/{id}/report` 只读返回；失败/草稿
+  运行没有报告快照，因此不会暴露诊断。

@@ -449,6 +449,10 @@ class CoreActLoopMixin:
                     self._attach_coreact_verdict(
                         attempt_outcome.record, action.rubric, attempt_outcome.verdict,
                         attempt=attempt_outcome.action.attempt, error=attempt_outcome.error,
+                        rubric_hash=(
+                            action.guidance.content_hash
+                            if action.guidance is not None else ""
+                        ),
                     )
                     if action.guidance is not None:
                         payload = attempt_outcome.record.metadata.environment.setdefault("coreact", {})

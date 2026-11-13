@@ -240,7 +240,10 @@ class CoreActSupportMixin:
         cs.uncertain = cs.uncertain[-10:]
 
     @staticmethod
-    def _attach_coreact_verdict(record, rubric, verdict, *, attempt: int, error: str | None) -> None:
+    def _attach_coreact_verdict(
+        record, rubric, verdict, *, attempt: int, error: str | None,
+        rubric_hash: str = "",
+    ) -> None:
         if record is None:
             return
         record.metadata.environment["coreact"] = {
@@ -248,6 +251,8 @@ class CoreActSupportMixin:
             "verdict": verdict.model_dump(mode="json"),
             "attempt": attempt,
             "execution_error": error,
+            # RG-04：动作后验收绑定 guidance 内容指纹（与动作前判定同 hash）
+            "rubric_hash": rubric_hash,
         }
 
     @staticmethod

@@ -14,11 +14,13 @@ from deepresearch_agent.config.settings import (
     REPORT_BATCH_BUDGET_RATIO,
     REPORT_BATCH_DIGEST_MAX_TOKENS,
     REPORT_MAX_SECTIONS,
+    REPORT_QUALITY_ASSESSMENT_ENABLED,
     REPORT_RESERVED_TOKENS,
     REPORT_SECTION_EVIDENCE_BUDGET,
     VERIFICATION_RESERVED_TOKENS,
 )
 from .report_safety import add_inline_citations, citation_evidence_ids, has_internal_material, rank_evidence, sanitize_report
+from .quality_assessment import assess_report_quality, build_quality_judge
 from deepresearch_agent.harness.report_fallbacks import _evidence_only_report
 
 
@@ -51,8 +53,41 @@ class ReportPipelineStagedMixin:
             )
             if "## 局限（语义核验）" not in self.report_result.final_report:
                 self.report_result.final_report += note
+        self._attach_quality_assessment()
         self.state.response = self.report_result.final_report
         return self.report_result.final_report
+
+    def _attach_quality_assessment(self) -> None:
+        """RG-04：报告质量维度（诊断，advisory-only）。
+
+        - 默认关闭；开启时用控制器同一模型端点（独立上下文）做一次非官方诊断；
+        - 预算不足/无模型/输出非法 → not_run（不造分、不影响 Run 结果与 Contract）；
+        - 仅写入 report_metrics（随 checkpoint 持久化，报告端点只读暴露）。
+        """
+        judge = getattr(self, "quality_judge", None)
+        judge_model = getattr(self, "quality_judge_model", None)
+        if judge is None and REPORT_QUALITY_ASSESSMENT_ENABLED:
+            llm = getattr(getattr(self, "_coreact_controller", None), "llm", None)
+            if llm is not None:
+                judge_model = getattr(llm, "model_name", None)
+                judge = build_quality_judge(llm, model_id=judge_model)
+        remaining = max(
+            0,
+            self.context.budget_limits.max_llm_tokens - self.context.budget_usage.llm_tokens,
+        )
+        assessment = assess_report_quality(
+            judge=judge,
+            report=self.report_result.final_report,
+            query=self.context.resolved_query or self.context.original_query,
+            remaining_tokens=remaining,
+            reserve_tokens=VERIFICATION_RESERVED_TOKENS,
+            judge_model=judge_model,
+        )
+        # §4.6：诊断消耗计入共享预算（估算口径；后续门/审计可见）
+        spent = max(0, int(assessment.usage.get("estimated_tokens", 0) or 0))
+        if spent:
+            self.context.budget_usage.llm_tokens += spent
+        self.report_result.report_metrics["quality_assessment"] = assessment.model_dump(mode="json")
 
     def _requires_reserved_budget_fallback(self) -> bool:
         remaining = (

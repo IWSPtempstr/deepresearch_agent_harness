@@ -104,11 +104,12 @@ rubric 生成、事前建议、修订和事后语义检查全部计入统一预�
 - 实际证据：`harness/pre_action_advisor.py`（确定性可判项 source_policy/no_duplicate_query；动作前不可判定 kind（evidence_presence/output_schema/claim_support）固定 unknown，模型增强**只能判 fail 不能判 pass**；模型调用须 bind(max_tokens=800)+真实 deadline（10s），不支持/失败 → 零调用确定性回退；失败调用如实计成本：已知响应计全量 token、传输失败按保守配额估算，bind 失败零成本）。`coreact_loop.py`：每步提案前用 RubricBuilder 构建 guidance（deterministic 默认）→ 注入 DecisionContext（controller prompt 新增"下一动作验收准则（系统内部约束）"段）→ 控制器真实调用后记录 `RubricInjectionRecord`（sha256(实际 prompt)，仅成功调用才记录）；动作级 bind（content_hash 不变）；**整批口径**动作前门——无问题保留（advisory unknown 记 degraded）、有问题先释放整批 tool 预约再做**一次**提案修订（同 rubric_id/hash；有实质变化且通过 detached 确定性准入 → 整批替换为单一动作并复检；未变/被拒/不存在 → 整批不派发、交控制器下一轮），原批次判定与成本归档到 `pre_action_history`（≤16）；每个动作前重算 LLM 许可并扣减/记账共享 `llm_tokens`；预约精确对账（各路径 reserved 归零）；pending intent 持久化 guidance+pre_verification（含修正重试），恢复重放还原并产出 worker 注入证据；worker 经隔离副本 `action_guidance` 消费（executor 记录 guidance 原样+匹配证据），Provider 公共参数不变。`tests/harness/test_rubric_guidance_injection.py` 24 项：prompt 实际含准则且注入哈希==sha256(captured prompt)、worker 消费证据与哈希一致、Provider 参数白名单、off/advisory unknown degraded/required 阻断/一次修订/修订被拒/提案未变/多问题 K=2/预算预约/共享预算/崩溃恢复/bind 失败零成本等。独立 review 四轮（round1 2 major+10 minor；round2 4 major；round3 5 项；round4 2 项计费）全部修复，终审 APPROVE。门禁：ruff、pytest 583 passed/4 skipped、git diff --check。
 
 ### RG-04 — 事后衔接与报告质量维度
-- 状态：pending
+- 状态：done（2026-11-13）
 - 依赖：RG-03
 - 触点：coreact_verifier.py、ReportService、结果DTO/前端、output-contract.md。
 - 动作：同 rubric 前后关联、分别审计；RACE 风格维度可选输出，明确非官方分数；required unknown 不可通过。
 - 验收：前后 hash 相同、失败历史保留、预算耗尽/畸形判分、草稿与最终结果隔离；运行完整 pytest 与前端构建（实际命令先核对 package.json）。
+- 实际证据：`_attach_coreact_verdict` 增加 `rubric_hash`（动作后 verdict 与动作前/指导同一 content_hash，绑定 task_id 不变）；`harness/quality_assessment.py`（四维度 comprehensiveness/insight/instruction_following/readability；RACE 风格但**非官方协议/无分数字段**——响应级与维度级的 score/rating/points 字段一律按 unknown 处理；默认 not_run；准入 = VERIFICATION 预留 + CJK prompt 估算 + 800 生成配额；bind(max_tokens)+真实 deadline，bind 失败=未派发零成本；失败尝试成本如实：已知响应计全量 prompt+response、传输失败按保守配额估算、未派发零调用；聚合 any-fail→fail / all-pass→pass / 已执行含 unknown→unknown（不伪装 not_run）；归一化全程 try/except 容器化——畸形 status 类型（[]/{}/3/None）不崩溃不外溢）；report_pipeline 在报告生成后写 `report_result.report_metrics.quality_assessment`（advisory_only，不参与 Contract/completed；消耗计入共享 llm_tokens）；`GET /runs/{id}/report` 仅 completed 运行从 checkpoint 只读暴露白名单视图（status/dimensions/judge_model/prompt_version/note/advisory_only/usage.calls；异常文本不出网；嵌套损坏形状一律 None）；前端 types + 报告页“质量诊断（非官方）”展示块（not_run 不显示）。`tests/harness/test_report_quality.py` 21 项：维度协议无分数/未执行 not_run/准入预留保护（CJK 长报告）/合法与畸形（类型级/响应级/维度级 score）/失败成本三口径（未派发零、传输保守、已知全量）/管线开关与共享预算记账/前后 hash 相同/失败尝试历史保留/DTO completed-only 与草稿隔离/损坏 checkpoint 容错/密钥不外泄。独立 review 一轮（3 HIGH + 4 MEDIUM）+ 复审 1 项（失败调用成本）全部修复。门禁：pytest 604 passed/4 skipped、ruff、git diff --check、`npm run build`。
 
 ## 6. 之前业务计划的未完成项（独立排期，非本次实现）
 
@@ -122,15 +123,21 @@ rubric 生成、事前建议、修订和事后语义检查全部计入统一预�
 
 BC-01～05 依赖已完成的 T-017 执行底座，互相可独立修复；BC-04 必须先冻结修订输出协议，BC-05 在相关后端行为确定后收尾。不存在授权清库、取消历史任务或访问付费服务的隐含许可。
 
-## 7. 验收矩阵与范围声明
+## 7. 验收矩阵与范围声明（实施后）
+
+实施提交链：`d7f278f`(RG-01) → `aff885a`(RG-02) → `33f1aee`(RG-03) → RG-04（本提交）。
+每阶段 实现→正确性测试→独立 review→修复/复审→本地提交。
 
 | 项 | 任务 | 当前结果 |
 |---|---|---|
-| 轨迹条件化、phase感知生成与回退 | RG-02 | 未执行 |
-| 实际 messages 含 rubric，Provider 无内部字段 | RG-03 | 未执行 |
-| 同 rubric 一次提案修订，advisory unknown 显式降级 | RG-03 | 未执行 |
-| required unknown 不放行；前后 verdict 不混同 | RG-01/03/04 | 未执行 |
-| RACE 风格维度与官方评测分数不混淆 | RG-04 | 未执行 |
-| 澄清/控制/SSE/修订/历史交付闭环 | BC-01～05 | 未执行 |
+| 轨迹条件化、phase感知生成与回退 | RG-02 | PASS（test_rubric_builder.py 44 项；phase_rule_v1 持久化；非法/超时/无配额零调用回退；预留+CJK 估算+生成配额门；独立 review 3 轮 APPROVE） |
+| 实际 messages 含 rubric，Provider 无内部字段 | RG-03 | PASS（test_rubric_guidance_injection.py 24 项；注入哈希==sha256(captured prompt)；worker 消费证据与记录 guidance 哈希一致；Provider 参数白名单断言；4 轮 review APPROVE） |
+| 同 rubric 一次提案修订，advisory unknown 显式降级 | RG-03 | PASS（整批口径一次修订；detached 确定性准入；degraded/advisory_unknown_continued；预约精确对账；原判定与成本归档 pre_action_history） |
+| required unknown 不放行；前后 verdict 不混同 | RG-01/03/04 | PASS（pre_action_blocks 协议层 + 门内阻断派发；record 元数据 pre/post 独立保存；前后 rubric_hash 相同断言 test_report_quality.py；失败尝试历史保留） |
+| RACE 风格维度与官方评测分数不混淆 | RG-04 | PASS（协议无分数字段；响应级/维度级 score 字段按 unknown；默认 not_run 零调用；仅 completed 暴露；白名单 DTO 不透出异常文本；advisory_only 不参与 Contract/completed） |
+| 澄清/控制/SSE/修订/历史交付闭环 | BC-01～05 | 未执行（独立排期，不属本轮） |
 
-本次文档校验仅覆盖：新增任务唯一性、全部 pending、内部链接、前后判定字段和 hard/advisory 语义一致。代码测试与效果评测没有运行，不使用历史492项收集或其它测试数字冒充本次通过证据。
+范围声明（如实）：本轮未做效果对比实验/A/B/基准分数；未验证真实 LLM/Provider 服务
+端到端（测试以 scripted 模型 + 真实执行器栈为主）；上游 Co-ReAct 代码/模板未复制
+（仅机制思想参考，commit/许可已固定记录于 output-contract §4.1）；模型参与的
+guidance/建议/诊断调用全部默认关闭，开启需显式配置且受预留预算与生成配额约束。

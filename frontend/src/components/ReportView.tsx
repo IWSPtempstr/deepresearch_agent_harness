@@ -45,6 +45,10 @@ export function ReportView({ report, evidence, onEvidence }: {report?: Report | 
       <nav className="report-toc" aria-label="报告目录"><strong>目录</strong>{headings.map((heading, index) => <button key={`${heading.id}-${index}`} className={`level-${heading.level}`} onClick={() => jumpToHeading(index)}>{heading.title}</button>)}</nav>
       <article className="report-article">
         {report.report_mode === "budget_fallback" && <div className="report-notice"><strong>预算保护模式</strong><span>正文仅呈现可确定交付的主要发现；完整证据保存在“证据”视图。</span></div>}
+        {report.quality_assessment && report.quality_assessment.status !== "not_run" && <div className="report-notice" title={report.quality_assessment.note}>
+          <strong>质量诊断（非官方）</strong>
+          <span>{Object.entries(report.quality_assessment.dimensions).map(([name, item]) => `${name}: ${item.status}`).join(" · ")}</span>
+        </div>}
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
           a: ({href, children}) => {
             const match = href?.match(/^#evidence-(ev_[\w-]+)$/);

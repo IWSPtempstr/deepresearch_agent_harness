@@ -31,10 +31,19 @@ export interface ReportEvidenceIndex {
   provider: string; summary: string; url?: string | null; score: number;
 }
 export interface ReportSection { id: string; title: string; level: number; }
+export type QualityDimensionStatus = "pass" | "fail" | "unknown" | "not_run";
+export interface QualityDimension { status: QualityDimensionStatus; reason: string; }
+/** RG-04：RACE 风格质量维度（展示/开发诊断；非官方 DRB/RACE 分数，不参与完成判定）。 */
+export interface ReportQualityAssessment {
+  status: QualityDimensionStatus; dimensions: Record<string, QualityDimension>;
+  judge_model?: string | null; prompt_version?: string | null;
+  note: string; advisory_only: boolean;
+}
 export interface Report {
   run_id: string; status: string; content?: string | null; report_mode?: "normal" | "budget_fallback";
   sections?: ReportSection[]; evidence_index?: ReportEvidenceIndex[];
   verification: Array<{kind: string; required: boolean; passed?: boolean | null; evidence: Record<string, unknown>}>;
+  quality_assessment?: ReportQualityAssessment | null;
 }
 export interface RunEvent { event_id?: number; event_type: string; stage?: string; [key: string]: unknown; }
 export interface WhiteboardEntry {

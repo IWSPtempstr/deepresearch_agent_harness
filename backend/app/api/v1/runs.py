@@ -177,6 +177,71 @@ async def get_evidence(run_id: str, database=Depends(get_database)):
     ], "total": len(items)}
 
 
+def _public_quality_view(assessment: dict) -> dict | None:
+    """只暴露白名单诊断字段；provider 异常文本等内部信息不出网。"""
+    dimensions = assessment.get("dimensions")
+    if not isinstance(dimensions, dict):
+        return None
+    public_dimensions = {}
+    for name, entry in dimensions.items():
+        if not isinstance(entry, dict):
+            continue
+        status = entry.get("status")
+        reason = entry.get("reason")
+        public_dimensions[name] = {
+            "status": status if status in {"pass", "fail", "unknown", "not_run"} else "unknown",
+            "reason": str(reason if isinstance(reason, str) else "")[:200],
+        }
+    status = assessment.get("status")
+    usage = assessment.get("usage") if isinstance(assessment.get("usage"), dict) else {}
+    return {
+        "status": status if status in {"pass", "fail", "unknown", "not_run"} else "unknown",
+        "dimensions": public_dimensions,
+        "judge_model": assessment.get("judge_model") if isinstance(assessment.get("judge_model"), str) else None,
+        "prompt_version": assessment.get("prompt_version") if isinstance(assessment.get("prompt_version"), str) else None,
+        "note": str(assessment.get("note") or "")[:500],
+        "advisory_only": bool(assessment.get("advisory_only", True)),
+        # usage 只透出计数（不透明 reason 可能含异常文本）
+        "usage": {"calls": int(usage.get("calls", 0) or 0)},
+    }
+
+
+async def _quality_assessment_for(database, run_id: str, run_status: str) -> dict | None:
+    """RG-04：报告质量维度（诊断）从最新 checkpoint 的报告快照读取。
+
+    只读、无副作用；仅 **completed**（Contract 通过）的 Run 暴露——失败/草稿/
+    中间态运行的诊断不得对外呈现为"已验收报告的附属信息"。缺失/损坏一律
+    返回 None（不造分、不阻塞报告读取；任何嵌套形状都不抛异常）。
+    """
+    if run_status != "completed":
+        return None
+    try:
+        checkpoint = await CheckpointRepository(database).latest(run_id)
+    except Exception:  # noqa: BLE001 —— 诊断字段失败不影响报告主链路
+        return None
+    if checkpoint is None:
+        return None
+    try:
+        state = json.loads(checkpoint.state_json or "{}")
+        if not isinstance(state, dict):
+            return None
+        workflow_state = state.get("workflow_state")
+        if not isinstance(workflow_state, dict):
+            return None
+        report_result = workflow_state.get("report_result")
+        if not isinstance(report_result, dict):
+            return None
+        metrics = report_result.get("report_metrics")
+        if not isinstance(metrics, dict):
+            return None
+        assessment = metrics.get("quality_assessment")
+        if not isinstance(assessment, dict):
+            return None
+        return _public_quality_view(assessment)
+    except Exception:  # noqa: BLE001 —— 诊断读取全程容错
+        return None
+
+
 @router.get("/{run_id}/report")
 async def get_report(run_id: str, database=Depends(get_database)):
     run = await require_run(database, run_id)
@@ -206,6 +271,9 @@ async def get_report(run_id: str, database=Depends(get_database)):
             {"check_id": check.check_id, "kind": check.kind, "required": bool(check.required), "passed": None if check.passed is None else bool(check.passed), "evidence": json.loads(check.evidence_json or "{}")}
             for check in checks
         ],
+        # RG-04：质量维度是展示/开发诊断（advisory-only），不参与 completed 判定；
+        # 仅 completed（已验收）运行暴露
+        "quality_assessment": await _quality_assessment_for(database, run_id, run.status),
     }
 
 

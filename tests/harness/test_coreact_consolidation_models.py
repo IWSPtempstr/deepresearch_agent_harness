@@ -138,13 +138,14 @@ def test_unknown_schema_version_rejected(model_type, field, value):
 
 
 def test_action_rubric_unknown_version_rejected():
-    from deepresearch_agent.harness.action_models import ActionRubric
+    # RG-01：rubric 独立 schema 版本（RUBRIC_SCHEMA_VERSION=2，旧适配记录按 v1）
+    from deepresearch_agent.harness.action_models import ActionRubric, RUBRIC_SCHEMA_VERSION
 
     with pytest.raises(ValidationError, match="高于实现支持"):
         ActionRubric.model_validate({
             "rubric_id": "r1", "task_id": "t1",
             "criteria": [{"criterion_id": "c", "kind": "evidence_presence", "description": "d"}],
-            "schema_version": ACTION_MODELS_SCHEMA_VERSION + 1,
+            "schema_version": RUBRIC_SCHEMA_VERSION + 1,
         })
 
 
