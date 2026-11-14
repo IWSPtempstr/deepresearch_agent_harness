@@ -133,6 +133,9 @@ class ChatService:
             "report_type": "long_document" if detailed_request else request.report_type,
             "deep_research_max_iterations": 1 if request.source_mode.value == "graphrag" else 2,
             "schema_version": 1,
+            # S1：web 聚合通道冻结可用 API 集合；BriefBuilder 据此选择默认工具
+            # （Tavily 缺失时用 scholar_search，避免默认 web_search 必失败）。
+            "web_apis": {"tavily": bool(settings.TAVILY_API_KEY), "scholar": True},
         }
         routing = (
             resolve_model_for(snapshot, content=request.content, settings=settings)

@@ -17,6 +17,7 @@ from deepresearch_agent.harness.action_models import (
     MAX_OBSERVATIONS_KEPT,
     build_observation_summary,
 )
+from deepresearch_agent.harness.dedupe import query_dedupe_key
 
 logger = logging.getLogger(__name__)
 
@@ -208,12 +209,13 @@ class CoreActSupportMixin:
                 args = call.get("args") if isinstance(call, dict) else None
                 query = args.get("query") if isinstance(args, dict) else None
                 if query:
-                    queries.append(str(query))
+                    tool_name = call.get("tool_name") if isinstance(call, dict) else None
+                    queries.append(query_dedupe_key(tool_name, str(query)))
         for record in self.state.execution_records:
             for call in record.tool_calls:
                 query = call.args.get("query") if isinstance(call.args, dict) else None
                 if query:
-                    queries.append(str(query))
+                    queries.append(query_dedupe_key(call.tool_name, str(query)))
         return list(dict.fromkeys(queries))[-10:]
 
     def _coreact_retry_available(self) -> bool:

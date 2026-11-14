@@ -59,14 +59,21 @@ async def health(database=Depends(get_database)):
 
 @router.get("/capabilities")
 async def capabilities():
-    web = bool(settings.TAVILY_API_KEY)
+    # S1：web 是聚合通道（Tavily + OpenAlex/arXiv）；学术 API 免 key 常开。
+    tavily_configured = bool(settings.TAVILY_API_KEY)
+    scholar_configured = True
+    web = tavily_configured or scholar_configured
     graph_configured = bool(settings.NEO4J_URI and settings.NEO4J_USERNAME and settings.NEO4J_PASSWORD)
     graph_status, graph_reason = await _tcp_status(settings.NEO4J_URI, 7687) if graph_configured else ("unavailable", "Neo4j 未配置")
     graph = graph_status == "healthy"
     return {
         "sources": {
             "graphrag": {"available": graph, "reason": None if graph else graph_reason},
-            "web": {"available": web, "reason": None if web else "TAVILY_API_KEY 未配置"},
+            "web": {"available": web, "reason": None if web else "无可用的 web 检索 API"},
+        },
+        "web_providers": {
+            "tavily": tavily_configured,
+            "scholar": scholar_configured,  # OpenAlex/arXiv 免 key 常开
         },
         # T-407：唯一生产入口（历史 Run 的 deep_research 标识仅作只读兼容）
         "workflows": ["plan_execute_report"],

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Callable, Mapping
 
 from deepresearch_agent.harness.contracts import SourceMode
@@ -57,10 +58,14 @@ class _LazyProvider:
         self.provider_name = provider_name
         self._factory = factory
         self._instance: RetrievalProvider | None = None
+        # 并行动作可能在不同线程同时触发首次初始化；双检锁保证只构造一次。
+        self._lock = threading.Lock()
 
     def _get(self) -> RetrievalProvider:
         if self._instance is None:
-            self._instance = self._factory()
+            with self._lock:
+                if self._instance is None:
+                    self._instance = self._factory()
         return self._instance
 
     async def search(self, *args, **kwargs):
@@ -91,22 +96,16 @@ def create_default_router() -> RetrievalRouter:
             factory=build_graphrag,
         )
     }
-    if TAVILY_API_KEY:
-        def build_tavily() -> RetrievalProvider:
-            from deepresearch_agent.persistence.artifact_store import ArtifactStore
-            from deepresearch_agent.retrieval.tavily_provider import TavilyProvider
-            return TavilyProvider(
-                api_key=TAVILY_API_KEY,
-                artifact_store=ArtifactStore(ARTIFACT_ROOT),
-                default_depth=TAVILY_SEARCH_DEPTH,  # type: ignore[arg-type]
-                default_max_results=TAVILY_MAX_RESULTS,
-                timeout_seconds=TAVILY_TIMEOUT_SECONDS,
-                cache_ttl_seconds=TAVILY_CACHE_TTL_SECONDS,
-            )
-        providers[SourceMode.WEB] = _LazyProvider(
-            mode=SourceMode.WEB,
-            provider_name="tavily",
-            factory=build_tavily,
+    def build_tavily() -> RetrievalProvider:
+        from deepresearch_agent.persistence.artifact_store import ArtifactStore
+        from deepresearch_agent.retrieval.tavily_provider import TavilyProvider
+        return TavilyProvider(
+            api_key=TAVILY_API_KEY,
+            artifact_store=ArtifactStore(ARTIFACT_ROOT),
+            default_depth=TAVILY_SEARCH_DEPTH,  # type: ignore[arg-type]
+            default_max_results=TAVILY_MAX_RESULTS,
+            timeout_seconds=TAVILY_TIMEOUT_SECONDS,
+            cache_ttl_seconds=TAVILY_CACHE_TTL_SECONDS,
         )
 
     # P2-11：学术科研情报（OpenAlex 主源 + arXiv 兜底），免 key 常开
@@ -114,6 +113,24 @@ def create_default_router() -> RetrievalRouter:
         from deepresearch_agent.retrieval.scholar_provider import ChainedScholarProvider
         return ChainedScholarProvider()
 
+    # S1：web 是聚合通道——Tavily 与学术 API 同属 source_mode='web'。
+    # Tavily 未配置时仍保留 scholar_search；web_search 会在派发时报
+    # SOURCE_UNAVAILABLE，不静默换通道。
+    def build_web() -> RetrievalProvider:
+        from deepresearch_agent.retrieval.web_aggregate import AggregateWebProvider
+
+        return AggregateWebProvider(
+            tavily=build_tavily() if TAVILY_API_KEY else None,
+            scholar=build_scholar(),
+        )
+
+    providers[SourceMode.WEB] = _LazyProvider(
+        mode=SourceMode.WEB,
+        provider_name="web",
+        factory=build_web,
+    )
+    # 只读兼容：历史 scholar Run 恢复时仍使用独立通道 provider；新请求在
+    # API 边界归一化为 web（不再创建 scholar Run）。
     providers[SourceMode.SCHOLAR] = _LazyProvider(
         mode=SourceMode.SCHOLAR,
         provider_name="scholar",

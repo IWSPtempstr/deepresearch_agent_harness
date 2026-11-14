@@ -30,6 +30,7 @@ from deepresearch_agent.harness.action_models import (
     ActionRubric,
     PreActionVerification,
 )
+from deepresearch_agent.harness.dedupe import is_duplicate_query
 
 logger = logging.getLogger(__name__)
 
@@ -131,10 +132,12 @@ class PreActionAdvisor:
                     reason="" if ok else f"工具 {getattr(task, 'task_type', '')!r} 不在冻结白名单 {sorted(allowed)}",
                 ))
             elif criterion.check_kind == "no_duplicate_query":
-                duplicated = bool(query) and query in executed
+                duplicated = is_duplicate_query(
+                    getattr(task, "task_type", ""), query, executed,
+                )
                 verdicts.append(ActionCriterionVerdict(
                     criterion_id=criterion.criterion_id, status="fail" if duplicated else "pass",
-                    reason="查询与已执行查询重复（无增量）" if duplicated else "",
+                    reason="同一工具重复同一查询（无增量）" if duplicated else "",
                 ))
             else:
                 verdicts.append(ActionCriterionVerdict(

@@ -20,6 +20,8 @@ from deepresearch_agent.agents.multi_agent.core.rubric import (
     TaskRubric,
 )
 
+from deepresearch_agent.harness.dedupe import is_duplicate_query
+
 VERIFIER_VERSION = "coreact_verifier_v1"
 
 # 执行器内部工具（非检索面），不算违反 source policy。
@@ -258,7 +260,7 @@ class CoreActVerifier:
 
         if criterion_kind == "no_duplicate_query":
             query = self._action_query(task)
-            duplicated = bool(query) and query in executed_queries
+            duplicated = is_duplicate_query(getattr(task, "task_type", ""), query, executed_queries)
             return (not duplicated), ("重复执行无增量查询" if duplicated else ""), []
 
         # kind 为 Literal；restore 侧（coreact_state._pending_action_valid）会把

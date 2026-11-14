@@ -25,6 +25,8 @@ from deepresearch_agent.harness.action_models import (
 from deepresearch_agent.harness.action_runner import ActionRunner, BatchAction, DispatchBudget
 from deepresearch_agent.harness.coreact_controller import DecisionContext
 from deepresearch_agent.harness.coreact_support import build_semantic_judge
+from deepresearch_agent.harness.dedupe import is_duplicate_query, query_dedupe_key
+from deepresearch_agent.harness.policies import SourcePolicy
 from deepresearch_agent.harness.pre_action_advisor import PreActionAdvisor, task_rubric_from_action_rubric
 from deepresearch_agent.harness.rubric_builder import RubricBuilder, RubricBuilderConfig
 from deepresearch_agent.harness.coreact_state import (
@@ -67,11 +69,7 @@ class CoreActLoopMixin:
         completion_conditions = list(acceptance.completion_conditions or [])
         verifier = CoreActVerifier()
         max_parallel = max(1, int(COREACT_MAX_PARALLEL or 1))
-        source_tools = {
-            "graphrag": {"local_search", "global_search", "hybrid_search", "naive_search", "chain_exploration"},
-            "web": {"web_search"},
-            "scholar": {"scholar_search"},
-        }.get(self.context.source_mode.value, set())
+        source_tools = set(SourcePolicy.SOURCE_TASK_TYPES.get(self.context.source_mode, set()))
 
         # T-403：统一隔离执行器（预派发预算预约 + 副本隔离 + 稳定合并 + 单次修正）
         self._action_runner = ActionRunner(
@@ -319,7 +317,7 @@ class CoreActLoopMixin:
                     guidance.bind(task_id=task.task_id), task_id=task.task_id), 1, guidance)]
                 if max_parallel > 1:
                     seen_queries = set(recent_queries)
-                    seen_queries.add(query or "")
+                    seen_queries.add(query_dedupe_key(task.task_type, query))
                     fill_limit = min(max_parallel - 1, self.context.budget_limits.max_concurrency - 1)
                     for extra in self._parallel_fillup(plan, completed, seen_queries, limit=fill_limit):
                         batch.append((extra, task_rubric_from_action_rubric(
@@ -834,7 +832,7 @@ class CoreActLoopMixin:
             # 执行后刷新：recent 必须包含刚失败的查询，原样重复直接拒绝
             recent_after_batch = self._coreact_recent_queries()
             retry_query = self._coreact_query(retry_task)
-            if retry_query and retry_query in set(recent_after_batch):
+            if is_duplicate_query(retry_task.task_type, retry_query, set(recent_after_batch)):
                 reason = f"定向重试仍重复查询: {retry_query[:120]}"
                 if reason not in self.coreact_loop.failure_reasons:
                     self.coreact_loop.failure_reasons.append(reason)
@@ -919,8 +917,9 @@ class CoreActLoopMixin:
             if node.source_mode != self.context.source_mode.value or node.status != "pending":
                 continue
             node_query = self._coreact_query(node)
-            if node_query and node_query in seen_queries:
+            node_key = query_dedupe_key(node.task_type, node_query)
+            if is_duplicate_query(node.task_type, node_query, seen_queries):
                 continue
-            seen_queries.add(node_query or "")
+            seen_queries.add(node_key or "")
             admitted.append(node)
         return admitted

@@ -360,11 +360,23 @@ def test_clarification_resumes_same_run(client):
     assert len(clarifications) == 1 and clarifications[0]["content"] == "主体是阶段4 API"
 
 
+def test_api_scholar_source_is_normalized_to_web(client):
+    """S1：scholar API 并入 web 通道；旧客户端提交 scholar 不报错，Run 冻结为 web。"""
+    client.app.state.run_service.schedule = lambda _run_id: None
+    session_id = new_session(client)
+    response = send(client, session_id, client_id="scholar-normalize", source="scholar")
+    assert response.status_code == 202
+    run = client.get(f"/api/v1/runs/{response.json()['run_id']}").json()
+    assert run["source_mode"] == "web"
+
+
 def test_capabilities_and_openapi_are_complete(client, monkeypatch):
     from deepresearch_agent.config import settings
     monkeypatch.setattr(settings, "TAVILY_API_KEY", "")
     capabilities = client.get("/api/v1/capabilities").json()
-    assert capabilities["sources"]["web"] == {"available": False, "reason": "TAVILY_API_KEY 未配置"}
+    # S1：web 聚合通道含常开学术 API；即使无 Tavily，通道仍可用 scholar_search
+    assert capabilities["sources"]["web"] == {"available": True, "reason": None}
+    assert capabilities["web_providers"] == {"tavily": False, "scholar": True}
     paths = client.get("/openapi.json").json()["paths"]
     required = {"/api/v1/sessions", "/api/v1/sessions/search", "/api/v1/runs/{run_id}/events", "/api/v1/runs/{run_id}/context", "/api/v1/memories", "/api/v1/memories/capacity", "/api/v1/skills", "/api/v1/evaluations/summary", "/api/v1/evaluations/runs/{run_id}"}
     assert required.issubset(paths)

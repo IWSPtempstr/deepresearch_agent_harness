@@ -91,7 +91,15 @@ class RuntimePersistMixin:
                 if existing is None:
                     # 计费跟随首次写入：行已存在（含 failed）说明首次提交已计费，
                     # 崩溃重放/步级重复提交不得重复 consume_tool。
-                    budget.consume_tool(tavily=call.source_mode == "web")
+                    # S1：web 聚合通道内按工具名区分 Tavily / 学术 API；未知的
+                    # 旧 web 工具名保持原口径（计入 tavily）。
+                    from deepresearch_agent.harness.policies import SourcePolicy
+
+                    api = SourcePolicy.TOOL_API.get(str(call.tool_name))
+                    budget.consume_tool(
+                        tavily=api == "tavily" or (api is None and call.source_mode == "web"),
+                        scholar=api == "scholar",
+                    )
                 if self.trajectory:
                     await self.trajectory.prepare_tool_call(tool_call_id=call.tool_call_id, run_id=context.run_id, task_id=record.task_id, tool_name=call.tool_name, source_mode=context.source_mode.value, args=call.args)
                     await self.trajectory.complete_tool_call(call.tool_call_id, result=call.result, error_code="TOOL_FAILED" if call.status == "failed" else None)

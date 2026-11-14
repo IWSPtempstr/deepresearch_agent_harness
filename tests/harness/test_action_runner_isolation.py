@@ -295,7 +295,7 @@ async def test_admission_rejects_dependencies_tools_and_duplicates():
     ]
     report = runner.admit(
         actions, completed_task_ids=[],
-        executed_queries=["重复查询"],
+        executed_queries=["web_search:重复查询"],
     )
     assert [action.action_id for action in report.admitted] == ["action_task_ok"]
     reasons = {r.action_id: r.reason_code for r in report.rejections}

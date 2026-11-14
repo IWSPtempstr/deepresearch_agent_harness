@@ -91,6 +91,7 @@ class RetrievalExecutor(BaseExecutor):
         provider = self._provider or self._router.for_mode(state.source_mode)  # type: ignore[union-attr]
         if provider.mode.value != state.source_mode or task.source_mode != state.source_mode:
             raise ValueError("Plan/Task/Provider source_mode 不一致")
+        provider_label = self._provider_label(provider, tool_name)
         # T-404 稳定 tool ID：tool_call_id 由 (run_id, task_id, attempt) 派生——
         # 崩溃重放同一尝试生成相同 ID（行幂等、不重复计费）；定向重试 attempt+1
         # 产生新 ID，全部尝试的记录保留。外部调用本身不承诺恰好一次。
@@ -129,14 +130,14 @@ class RetrievalExecutor(BaseExecutor):
 
         evidence = self._extract_evidence(
             state, structured_output, task_id=task.task_id,
-            tool_call_id=tool_call_id, provider=provider.provider_name,
+            tool_call_id=tool_call_id, provider=provider_label,
         ) if success else []
 
         environment = {
             "execution_mode": signal.execution_mode,
             "cache_key": cache_key,
             "source_mode": state.source_mode,
-            "provider": provider.provider_name,
+            "provider": provider_label,
         }
         # RG-03：worker 真实消费注入的 rubric 指导（读取内部上下文通道，
         # 计算判词匹配证据；Provider 公共参数不变——payload 未被 rubric 触碰）。
@@ -193,6 +194,15 @@ class RetrievalExecutor(BaseExecutor):
             error=error_message,
         )
 
+    @staticmethod
+    def _provider_label(provider: RetrievalProvider, task_type: str) -> str:
+        """证据 provider 归属：聚合 web 通道按具体 API 标注，其余用 provider 名。"""
+        if provider.mode == SourceMode.WEB:
+            from deepresearch_agent.retrieval.web_aggregate import AggregateWebProvider
+
+            return AggregateWebProvider.provider_label_for(task_type)
+        return provider.provider_name
+
     def _invoke_provider(
         self,
         provider: RetrievalProvider,
@@ -202,7 +212,9 @@ class RetrievalExecutor(BaseExecutor):
         task: TaskNode,
         tool_call_id: str,
     ) -> Dict[str, Any]:
-        actual_tool = "tavily_search" if provider.mode == SourceMode.WEB else task_type
+        # 任务类型即工具名：web 聚合通道按 task_type 选择 API；legacy scholar
+        # 通道保持原语义。SourcePolicy 对通道/工具组合做权威校验。
+        actual_tool = task_type
         self._source_policy.assert_tool_allowed(provider.mode, actual_tool)
         query = str(payload.get("query") or task.description)
         results = run_async_from_sync(lambda: provider.search(
@@ -210,7 +222,9 @@ class RetrievalExecutor(BaseExecutor):
             top_k=int(payload.get("top_k") or 5),
             search_depth=payload.get("search_depth", "advanced"),
             filters=SearchFilters(
-                strategy=task_type if provider.mode == SourceMode.GRAPHRAG else None,
+                # graphrag 用 strategy 区分 local/global/...；web 聚合通道用它
+                # 区分 Tavily 与学术 API（Tavily 忽略该字段）。
+                strategy=task_type if provider.mode in {SourceMode.GRAPHRAG, SourceMode.WEB} else None,
                 include_domains=tuple(payload.get("include_domains") or ()),
                 exclude_domains=tuple(payload.get("exclude_domains") or ()),
                 start_date=payload.get("start_date"),
@@ -229,7 +243,7 @@ class RetrievalExecutor(BaseExecutor):
         return {
             "answer": "\n\n".join(str(result.evidence) for result in results),
             "retrieval_results": [result.to_dict() for result in results],
-            "provider": provider.provider_name,
+            "provider": self._provider_label(provider, task_type),
             "source_mode": provider.mode.value,
         }
 

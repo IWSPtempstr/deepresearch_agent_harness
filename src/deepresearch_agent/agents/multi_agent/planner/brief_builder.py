@@ -119,11 +119,23 @@ class BriefBuilder:
 
     # ---------- 各阶段 ----------
 
+    @staticmethod
+    def _default_task_type(state: PlanExecuteState) -> str:
+        """S1：web 聚合通道按冻结的可用 API 选择默认检索工具。
+
+        `web_apis` 缺失（旧快照/直接构造）时保持历史默认 web_search。
+        """
+        if state.source_mode == "web":
+            apis = (state.context_snapshot or {}).get("web_apis")
+            if isinstance(apis, dict) and apis.get("tavily") is False:
+                return "scholar_search"
+        return SOURCE_TASK_TYPE.get(state.source_mode, "web_search")
+
     def _simple_plan(self, state: PlanExecuteState, context: Any, failures: List[str]) -> Optional[PlanSpec]:
         query = (context.refined_query or context.original_query or "").strip()
         if len(query) > 160 or not any(marker in query.lower() for marker in SIMPLE_REQUEST_MARKERS):
             return None
-        task_type = SOURCE_TASK_TYPE.get(state.source_mode, "web_search")
+        task_type = self._default_task_type(state)
         node = TaskNode(
             task_type=task_type,
             source_mode=state.source_mode,
@@ -147,9 +159,19 @@ class BriefBuilder:
         refined_query: str,
         failures: List[str],
     ) -> PlanSpec:
-        task_type = SOURCE_TASK_TYPE.get(state.source_mode, "web_search")
+        task_type = self._default_task_type(state)
         nodes: List[TaskNode] = []
-        direction_count = min(self.config.max_candidate_tasks, len(RESEARCH_DIRECTIONS))
+        # S1：web 聚合通道为学术 API 预留一个候选（确定性路径也能用上 scholar_search）；
+        # Tavily 候选仍占多数，Controller 仍是唯一决策者。若 Tavily 不可用，
+        # 所有候选都走 scholar_search（不生成注定 SOURCE_UNAVAILABLE 的动作）。
+        academic_slot = (
+            state.source_mode == "web" and task_type == "web_search"
+            and self.config.max_candidate_tasks >= 2
+        )
+        direction_count = min(
+            self.config.max_candidate_tasks - (1 if academic_slot else 0),
+            len(RESEARCH_DIRECTIONS),
+        )
         for direction in RESEARCH_DIRECTIONS[:direction_count]:
             query = f"{refined_query} {direction}"
             nodes.append(TaskNode(
@@ -158,6 +180,14 @@ class BriefBuilder:
                 description=f"{refined_query}——{direction}",
                 priority=2,
                 parameters={"query": query},
+            ))
+        if academic_slot:
+            nodes.append(TaskNode(
+                task_type="scholar_search",
+                source_mode=state.source_mode,
+                description=f"{refined_query}——学术文献与综述",
+                priority=2,
+                parameters={"query": f"{refined_query} 学术研究 综述", "top_k": 5},
             ))
         # final evidence 缺口 → 追加补充检索候选（反馈 Controller，而非回旧 Planner）
         if any(marker in failure for failure in failures for marker in EVIDENCE_GAP_MARKERS):

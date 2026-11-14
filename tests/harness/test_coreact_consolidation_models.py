@@ -193,7 +193,8 @@ def test_brief_revision_cannot_expand_sources():
 
 
 def test_brief_tools_follow_frozen_source():
-    assert make_brief().allowed_tools == frozenset({"web_search"})
+    # S1：web 是聚合通道（Tavily + OpenAlex/arXiv）
+    assert make_brief().allowed_tools == frozenset({"web_search", "scholar_search"})
     assert make_brief(allowed_sources=[SourceMode.SCHOLAR]).allowed_tools == frozenset({"scholar_search"})
 
 

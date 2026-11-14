@@ -43,10 +43,16 @@ class OpenAlexProvider:
         self.base_url = base_url.rstrip("/")
         self._client = client
 
-    async def _get_client(self) -> httpx.AsyncClient:
+    async def _get_client(self) -> tuple[httpx.AsyncClient, bool]:
+        """返回 (client, owns)。
+
+        未注入 client 时按调用创建并关闭：coreact 并行动作在不同线程/事件循环
+        执行，缓存 AsyncClient 会跨 loop 复用并产生竞态；注入 client 的测试路径
+        仍由调用方负责关闭。
+        """
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=30.0)
-        return self._client
+            return httpx.AsyncClient(timeout=30.0), True
+        return self._client, False
 
     async def aclose(self) -> None:
         if self._client is not None:
@@ -71,13 +77,16 @@ class OpenAlexProvider:
             params["mailto"] = self.mailto
         if filters.start_date:
             params["filter"] = f"from_publication_date:{filters.start_date}"
-        client = await self._get_client()
+        client, owns = await self._get_client()
         try:
             response = await client.get(f"{self.base_url}/works", params=params)
             response.raise_for_status()
+            works = (response.json() or {}).get("results", [])
         except httpx.HTTPError as exc:
             raise AppError(ErrorCode.RETRIEVAL_FAILED, f"OpenAlex 检索失败: {exc}", retryable=True) from exc
-        works = (response.json() or {}).get("results", [])
+        finally:
+            if owns:
+                await client.aclose()
         results: list[RetrievalResult] = []
         for index, work in enumerate(works[:top_k]):
             abstract = _inverted_abstract_to_text(work.get("abstract_inverted_index"))
@@ -131,10 +140,16 @@ class ArxivProvider:
         self.base_url = base_url.rstrip("/")
         self._client = client
 
-    async def _get_client(self) -> httpx.AsyncClient:
+    async def _get_client(self) -> tuple[httpx.AsyncClient, bool]:
+        """返回 (client, owns)。
+
+        未注入 client 时按调用创建并关闭：coreact 并行动作在不同线程/事件循环
+        执行，缓存 AsyncClient 会跨 loop 复用并产生竞态；注入 client 的测试路径
+        仍由调用方负责关闭。
+        """
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=30.0)
-        return self._client
+            return httpx.AsyncClient(timeout=30.0), True
+        return self._client, False
 
     async def aclose(self) -> None:
         if self._client is not None:
@@ -156,14 +171,18 @@ class ArxivProvider:
             "max_results": max(1, min(int(top_k), 30)),
             "sortBy": "relevance",
         }
-        client = await self._get_client()
+        client, owns = await self._get_client()
         try:
             response = await client.get(self.base_url, params=params)
             response.raise_for_status()
+            response_text = response.text
         except httpx.HTTPError as exc:
             raise AppError(ErrorCode.RETRIEVAL_FAILED, f"arXiv 检索失败: {exc}", retryable=True) from exc
+        finally:
+            if owns:
+                await client.aclose()
         try:
-            root = ET.fromstring(response.text)
+            root = ET.fromstring(response_text)
         except ET.ParseError as exc:
             raise AppError(ErrorCode.RETRIEVAL_FAILED, "arXiv 返回非 Atom XML", retryable=True) from exc
 
@@ -217,13 +236,15 @@ class ChainedScholarProvider:
     strategies = {"scholar_search"}
 
     def __init__(self, providers: Optional[list[Any]] = None):
-        self.providers = providers
-
-    async def _resolve(self) -> list[Any]:
-        if self.providers is None:
+        if providers is None:
+            # 构造廉价（httpx 客户端仍按需创建）；eager 初始化避免并行动作
+            # 首次调用时竞态创建多份 provider 并泄漏被覆盖的客户端。
             from deepresearch_agent.config.settings import OPENALEX_MAILTO
 
-            self.providers = [OpenAlexProvider(mailto=OPENALEX_MAILTO), ArxivProvider()]
+            providers = [OpenAlexProvider(mailto=OPENALEX_MAILTO), ArxivProvider()]
+        self.providers = list(providers)
+
+    async def _resolve(self) -> list[Any]:
         return self.providers
 
     async def aclose(self) -> None:

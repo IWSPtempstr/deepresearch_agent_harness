@@ -21,6 +21,8 @@ class BudgetLimits(BaseModel):
     max_plan_tasks: int = Field(default=8, ge=1)
     max_tool_calls: int = Field(default=30, ge=1)
     max_tavily_calls: int = Field(default=20, ge=1)
+    # S1：web 聚合通道中的学术 API（OpenAlex/arXiv）独立计数，避免串账。
+    max_scholar_api_calls: int = Field(default=20, ge=1)
     max_replans: int = Field(default=2, ge=0)
     max_task_retries: int = Field(default=2, ge=0)
     max_llm_tokens: int = Field(default=200000, ge=1)
@@ -32,6 +34,7 @@ class BudgetUsage(BaseModel):
     plan_tasks: int = 0
     tool_calls: int = 0
     tavily_calls: int = 0
+    scholar_api_calls: int = 0
     replans: int = 0
     task_retries: int = 0
     llm_tokens: int = 0
@@ -66,6 +69,7 @@ class BudgetManager:
         self._check("llm_tokens", self.usage.llm_tokens, self.limits.max_llm_tokens)
         self._check("tool_calls", self.usage.tool_calls, self.limits.max_tool_calls)
         self._check("tavily_calls", self.usage.tavily_calls, self.limits.max_tavily_calls)
+        self._check("scholar_api_calls", self.usage.scholar_api_calls, self.limits.max_scholar_api_calls)
         self._check("replans", self.usage.replans, self.limits.max_replans)
         self._check("task_retries", self.usage.task_retries, self.limits.max_task_retries)
 
@@ -82,10 +86,12 @@ class BudgetManager:
         if observed > limit:
             raise BudgetExceeded(metric, observed, limit)
 
-    def consume_tool(self, *, tavily: bool = False, count: int = 1) -> None:
+    def consume_tool(self, *, tavily: bool = False, scholar: bool = False, count: int = 1) -> None:
         self.usage.tool_calls += count
         if tavily:
             self.usage.tavily_calls += count
+        if scholar:
+            self.usage.scholar_api_calls += count
         self.assert_available()
 
     def observe_plan_tasks(self, count: int) -> None:

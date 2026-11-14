@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, ValidationError
 
 from deepresearch_agent.agents.multi_agent.core.plan_spec import TASK_TYPE_CHOICES, TaskNode
+from deepresearch_agent.harness.policies import SourcePolicy
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +31,9 @@ MAX_DECISION_CONTENT_CHARS = 20_000  # LLM 回传内容上限，防资源耗尽
 # T-405：prompt 内发现/评估条数与单条长度上限（有界上下文）
 MAX_PROMPT_OBSERVATIONS = 6
 OBSERVATION_PROMPT_CHARS = 300
+# 单一事实源：通道 → 允许任务类型（S1：web 同时允许 Tavily 与学术 API）。
 SOURCE_TASK_TYPES = {
-    "graphrag": {"local_search", "global_search", "hybrid_search", "naive_search", "chain_exploration"},
-    "web": {"web_search"},
-    "scholar": {"scholar_search"},
+    mode.value: set(tasks) for mode, tasks in SourcePolicy.SOURCE_TASK_TYPES.items()
 }
 
 _DECISION_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
@@ -126,7 +126,7 @@ class CoreActController:
 
     def _build_decision_prompt(self, context: DecisionContext) -> str:
         tool_menu = {
-            "web": "web_search（联网搜索；参数 query）",
+            "web": "web_search（联网搜索；参数 query）/ scholar_search（学术检索 OpenAlex+arXiv；参数 query）",
             "scholar": "scholar_search（学术检索；参数 query）",
             "graphrag": "local_search / global_search / hybrid_search / naive_search / chain_exploration",
         }.get(context.source_mode, "web_search")

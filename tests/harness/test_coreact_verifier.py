@@ -25,6 +25,7 @@ def make_record(*, tool_name="web_search", status="success", result=None, eviden
 def make_task(query="检索增强生成技术路线"):
     return SimpleNamespace(
         task_id="task_1",
+        task_type="web_search",
         description="调研检索增强技术路线",
         source_mode="web",
         parameters={"query": query},
@@ -93,7 +94,7 @@ class TestDeterministicChecks:
         records = [make_record(evidence_ids=["ev_1"], texts=["检索增强生成技术"])]
         verdict = CoreActVerifier().verify(
             rubric=RUBRIC, task=make_task(query="重复查询"), records=records,
-            ledger_ids={"ev_1"}, executed_queries={"重复查询"}, allowed_tools=ALLOWED,
+            ledger_ids={"ev_1"}, executed_queries={"web_search:重复查询"}, allowed_tools=ALLOWED,
         )
         dup = {c.criterion_id: c for c in verdict.criteria}["task_1_no_duplicate_query"]
         assert dup.passed is False and dup.reason == "重复执行无增量查询"

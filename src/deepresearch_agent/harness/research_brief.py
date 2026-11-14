@@ -58,7 +58,9 @@ def _reject_unknown_version(kind: str, declared: Any, supported: int) -> None:
 # 各冻结来源允许的检索工具白名单（与 coreact_controller.SOURCE_TASK_TYPES 对齐）。
 SOURCE_TOOL_WHITELIST: dict[str, frozenset[str]] = {
     "graphrag": frozenset({"local_search", "global_search", "hybrid_search", "naive_search", "chain_exploration"}),
-    "web": frozenset({"web_search"}),
+    # S1：web 是聚合通道——Tavily 与 OpenAlex/arXiv 都是该通道内的 API。
+    "web": frozenset({"web_search", "scholar_search"}),
+    # 只读兼容：历史 scholar Run 仍按其冻结白名单恢复执行。
     "scholar": frozenset({"scholar_search"}),
 }
 

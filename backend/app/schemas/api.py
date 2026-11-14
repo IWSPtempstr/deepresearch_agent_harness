@@ -46,6 +46,15 @@ class MessageSend(ApiModel):
             return WorkflowMode.PLAN_EXECUTE_REPORT
         return value
 
+    @field_validator("source_mode", mode="before")
+    @classmethod
+    def _normalize_legacy_source(cls, value: Any) -> Any:
+        # S1：scholar 不再是独立通道（学术 API 并入 web 聚合通道）。
+        # 历史 Run 的 scholar 记录只读保留；新请求在边界归一化，不拒绝旧客户端。
+        if isinstance(value, str) and value == "scholar":
+            return SourceMode.WEB
+        return value
+
 
 class ClarificationSubmit(ApiModel):
     content: str = Field(min_length=1, max_length=10000)

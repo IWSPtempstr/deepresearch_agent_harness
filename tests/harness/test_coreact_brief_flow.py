@@ -51,12 +51,18 @@ def test_multi_direction_candidate_graph_without_reflection():
 
 
 def test_three_source_modes_produce_whitelisted_task_types():
-    for mode, expected in (("web", "web_search"), ("graphrag", "hybrid_search"), ("scholar", "scholar_search")):
+    for mode, expected in (
+        ("web", {"web_search", "scholar_search"}),
+        ("graphrag", {"hybrid_search"}),
+        ("scholar", {"scholar_search"}),
+    ):
         builder = BriefBuilder()
         state = make_state("调研跨来源检索质量评估", source_mode=mode)
         result = builder.generate_plan(state)
-        assert all(node.task_type == expected for node in result.plan_spec.task_graph.nodes), mode
+        assert {node.task_type for node in result.plan_spec.task_graph.nodes} == expected, mode
         assert result.plan_spec.source_mode == mode
+        # S1：web 聚合通道的学术候选与 Tavily 候选都属于同一冻结来源
+        assert all(node.source_mode == mode for node in result.plan_spec.task_graph.nodes)
 
 
 def test_evidence_gap_failure_feeds_followup_candidate():

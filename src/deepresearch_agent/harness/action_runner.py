@@ -27,6 +27,7 @@ from deepresearch_agent.agents.multi_agent.core.plan_spec import TaskNode
 from deepresearch_agent.agents.multi_agent.core.rubric import TaskRubric
 from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.harness.budgets import BudgetExceeded
+from deepresearch_agent.harness.dedupe import is_duplicate_query, query_dedupe_key
 from deepresearch_agent.harness.errors import RunLeaseLost
 
 logger = logging.getLogger(__name__)
@@ -250,15 +251,18 @@ class ActionRunner:
                 )
                 continue
             query = str(action.spec.query or "").strip()
-            if query and query in seen_queries:
+            # S1：按 (tool, query) 去重——同一查询打到不同 API（Tavily/学术）
+            # 是有增量的动作；只有同工具重复同一查询才拒绝。旧 raw 表示仍兼容。
+            query_key = query_dedupe_key(action.task.task_type, query)
+            if is_duplicate_query(action.task.task_type, query, seen_queries):
                 report.rejections.append(Rejection(action.action_id, "duplicate_query", query[:120]))
                 continue
             # 批内已准入的数量必须计入预约判断（否则额度边界上的批次会超发）
             if self.budget is not None and not self.budget.can_dispatch(admitted_count + 1):
                 report.rejections.append(Rejection(action.action_id, "budget_exhausted", "tool 额度不足（预派发预约拒绝）"))
                 continue
-            if query:
-                seen_queries.add(query)
+            if query_key:
+                seen_queries.add(query_key)
             admitted_count += 1
             report.admitted.append(action)
         if self.budget is not None and admitted_count:

@@ -42,6 +42,7 @@ HARNESS_BUDGETS = {
     "max_plan_tasks": _require_positive("RUN_MAX_PLAN_TASKS", _get_env_int("RUN_MAX_PLAN_TASKS", 8) or 8),
     "max_tool_calls": _require_positive("RUN_MAX_TOOL_CALLS", _get_env_int("RUN_MAX_TOOL_CALLS", 30) or 30),
     "max_tavily_calls": _require_positive("RUN_MAX_TAVILY_CALLS", _get_env_int("RUN_MAX_TAVILY_CALLS", 20) or 20),
+    "max_scholar_api_calls": _require_positive("RUN_MAX_SCHOLAR_API_CALLS", _get_env_int("RUN_MAX_SCHOLAR_API_CALLS", 20) or 20),
     "max_replans": _require_positive("RUN_MAX_REPLANS", _get_env_int("RUN_MAX_REPLANS", 2) or 2),
     "max_task_retries": _require_positive("RUN_MAX_TASK_RETRIES", _get_env_int("RUN_MAX_TASK_RETRIES", 2) or 2),
     "max_llm_tokens": _require_positive("RUN_MAX_LLM_TOKENS", _get_env_int("RUN_MAX_LLM_TOKENS", 200000) or 200000),
