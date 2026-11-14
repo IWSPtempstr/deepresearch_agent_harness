@@ -103,7 +103,7 @@
 
 ### S2 — 多来源冻结契约（v2，零 DDL）
 
-- 状态：pending
+- 状态：done（2026-11-14）
 - 依赖：S1
 - 触点：`harness/research_brief.py`、`harness/run_context.py`、brief/context/run_service、
   `backend/app/schemas/api.py`、`backend/app/services/chat_service.py`。
@@ -115,6 +115,29 @@
   4. brief 生成/修订写入冻结集合；`with_revision` 不允许改来源。
 - 验收：v1/v2 roundtrip 与版本拒绝；sources 在主通道缺失/空/重复时拒绝；
   旧 Run（无 sources）按单通道解释；修订不可扩通道。
+- 实际证据：`RESEARCH_BRIEF_SCHEMA_VERSION=2`：v2 允许多元素
+  `allowed_sources`（首个为主通道），v1 载荷仍只读且必须单来源；高版本
+  `UnknownSchemaVersion`。`allowed_tools` 为各通道白名单并集，
+  `effective_sources` 暴露冻结集合；`with_revision` 不可改来源。
+  `RunContext.sources` + `sources_from_config`：缺失/损坏/空值回退
+  `{source_mode}`，保证主通道在首位；`_load_context` 以 Run 行为权威恢复
+  集合（旧 checkpoint 兼容）。`MessageSend.sources` 可选，scholar→web 归一、
+  去重、非空、必须包含主通道；ChatService 将 `[source_mode, ...]` 冻结进
+  config_snapshot。Driver 的 planning 快照改为 config+context 合并，确保
+  `sources`/`web_apis` 进入 BriefBuilder。`ResearchBrief` 若发现集合变化直接
+  拒绝（Run 内不可扩/改来源）。API 422 处理器对 pydantic `ctx.error` 做
+  字符串化，避免异常对象导致二次序列化失败。`tests/harness/test_multisource_contract.py`
+  7 项 + API 用例：v2 roundtrip/工具并集、v1 单来源与高版本拒绝、修订不可
+  改来源、RunContext 校验/回退、config 解析容错、driver 快照、BriefBuilder
+  多来源 brief、API 多来源冻结与非法集合 422。
+  独立 review 1 轮（2 HIGH：planning/context 快照可覆盖冻结集合、restore 信任
+  checkpoint 主通道；2 MEDIUM：缺主通道的损坏列表被“补全”成并集、API 静默去重
+  绕过 max_length/重复拒绝；1 既有缺口：未来版本 brief 被当作损坏重写）全部
+  修复：冻结键只认 Run 行 config（checkpoint/Context Pack 不得覆盖，缺失即移除）、
+  restore 校验 checkpoint 主通道与 Run 行一致否则大声失败、`sources_from_config`
+  对缺主通道 fail closed 回退单通道、API 只做别名归一（重复/超长/别名冲突一律
+  422）、BriefBuilder 用 `from_payload` 让高版本 brief 显式拒绝。复检门禁：
+  pytest 667 passed/4 skipped、ruff、git diff --check。
 
 ### S3 — 执行层多来源
 
@@ -163,7 +186,7 @@
 | 项 | 任务 | 当前结果 |
 |---|---|---|
 | scholar API 纳入 web 聚合、旧 scholar 只读兼容 | S1 | PASS（白名单/policy/controller 统一；聚合路由 + 证据归属；tavily/scholar 预算分账；(tool,query) 去重；API 边界归一；pytest 654 passed/4 skipped） |
-| 多来源冻结契约 v2 与 v1 兼容 | S2 | pending |
+| 多来源冻结契约 v2 与 v1 兼容 | S2 | PASS（brief v2/单来源 v1/高版本拒绝；RunContext + config 冻结且 checkpoint/上下文不得覆盖；API sources 校验；pytest 667 passed/4 skipped） |
 | 组合 router / 多通道准入 / 预算分离 | S3 | pending |
 | source_match/diversity/rubric 多来源语义 | S4 | pending |
 | 前端多选与冻结集合披露 | S5 | pending |

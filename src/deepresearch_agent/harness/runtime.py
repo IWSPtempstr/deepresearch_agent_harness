@@ -12,7 +12,7 @@ from deepresearch_agent.harness.contracts import ContractEvaluator, RunStatus, S
 from deepresearch_agent.harness.evidence import EvidenceLedger
 from deepresearch_agent.harness.event_bus import EventBus
 from deepresearch_agent.harness.errors import RunCancelled
-from deepresearch_agent.harness.run_context import RunContext
+from deepresearch_agent.harness.run_context import RunContext, sources_from_config
 from deepresearch_agent.harness.state_machine import StateMachine
 from deepresearch_agent.persistence.artifact_store import ArtifactStore
 from deepresearch_agent.persistence.repositories import (
@@ -114,6 +114,17 @@ class HarnessRuntime(RuntimeExecutionMixin, RuntimePersistMixin):
                 restored.status = persisted_status
             restored.cancellation_requested = bool(run.cancellation_requested)
             restored.config_snapshot.update(config_snapshot)
+            # S2：来源集合以 Run 行为权威；旧 checkpoint 无该字段时回退单通道。
+            # checkpoint 的主通道与 Run 行不一致属于损坏/被篡改快照——大声失败，
+            # 不静默改写来源（多来源冻结契约）。
+            row_primary = SourceMode(run.source_mode)
+            if restored.source_mode != row_primary:
+                raise ValueError(
+                    f"Run {run_id} 的 checkpoint source_mode="
+                    f"{restored.source_mode.value!r} 与 Run 行 {row_primary.value!r} 不一致"
+                )
+            restored.source_mode = row_primary
+            restored.sources = sources_from_config(config_snapshot, row_primary)
             return restored
         message = await self.messages.get(run.trigger_message_id)
         if message is None:
@@ -122,6 +133,7 @@ class HarnessRuntime(RuntimeExecutionMixin, RuntimePersistMixin):
         return RunContext(
             run_id=run.run_id, session_id=run.session_id, trigger_message_id=run.trigger_message_id,
             source_mode=SourceMode(run.source_mode), workflow_mode=WorkflowMode(run.workflow_mode),
+            sources=sources_from_config(config_snapshot, SourceMode(run.source_mode)),
             status=(
                 RunStatus(run.current_stage or "queued")
                 if run.status == "pausing" else RunStatus(run.status)

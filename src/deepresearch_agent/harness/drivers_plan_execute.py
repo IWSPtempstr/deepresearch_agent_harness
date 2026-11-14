@@ -46,7 +46,13 @@ class PlanExecuteReportDriver(CoreActLoopMixin, CoreActSupportMixin, ReportPipel
         self.lease_probe = None
         self.selected_skill = (context.context_snapshot or {}).get("selected_skill") or None
         self.skill_policy = compile_runtime_policy(self.selected_skill, source_mode=context.source_mode.value)
-        runtime_snapshot = dict(context.context_snapshot or context.config_snapshot)
+        # S2：冻结来源/可用 API 等 Run 级配置必须进入 planning 快照；Context Pack
+        # 快照提供上下文内容，但**不得覆盖** Run 行冻结的来源集合。
+        runtime_snapshot = {
+            **(context.config_snapshot or {}),
+            **(context.context_snapshot or {}),
+        }
+        self._apply_frozen_runtime_keys(runtime_snapshot, context.config_snapshot or {})
         runtime_snapshot["active_skill_policy"] = self.skill_policy
         runtime_snapshot["skill_policy_consumers"] = ["planner", "worker", "reflection", "reporter", "verifier"] if self.skill_policy else []
         self.state = PlanExecuteState(
@@ -62,14 +68,28 @@ class PlanExecuteReportDriver(CoreActLoopMixin, CoreActSupportMixin, ReportPipel
         self.report_result: ReportResult | None = None
         self._repair_pending = False
         self._restore(context.workflow_state)
+        # S2：checkpoint 可能携带旧的/被扩展的来源集合；Run 行 config 是唯一权威。
+        self.state.context_snapshot = dict(self.state.context_snapshot or {})
+        self._apply_frozen_runtime_keys(
+            self.state.context_snapshot, context.config_snapshot or {},
+        )
         # BC-01：Run 行上的澄清回答是权威输入；恢复的 checkpoint 快照可能早于
         # 本次回答，合并后 BriefBuilder 才能消费（不覆盖已有快照字段）。
         self.state.context_snapshot = {
-            **(self.state.context_snapshot or {}),
+            **self.state.context_snapshot,
             "clarifications": [
                 answer.model_dump(mode="json") for answer in parse_answers(context.config_snapshot)
             ],
         }
+
+    @staticmethod
+    def _apply_frozen_runtime_keys(snapshot: dict[str, Any], config_snapshot: dict[str, Any]) -> None:
+        """来源集合/可用 API 只认 Run 行快照；缺失时移除，防止 checkpoint 扩权。"""
+        for key in ("sources", "web_apis"):
+            if key in config_snapshot:
+                snapshot[key] = config_snapshot[key]
+            else:
+                snapshot.pop(key, None)
 
     def _restore(self, payload: dict[str, Any]) -> None:
         if not payload:

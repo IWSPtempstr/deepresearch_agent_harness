@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .contracts import SourceMode
 
-RESEARCH_BRIEF_SCHEMA_VERSION = 1
+RESEARCH_BRIEF_SCHEMA_VERSION = 2
 
 
 class UnknownSchemaVersion(ValueError):
@@ -103,7 +103,9 @@ class ResearchBrief(BaseModel):
     """唯一 coreact 路径的研究输入契约。
 
     不变量：
-    - allowed_sources 必须与 source_mode 完全一致（单来源冻结，模型不得扩大）；
+    - v1：allowed_sources 必须恰好一个（历史单来源冻结）；
+    - v2：allowed_sources 可多元素，首个为主通道（runs.source_mode），集合在
+      创建时冻结、运行中不得扩大；
     - 短报告场景 required_sections 可为空，但输出必须保留"结论—依据—局限"；
     - 修订只能经 with_revision()（版本 +1），任何字段变更不落版本即无效。
     """
@@ -144,23 +146,32 @@ class ResearchBrief(BaseModel):
 
     @model_validator(mode="after")
     def _freeze_sources(self) -> ResearchBrief:
-        allowed = set(self.allowed_sources)
-        if allowed != {self.source_mode}:
-            raise ValueError(
-                f"allowed_sources {sorted(item.value for item in allowed)} 必须与冻结的 "
-                f"source_mode={self.source_mode.value!r} 完全一致（单来源路径）"
-            )
+        allowed = list(self.allowed_sources)
+        if len(allowed) != len(set(allowed)):
+            raise ValueError("allowed_sources 不得重复")
+        if self.schema_version <= 1 and len(allowed) != 1:
+            raise ValueError("v1 ResearchBrief 只允许单一来源；多来源必须使用 schema_version=2")
+        if not allowed:
+            raise ValueError("allowed_sources 不得为空")
         return self
 
     @property
     def source_mode(self) -> SourceMode:
-        """冻结的信息源；allowed_sources 唯一元素。"""
+        """冻结的**主通道**（allowed_sources 首个元素）。"""
         return self.allowed_sources[0]
 
     @property
+    def effective_sources(self) -> tuple[SourceMode, ...]:
+        """冻结的来源集合（多来源 v2；v1/单来源为单元素）。"""
+        return tuple(self.allowed_sources)
+
+    @property
     def allowed_tools(self) -> frozenset[str]:
-        """该来源允许的检索工具白名单（与 SourcePolicy 派生一致）。"""
-        return SOURCE_TOOL_WHITELIST.get(self.source_mode.value, frozenset())
+        """冻结集合内所有通道允许工具的白名单并集。"""
+        tools: set[str] = set()
+        for mode in self.allowed_sources:
+            tools.update(SOURCE_TOOL_WHITELIST.get(mode.value, frozenset()))
+        return frozenset(tools)
 
     def content_hash(self) -> str:
         """Canonical JSON hash（不含自身派生值；跨进程稳定）。"""

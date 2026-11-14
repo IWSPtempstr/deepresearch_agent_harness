@@ -31,7 +31,12 @@ from deepresearch_agent.agents.multi_agent.core.state import PlanExecuteState
 from deepresearch_agent.agents.multi_agent.planner.result import PlannerResult
 from deepresearch_agent.harness.contracts import SourceMode
 from deepresearch_agent.harness.clarifications import has_answers, merge_into_history
-from deepresearch_agent.harness.research_brief import BudgetPolicy, ResearchBrief
+from deepresearch_agent.harness.research_brief import (
+    BudgetPolicy,
+    ResearchBrief,
+    UnknownSchemaVersion,
+)
+from deepresearch_agent.harness.run_context import sources_from_config
 
 logger = logging.getLogger(__name__)
 
@@ -249,13 +254,26 @@ class BriefBuilder:
         policy = BudgetPolicy.from_budget_limits(budget_limits)
         # Run 预算缺失（离线/测试）时以配置口径兜底；两者取严
         policy = policy.model_copy(update={"min_evidence": max(policy.min_evidence, self.config.min_evidence)})
+        # S2：来源集合由 Run 创建时冻结（config_snapshot.sources）；旧 Run 回退单通道。
+        frozen_sources = sources_from_config(
+            state.context_snapshot or {}, SourceMode(state.source_mode),
+        )
         previous_payload = (state.context_snapshot or {}).get("research_brief")
         if isinstance(previous_payload, dict):
             try:
-                previous = ResearchBrief.model_validate(previous_payload)
+                # from_payload：版本门禁在模型校验前执行——高版本在此显式抛
+                # UnknownSchemaVersion（不会被 pydantic 包进 ValidationError）。
+                previous = ResearchBrief.from_payload(previous_payload)
+            except UnknownSchemaVersion:
+                # 高于实现的 brief 版本：显式拒绝，绝不当作损坏重写成当前版本。
+                raise
             except Exception:  # noqa: BLE001 —— 损坏的历史 brief 不阻塞重规划
                 previous = None
             if previous is not None:
+                if previous.effective_sources != frozen_sources:
+                    raise ValueError(
+                        "来源集合在 Run 内发生变化：冻结契约不允许扩大/变更来源"
+                    )
                 if previous.goal == refined_query and previous.budget_policy.min_evidence == policy.min_evidence:
                     return previous
                 return previous.with_revision(
@@ -268,7 +286,7 @@ class BriefBuilder:
             goal=refined_query,
             questions=questions,
             output_requirements=["结论附就近证据引用", "无证据内容进入局限，不作推断"],
-            allowed_sources=[SourceMode(state.source_mode)],
+            allowed_sources=list(frozen_sources),
             acceptance_criteria=[condition for condition in plan_spec.acceptance_criteria.completion_conditions],
             budget_policy=policy,
         )

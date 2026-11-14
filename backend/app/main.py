@@ -149,7 +149,16 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError):
-        return _error(request, status_code=422, code="VALIDATION_ERROR", message="请求参数校验失败", details={"errors": exc.errors()})
+        # pydantic 的 ctx 可能包含异常对象（ValueError），不能直接 JSON 序列化；
+        # 统一转字符串，保证 422 处理器自身不抛错。
+        errors = []
+        for item in exc.errors():
+            entry = dict(item)
+            ctx = entry.get("ctx")
+            if isinstance(ctx, dict):
+                entry["ctx"] = {key: str(value) for key, value in ctx.items()}
+            errors.append(entry)
+        return _error(request, status_code=422, code="VALIDATION_ERROR", message="请求参数校验失败", details={"errors": errors})
 
     @app.exception_handler(Exception)
     async def unexpected_error_handler(request: Request, exc: Exception):

@@ -168,9 +168,15 @@ def test_unknown_engine_rejected_by_adapter():
 
 # ---------- 来源约束 ----------
 
-def test_brief_rejects_sources_inconsistent_with_source_mode():
-    with pytest.raises(ValidationError, match="完全一致"):
-        make_brief(allowed_sources=[SourceMode.WEB, SourceMode.GRAPHRAG])
+def test_brief_v1_rejects_multi_sources_but_v2_allows():
+    with pytest.raises(ValidationError, match="单一来源"):
+        make_brief(
+            schema_version=1,
+            allowed_sources=[SourceMode.WEB, SourceMode.GRAPHRAG],
+        )
+    multi = make_brief(allowed_sources=[SourceMode.WEB, SourceMode.GRAPHRAG])
+    assert multi.schema_version == 2
+    assert multi.effective_sources == (SourceMode.WEB, SourceMode.GRAPHRAG)
 
 
 def test_brief_rejects_duplicate_allowed_sources():

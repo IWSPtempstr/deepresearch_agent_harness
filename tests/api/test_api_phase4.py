@@ -360,6 +360,35 @@ def test_clarification_resumes_same_run(client):
     assert len(clarifications) == 1 and clarifications[0]["content"] == "主体是阶段4 API"
 
 
+def test_api_freezes_multiple_sources_and_rejects_invalid_sets(client):
+    client.app.state.run_service.schedule = lambda _run_id: None
+    session_id = new_session(client)
+    response = client.post(f"/api/v1/sessions/{session_id}/messages", json={
+        "client_message_id": "multi-source-1", "content": "多来源研究",
+        "source_mode": "web", "sources": ["web", "graphrag"],
+    })
+    assert response.status_code == 202
+    run_id = response.json()["run_id"]
+
+    async def read_config():
+        run = await RunRepository(client.app.state.database).get(run_id)
+        return json.loads(run.config_snapshot_json)
+
+    snapshot = client.portal.call(read_config)
+    assert snapshot["sources"] == ["web", "graphrag"]
+
+    empty = client.post(f"/api/v1/sessions/{session_id}/messages", json={
+        "client_message_id": "multi-source-empty", "content": "x",
+        "source_mode": "web", "sources": [],
+    })
+    assert empty.status_code == 422
+    missing_primary = client.post(f"/api/v1/sessions/{session_id}/messages", json={
+        "client_message_id": "multi-source-missing", "content": "x",
+        "source_mode": "web", "sources": ["graphrag"],
+    })
+    assert missing_primary.status_code == 422
+
+
 def test_api_scholar_source_is_normalized_to_web(client):
     """S1：scholar API 并入 web 通道；旧客户端提交 scholar 不报错，Run 冻结为 web。"""
     client.app.state.run_service.schedule = lambda _run_id: None
@@ -525,3 +554,23 @@ def test_evolution_dashboard_exposes_every_learning_stage(client):
     assert payload["critic"]["decision"] == "pass"
     assert payload["validation"]["passed"] is True
     assert payload["run"]["workflow_mode"] in {"deep_research", "plan_execute_report"}
+
+
+def test_api_rejects_duplicate_or_oversized_sources(client):
+    client.app.state.run_service.schedule = lambda _run_id: None
+    session_id = new_session(client)
+    duplicate = client.post(f"/api/v1/sessions/{session_id}/messages", json={
+        "client_message_id": "src-dup", "content": "x",
+        "source_mode": "web", "sources": ["web", "web"],
+    })
+    assert duplicate.status_code == 422
+    oversized = client.post(f"/api/v1/sessions/{session_id}/messages", json={
+        "client_message_id": "src-long", "content": "x",
+        "source_mode": "web", "sources": ["web", "graphrag", "web", "graphrag", "web"],
+    })
+    assert oversized.status_code == 422
+    alias_conflict = client.post(f"/api/v1/sessions/{session_id}/messages", json={
+        "client_message_id": "src-alias", "content": "x",
+        "source_mode": "web", "sources": ["scholar", "web"],
+    })
+    assert alias_conflict.status_code == 422
