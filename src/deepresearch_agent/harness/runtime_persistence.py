@@ -101,7 +101,8 @@ class RuntimePersistMixin:
                         scholar=api == "scholar",
                     )
                 if self.trajectory:
-                    await self.trajectory.prepare_tool_call(tool_call_id=call.tool_call_id, run_id=context.run_id, task_id=record.task_id, tool_name=call.tool_name, source_mode=context.source_mode.value, args=call.args)
+                    # S3：多来源 Run 的 tool_calls 行按任务通道记录。
+                    await self.trajectory.prepare_tool_call(tool_call_id=call.tool_call_id, run_id=context.run_id, task_id=record.task_id, tool_name=call.tool_name, source_mode=call.source_mode, args=call.args)
                     await self.trajectory.complete_tool_call(call.tool_call_id, result=call.result, error_code="TOOL_FAILED" if call.status == "failed" else None)
                 tool_payload: dict[str, Any] = {"task_id": record.task_id, "tool_call_id": call.tool_call_id, "tool_name": call.tool_name}
                 if isinstance(call.args, dict) and call.args.get("query"):

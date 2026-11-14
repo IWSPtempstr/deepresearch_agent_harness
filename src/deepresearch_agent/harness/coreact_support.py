@@ -202,6 +202,10 @@ class CoreActSupportMixin:
                 return value.strip()
         return str(task.description or "").strip()
 
+    def _coreact_source_values(self) -> list[str]:
+        """S3：Run 冻结来源集合的字符串视图（主通道在前）。"""
+        return [mode.value for mode in self.context.effective_sources]
+
     def _coreact_recent_queries(self) -> list[str]:
         queries = []
         if self.state.execution_context is not None:

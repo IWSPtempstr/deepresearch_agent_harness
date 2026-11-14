@@ -125,16 +125,17 @@ class BriefBuilder:
     # ---------- 各阶段 ----------
 
     @staticmethod
-    def _default_task_type(state: PlanExecuteState) -> str:
+    def _default_task_type(state: PlanExecuteState, mode: str | None = None) -> str:
         """S1：web 聚合通道按冻结的可用 API 选择默认检索工具。
 
         `web_apis` 缺失（旧快照/直接构造）时保持历史默认 web_search。
         """
-        if state.source_mode == "web":
+        channel = mode or state.source_mode
+        if channel == "web":
             apis = (state.context_snapshot or {}).get("web_apis")
             if isinstance(apis, dict) and apis.get("tavily") is False:
                 return "scholar_search"
-        return SOURCE_TASK_TYPE.get(state.source_mode, "web_search")
+        return SOURCE_TASK_TYPE.get(channel, "web_search")
 
     def _simple_plan(self, state: PlanExecuteState, context: Any, failures: List[str]) -> Optional[PlanSpec]:
         query = (context.refined_query or context.original_query or "").strip()
@@ -164,24 +165,36 @@ class BriefBuilder:
         refined_query: str,
         failures: List[str],
     ) -> PlanSpec:
-        task_type = self._default_task_type(state)
         nodes: List[TaskNode] = []
+        # S3：候选方向按冻结来源轮转派发（主通道优先），每通道用其默认工具；
+        # Controller 仍是唯一决策者。
+        frozen_sources = sources_from_config(
+            state.context_snapshot or {}, SourceMode(state.source_mode),
+        )
+        source_values = [mode.value for mode in frozen_sources]
+        web_default = self._default_task_type(state, "web")
         # S1：web 聚合通道为学术 API 预留一个候选（确定性路径也能用上 scholar_search）；
-        # Tavily 候选仍占多数，Controller 仍是唯一决策者。若 Tavily 不可用，
-        # 所有候选都走 scholar_search（不生成注定 SOURCE_UNAVAILABLE 的动作）。
+        # 若 Tavily 不可用，web 通道默认已是 scholar_search，不再重复预留。
         academic_slot = (
-            state.source_mode == "web" and task_type == "web_search"
+            "web" in source_values and web_default == "web_search"
             and self.config.max_candidate_tasks >= 2
         )
+        # final evidence 缺口 → 预留一个补充检索槽位（计入候选预算，不超发）
+        needs_followup = any(
+            marker in failure for failure in failures for marker in EVIDENCE_GAP_MARKERS
+        )
         direction_count = min(
-            self.config.max_candidate_tasks - (1 if academic_slot else 0),
+            self.config.max_candidate_tasks
+            - (1 if academic_slot else 0) - (1 if needs_followup else 0),
             len(RESEARCH_DIRECTIONS),
         )
-        for direction in RESEARCH_DIRECTIONS[:direction_count]:
+        for index, direction in enumerate(RESEARCH_DIRECTIONS[:direction_count]):
+            channel = source_values[index % len(source_values)]
+            task_type = self._default_task_type(state, channel)
             query = f"{refined_query} {direction}"
             nodes.append(TaskNode(
                 task_type=task_type,
-                source_mode=state.source_mode,
+                source_mode=channel,
                 description=f"{refined_query}——{direction}",
                 priority=2,
                 parameters={"query": query},
@@ -189,18 +202,18 @@ class BriefBuilder:
         if academic_slot:
             nodes.append(TaskNode(
                 task_type="scholar_search",
-                source_mode=state.source_mode,
+                source_mode="web",
                 description=f"{refined_query}——学术文献与综述",
                 priority=2,
                 parameters={"query": f"{refined_query} 学术研究 综述", "top_k": 5},
             ))
-        # final evidence 缺口 → 追加补充检索候选（反馈 Controller，而非回旧 Planner）
-        if any(marker in failure for failure in failures for marker in EVIDENCE_GAP_MARKERS):
+        # final evidence 缺口 → 追加预留槽位的补充检索候选（反馈 Controller）
+        if needs_followup:
             follow_up_query = f"{refined_query} 补充证据 最新数据"
             if all(str(node.parameters.get("query", "")).strip() != follow_up_query for node in nodes):
                 nodes.append(TaskNode(
-                    task_type=task_type,
-                    source_mode=state.source_mode,
+                    task_type=self._default_task_type(state, source_values[0]),
+                    source_mode=source_values[0],
                     description=f"{refined_query}——证据缺口补充检索",
                     priority=1,
                     parameters={"query": follow_up_query},

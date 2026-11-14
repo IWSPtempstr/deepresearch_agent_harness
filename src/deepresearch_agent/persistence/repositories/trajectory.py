@@ -39,7 +39,8 @@ class PlanTaskToolRepository:
             for item in tasks:
                 task_model = await session.get(TaskModel, item["task_id"])
                 if task_model is None:
-                    session.add(TaskModel(task_id=item["task_id"], run_id=run_id, plan_id=plan_id, task_type=item["task_type"], source_mode=source_mode, status=item.get("status", "pending"), task_json=json_text(item), created_at=now, updated_at=now))
+                    # S3：多来源 Run 的 tasks 行按任务通道落账（fallback 为 Run 主通道）。
+                    session.add(TaskModel(task_id=item["task_id"], run_id=run_id, plan_id=plan_id, task_type=item["task_type"], source_mode=item.get("source_mode") or source_mode, status=item.get("status", "pending"), task_json=json_text(item), created_at=now, updated_at=now))
                 else:
                     task_model.status = item.get("status", task_model.status)
                     task_model.task_json = json_text(item)

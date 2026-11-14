@@ -59,6 +59,8 @@ class DecisionContext(BaseModel):
 
     goal: str
     source_mode: str
+    # S3：Run 冻结的来源集合（主通道在前）；空 = 单来源（回退 source_mode）。
+    sources: List[str] = Field(default_factory=list)
     eligible_tasks: List[Dict[str, Any]] = Field(default_factory=list)  # 候选图任务 dump
     completed_count: int = 0
     evidence_count: int = 0
@@ -125,11 +127,19 @@ class CoreActController:
         return self._decision_from_payload(payload, context)
 
     def _build_decision_prompt(self, context: DecisionContext) -> str:
-        tool_menu = {
+        channel_menu = {
             "web": "web_search（联网搜索；参数 query）/ scholar_search（学术检索 OpenAlex+arXiv；参数 query）",
             "scholar": "scholar_search（学术检索；参数 query）",
             "graphrag": "local_search / global_search / hybrid_search / naive_search / chain_exploration",
-        }.get(context.source_mode, "web_search")
+        }
+        # S3：多来源 Run 渲染冻结集合与各通道工具；单来源保持原文案。
+        if context.sources:
+            tool_menu = "；".join(
+                f"{channel}：{channel_menu.get(channel, 'web_search')}"
+                for channel in context.sources
+            )
+        else:
+            tool_menu = channel_menu.get(context.source_mode, "web_search")
         budget_line = (
             f"剩余 token 预算约 {context.remaining_tokens}，预算紧张时应尽快 ready_to_report。"
             if context.remaining_tokens < 20000
@@ -276,15 +286,21 @@ class CoreActController:
             description = task_payload.get("description")
             if isinstance(description, str) and description.strip():
                 task.description = description.strip()
-            if task.source_mode != context.source_mode or not self._task_type_allowed(
-                context.source_mode, str(task.task_type)
+            if task.source_mode not in self._allowed_sources(context) or not self._task_type_allowed(
+                task.source_mode, str(task.task_type)
             ):
                 return None
             return ControllerDecision(action=task, reason=reason)
+        # S3：新提案动作的通道由工具反查（TOOL_SOURCE），且必须属于冻结集合；
+        # LLM 不能把 web 工具挂到 graphrag 通道（或反之）。
+        allowed_sources = self._allowed_sources(context)
+        channel = SourcePolicy.TOOL_SOURCE.get(str(task_payload.get("task_type")))
+        if channel is None or channel.value not in allowed_sources:
+            return None
         merged = {
             "task_type": task_payload.get("task_type"),
             "description": task_payload.get("description"),
-            "source_mode": context.source_mode,
+            "source_mode": channel.value,
             "parameters": {"query": task_payload.get("query") or task_payload.get("description")},
         }
         try:
@@ -293,13 +309,17 @@ class CoreActController:
             return None
         if str(task.task_type) not in TASK_TYPE_CHOICES:
             return None
-        if not self._task_type_allowed(context.source_mode, str(task.task_type)):
+        if not self._task_type_allowed(task.source_mode, str(task.task_type)):
             return None
         return ControllerDecision(action=task, reason=reason)
 
     @staticmethod
     def _task_type_allowed(source_mode: str, task_type: str) -> bool:
         return task_type in SOURCE_TASK_TYPES.get(source_mode, set())
+
+    @staticmethod
+    def _allowed_sources(context: DecisionContext) -> set:
+        return set(context.sources) or {context.source_mode}
 
     # ---------- 确定性兜底 ----------
 
@@ -309,8 +329,8 @@ class CoreActController:
                 task = TaskNode.model_validate(payload)
             except ValidationError:
                 continue
-            if task.source_mode == context.source_mode and self._task_type_allowed(
-                context.source_mode, str(task.task_type)
+            if task.source_mode in self._allowed_sources(context) and self._task_type_allowed(
+                task.source_mode, str(task.task_type)
             ):
                 return ControllerDecision(
                     action=task, reason=reason or "候选计划仍有可执行任务", source="fallback_candidate"

@@ -67,7 +67,7 @@ def test_three_source_modes_produce_whitelisted_task_types():
 
 def test_evidence_gap_failure_feeds_followup_candidate():
     """final evidence 缺口（min_evidence 等）→ 补充检索候选任务，不回旧 Planner。"""
-    builder = BriefBuilder()
+    builder = BriefBuilder(config=BriefBuilderConfig(max_candidate_tasks=5))
     state = make_state("调研检索增强技术的评测基准")
     result = builder.generate_plan(state, assumptions=["min_evidence", "insufficient_source_evidence"])
     queries = [str(node.parameters.get("query", "")) for node in result.plan_spec.task_graph.nodes]

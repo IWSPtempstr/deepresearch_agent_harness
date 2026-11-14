@@ -88,8 +88,22 @@ class RetrievalExecutor(BaseExecutor):
             payload,
         )
 
-        provider = self._provider or self._router.for_mode(state.source_mode)  # type: ignore[union-attr]
-        if provider.mode.value != state.source_mode or task.source_mode != state.source_mode:
+        from deepresearch_agent.harness.run_context import sources_from_config
+
+        effective_sources = sources_from_config(
+            state.context_snapshot, SourceMode(state.source_mode),
+        )
+        sources_values = {mode.value for mode in effective_sources}
+        if self._provider is not None:
+            provider = self._provider
+        else:
+            provider = self._router.for_modes(effective_sources)  # type: ignore[union-attr]
+        # S3：任务通道必须属于 Run 冻结集合；单来源 Run 保留旧的严格一致性检查。
+        if task.source_mode not in sources_values:
+            raise ValueError(
+                f"Task source_mode {task.source_mode!r} 超出 Run 冻结来源集合 {sorted(sources_values)}"
+            )
+        if len(effective_sources) == 1 and provider.mode.value != state.source_mode:
             raise ValueError("Plan/Task/Provider source_mode 不一致")
         provider_label = self._provider_label(provider, tool_name)
         # T-404 稳定 tool ID：tool_call_id 由 (run_id, task_id, attempt) 派生——
@@ -108,7 +122,9 @@ class RetrievalExecutor(BaseExecutor):
                 )
             else:
                 # Graph-only legacy specialist tools remain available, but are source-gated.
-                self._source_policy.assert_tool_allowed(SourceMode(state.source_mode), tool_name)
+                self._source_policy.assert_tool_allowed(
+                    SourcePolicy.TOOL_SOURCE.get(tool_name, SourceMode(state.source_mode)), tool_name,
+                )
                 tool_instance = self._get_tool_instance(tool_name)
                 structured_output = self._invoke_tool(tool_instance, tool_name, payload)
         except Exception as exc:  # noqa: BLE001
@@ -120,7 +136,8 @@ class RetrievalExecutor(BaseExecutor):
         tool_call = ToolCall(
             tool_name=tool_name,
             tool_call_id=tool_call_id,
-            source_mode=state.source_mode,
+            # S3：多来源 Run 的工具调用按**任务通道**记录（evidence 行亦然）。
+            source_mode=task.source_mode,
             args=payload,
             result=structured_output if success else None,
             status="success" if success else "failed",
@@ -195,13 +212,45 @@ class RetrievalExecutor(BaseExecutor):
         )
 
     @staticmethod
+    def _unwrap_provider(provider: RetrievalProvider) -> RetrievalProvider:
+        """剥离 TimeoutBound 等包装层，直到出现真正的路由/聚合 provider。
+
+        生产路径 run_service 注入的是 TimeoutBoundProvider(组合 provider)；
+        通道解析/证据归属必须基于内层对象，否则会被主通道误判。
+        """
+        seen: set[int] = set()
+        while id(provider) not in seen and hasattr(provider, "_provider"):
+            seen.add(id(provider))
+            provider = provider._provider
+        return provider
+
+    @staticmethod
     def _provider_label(provider: RetrievalProvider, task_type: str) -> str:
         """证据 provider 归属：聚合 web 通道按具体 API 标注，其余用 provider 名。"""
+        provider = RetrievalExecutor._unwrap_provider(provider)
+        from deepresearch_agent.retrieval.router import CompositeRetrievalProvider
+
+        if isinstance(provider, CompositeRetrievalProvider):
+            channel = provider.channel_for(task_type)
+            if channel == SourceMode.WEB:
+                from deepresearch_agent.retrieval.web_aggregate import AggregateWebProvider
+
+                return AggregateWebProvider.provider_label_for(task_type)
+            return RetrievalExecutor._unwrap_provider(provider.members[channel]).provider_name
         if provider.mode == SourceMode.WEB:
             from deepresearch_agent.retrieval.web_aggregate import AggregateWebProvider
 
             return AggregateWebProvider.provider_label_for(task_type)
         return provider.provider_name
+
+    @classmethod
+    def _channel_for(cls, provider: RetrievalProvider, task_type: str) -> SourceMode:
+        provider = cls._unwrap_provider(provider)
+        from deepresearch_agent.retrieval.router import CompositeRetrievalProvider
+
+        if isinstance(provider, CompositeRetrievalProvider):
+            return provider.channel_for(task_type)
+        return provider.mode
 
     def _invoke_provider(
         self,
@@ -212,10 +261,21 @@ class RetrievalExecutor(BaseExecutor):
         task: TaskNode,
         tool_call_id: str,
     ) -> Dict[str, Any]:
-        # 任务类型即工具名：web 聚合通道按 task_type 选择 API；legacy scholar
-        # 通道保持原语义。SourcePolicy 对通道/工具组合做权威校验。
+        # 任务类型即工具名：组合 provider 按工具反查通道派发；单通道 provider
+        # 保持原语义。SourcePolicy 对通道/工具组合做权威校验。
         actual_tool = task_type
-        self._source_policy.assert_tool_allowed(provider.mode, actual_tool)
+        channel = self._channel_for(provider, actual_tool)
+        # S3 防御：任务通道必须与工具所属通道一致（legacy scholar 通道豁免）。
+        expected_channel = SourcePolicy.TOOL_SOURCE.get(actual_tool)
+        if (
+            expected_channel is not None and task.source_mode != expected_channel.value
+            and not (task.source_mode == SourceMode.SCHOLAR.value and actual_tool == "scholar_search")
+        ):
+            raise ValueError(
+                f"任务通道 {task.source_mode!r} 与工具 {actual_tool!r} 所属通道 "
+                f"{expected_channel.value!r} 不一致"
+            )
+        self._source_policy.assert_tool_allowed(channel, actual_tool)
         query = str(payload.get("query") or task.description)
         results = run_async_from_sync(lambda: provider.search(
             query,
@@ -223,8 +283,9 @@ class RetrievalExecutor(BaseExecutor):
             search_depth=payload.get("search_depth", "advanced"),
             filters=SearchFilters(
                 # graphrag 用 strategy 区分 local/global/...；web 聚合通道用它
-                # 区分 Tavily 与学术 API（Tavily 忽略该字段）。
-                strategy=task_type if provider.mode in {SourceMode.GRAPHRAG, SourceMode.WEB} else None,
+                # 区分 Tavily 与学术 API（Tavily 忽略该字段）；组合 provider 用
+                # 它反查通道派发。legacy scholar 忽略该字段。
+                strategy=task_type,
                 include_domains=tuple(payload.get("include_domains") or ()),
                 exclude_domains=tuple(payload.get("exclude_domains") or ()),
                 start_date=payload.get("start_date"),
@@ -233,18 +294,18 @@ class RetrievalExecutor(BaseExecutor):
             ),
             call_context=ToolCallContext(
                 run_id=state.run_id,
-                source_mode=provider.mode,
+                source_mode=channel,
                 task_id=task.task_id,
                 tool_call_id=tool_call_id,
             ),
         ))
-        if any(result.source_mode != provider.mode.value for result in results):
-            raise ValueError("Provider 返回了与 Run.source_mode 不一致的证据")
+        if any(result.source_mode != channel.value for result in results):
+            raise ValueError("Provider 返回了与任务通道不一致的证据")
         return {
             "answer": "\n\n".join(str(result.evidence) for result in results),
             "retrieval_results": [result.to_dict() for result in results],
             "provider": self._provider_label(provider, task_type),
-            "source_mode": provider.mode.value,
+            "source_mode": channel.value,
         }
 
 

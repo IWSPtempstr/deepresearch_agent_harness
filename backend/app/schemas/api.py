@@ -85,6 +85,13 @@ class MessageSend(ApiModel):
             raise ValueError("sources 必须包含主通道 source_mode")
         return self
 
+    @property
+    def frozen_sources(self) -> list[SourceMode]:
+        """创建时冻结的来源集合（主通道固定首位）。"""
+        if self.sources is None:
+            return [self.source_mode]
+        return [self.source_mode, *[mode for mode in self.sources if mode != self.source_mode]]
+
 
 class ClarificationSubmit(ApiModel):
     content: str = Field(min_length=1, max_length=10000)

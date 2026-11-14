@@ -7,7 +7,7 @@ from typing import Callable, Mapping
 
 from deepresearch_agent.harness.contracts import SourceMode
 from deepresearch_agent.harness.errors import AppError, ErrorCode
-from deepresearch_agent.retrieval.base import RetrievalProvider
+from deepresearch_agent.retrieval.base import RetrievalProvider, ToolCallContext
 
 
 class RetrievalRouter:
@@ -34,6 +34,113 @@ class RetrievalRouter:
     async def aclose(self) -> None:
         """T-006：关停时释放各 provider 持有的资源（如 scholar httpx 客户端）。"""
         for provider in self._providers.values():
+            inner = getattr(provider, "_instance", None) or provider
+            close = getattr(inner, "aclose", None)
+            if close is None:
+                continue
+            try:
+                await close()
+            except Exception:
+                continue
+
+    def for_modes(self, sources) -> RetrievalProvider:
+        """S3：按 Run 冻结的来源集合返回组合 provider。
+
+        单来源 Run 原样返回该通道 provider（legacy 语义不变）；多来源返回
+        `CompositeRetrievalProvider`，按工具所属通道派发（不跨通道 fallback）。
+        集合中任一通道未配置 → SOURCE_UNAVAILABLE（fail fast，不产出注定
+        失败的 Run）。
+        """
+        from deepresearch_agent.harness.policies import SourcePolicy
+
+        requested: list[SourceMode] = []
+        for item in sources:
+            try:
+                mode = SourceMode(item)
+            except ValueError as exc:
+                raise AppError(
+                    ErrorCode.INVALID_SOURCE_MODE, f"不支持的信息源: {item!r}",
+                ) from exc
+            if mode not in requested:
+                requested.append(mode)
+        if not requested:
+            raise AppError(ErrorCode.SOURCE_UNAVAILABLE, "来源集合为空")
+        missing = [mode for mode in requested if mode not in self._providers]
+        if missing:
+            raise AppError(
+                ErrorCode.SOURCE_UNAVAILABLE,
+                f"冻结来源中包含未配置的通道: {[mode.value for mode in missing]}",
+                details={"missing_sources": [mode.value for mode in missing]},
+            )
+        if len(requested) == 1:
+            return self._providers[requested[0]]
+        primary = requested[0]
+        return CompositeRetrievalProvider(
+            members={mode: self._providers[mode] for mode in requested},
+            primary=primary,
+            tool_source={tool: mode for tool, mode in SourcePolicy.TOOL_SOURCE.items()},
+        )
+
+
+class CompositeRetrievalProvider:
+    """多来源 Run 的组合 provider：按工具所属通道派发，不跨通道 fallback。
+
+    - `mode` = 主通道（供 legacy 读取）；`sources` 暴露冻结集合；
+    - `search` 以 `filters.strategy`（= 任务类型/工具名）反查通道；
+      未配置该工具的通道 → SOURCE_UNAVAILABLE；
+    - 结果不做 source_mode 改写：各通道 provider 本就返回其真实通道。
+    """
+
+    def __init__(
+        self,
+        *,
+        members: Mapping[SourceMode, RetrievalProvider],
+        primary: SourceMode,
+        tool_source: Mapping[str, SourceMode],
+    ):
+        self.members = dict(members)
+        self.mode = primary
+        self.sources = tuple(members.keys())
+        self.provider_name = "composite"
+        self._tool_source = dict(tool_source)
+
+    def channel_for(self, tool_name: str) -> SourceMode:
+        mode = self._tool_source.get(str(tool_name))
+        if mode is None or mode not in self.members:
+            raise AppError(
+                ErrorCode.SOURCE_UNAVAILABLE,
+                f"工具 {tool_name!r} 不属于本次 Run 冻结的来源集合",
+                details={"tool": str(tool_name), "sources": sorted(m.value for m in self.members)},
+            )
+        return mode
+
+    async def search(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        search_depth,
+        filters,
+        call_context,
+    ):
+        tool_name = str(getattr(filters, "strategy", "") or "")
+        channel = self.channel_for(tool_name)
+        provider = self.members[channel]
+        scoped_context = (
+            call_context
+            if getattr(call_context, "source_mode", None) == channel
+            else ToolCallContext(
+                run_id=call_context.run_id, source_mode=channel,
+                task_id=call_context.task_id, tool_call_id=call_context.tool_call_id,
+            )
+        )
+        return await provider.search(
+            query, top_k=top_k, search_depth=search_depth,
+            filters=filters, call_context=scoped_context,
+        )
+
+    async def aclose(self) -> None:
+        for provider in self.members.values():
             inner = getattr(provider, "_instance", None) or provider
             close = getattr(inner, "aclose", None)
             if close is None:
@@ -72,7 +179,7 @@ class _LazyProvider:
         return await self._get().search(*args, **kwargs)
 
 
-__all__ = ["RetrievalRouter"]
+__all__ = ["RetrievalRouter", "CompositeRetrievalProvider"]
 
 
 def create_default_router() -> RetrievalRouter:

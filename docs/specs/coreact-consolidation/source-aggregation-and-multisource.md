@@ -141,7 +141,7 @@
 
 ### S3 — 执行层多来源
 
-- 状态：pending
+- 状态：done（2026-11-14）
 - 依赖：S2
 - 触点：`retrieval/router.py`、`retrieval/web_aggregate.py`、`retrieval_executor.py`、
   `runtime_persistence.py`/`run_service.py`、`action_runner.py`、`coreact_controller.py`、
@@ -155,6 +155,35 @@
   4. 失败/成功通道记录在事件/记录元数据（部分失败不伪装全量）。
 - 验收：graphrag+web 同 Run 混合证据按通道落账；单来源回归；未配置通道的
   动作被拒绝；恢复重放使用同一冻结集合。
+- 实际证据：`RetrievalRouter.for_modes`——单来源原样返回（legacy 语义），
+  多来源返回 `CompositeRetrievalProvider`（mode=主通道，`sources` 冻结集合，
+  `channel_for(tool)` 反查派发，未知/越界工具 `SOURCE_UNAVAILABLE`，aclose
+  遍历成员）；冻结集合含未配置通道 fail fast。executor：`for_modes(冻结集合)`
+  取 provider；`task.source_mode ∈ 冻结集合`（超界 ValueError，由 ActionRunner
+  记为动作失败）；单来源保留严格一致性检查；组合派发时 `call_context`/policy
+  按任务通道执行，结果 `source_mode` 必须等于任务通道（伪造归属拒绝）；
+  `ToolCall.source_mode`、`tool_calls` 行按任务通道落账（预算仍按
+  `TOOL_API` 分账）。Controller `DecisionContext.sources` + 三处决策上下文
+  （主/修订/重试）携带冻结集合；`_decide_deterministic`/retry 校验/新动作
+  准入全部改为集合成员判断；`coreact_loop` 的 eligible/并行补位/白名单改为
+  冻结集合并集（`SOURCE_TASK_TYPES` union）。`run_service` 用
+  `router.for_modes(context.effective_sources)`；`chat_service` 冻结集合写入
+  config_snapshot（`frozen_sources` 属性）；评测 Run 亦冻结单通道集合。
+  BriefBuilder 候选方向按冻结来源轮转派发（主通道优先，web 学术槽保持）。
+  `tests/harness/test_multisource_execution.py` 6 项 + API 回归：组合路由与
+  call_context 通道改写、未知工具 SOURCE_UNAVAILABLE、for_modes fail fast/
+  单来源不变、executor 三通道混合执行与归属标签、超界任务拒绝、controller
+  集合成员判断、policy TOOL_SOURCE 映射。独立 review 1 轮（1 BLOCKER：生产路径
+  `TimeoutBoundProvider(组合)` 对通道解析不透明导致非主通道任务全失败——executor
+  增加包装层解包并补生产接线回归测试；1 HIGH：`tasks` 行仍盖 Run 主通道——
+  `save_plan` 改按任务通道；2 MEDIUM：controller LLM 只渲染主通道/新动作强制主
+  通道——prompt 渲染冻结集合与各通道工具、新动作通道由 `TOOL_SOURCE` 反查；
+  通道/工具错配无防御——executor 校验 `task.source_mode == TOOL_SOURCE[tool]`
+  （legacy scholar 豁免）；若干 LOW：for_modes 非法通道 AppError、候选总数预算
+  化（方向+学术槽+follow-up 计入 max）、`__all__` 导出）。已知依赖：**S4 之前**
+  多来源 Run 的 `source_match` 仍按主通道校验（required），混合证据会在验收期
+  失败——这是 S4 的任务，不在 S3 范围内放宽。门禁：pytest 676 passed/4 skipped、
+  ruff、git diff --check。
 
 ### S4 — 验收语义与报告披露
 
@@ -187,7 +216,7 @@
 |---|---|---|
 | scholar API 纳入 web 聚合、旧 scholar 只读兼容 | S1 | PASS（白名单/policy/controller 统一；聚合路由 + 证据归属；tavily/scholar 预算分账；(tool,query) 去重；API 边界归一；pytest 654 passed/4 skipped） |
 | 多来源冻结契约 v2 与 v1 兼容 | S2 | PASS（brief v2/单来源 v1/高版本拒绝；RunContext + config 冻结且 checkpoint/上下文不得覆盖；API sources 校验；pytest 667 passed/4 skipped） |
-| 组合 router / 多通道准入 / 预算分离 | S3 | pending |
+| 组合 router / 多通道准入 / 预算分离 | S3 | PASS（for_modes 组合派发 + fail fast；executor/controller/loop 集合成员判断；生产 TimeoutBound 包装回归；tasks/tool_calls 按通道落账；pytest 676 passed/4 skipped；注：source_match 放宽属 S4） |
 | source_match/diversity/rubric 多来源语义 | S4 | pending |
 | 前端多选与冻结集合披露 | S5 | pending |
 

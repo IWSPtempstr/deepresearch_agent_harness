@@ -69,7 +69,10 @@ class CoreActLoopMixin:
         completion_conditions = list(acceptance.completion_conditions or [])
         verifier = CoreActVerifier()
         max_parallel = max(1, int(COREACT_MAX_PARALLEL or 1))
-        source_tools = set(SourcePolicy.SOURCE_TASK_TYPES.get(self.context.source_mode, set()))
+        # S3：冻结集合内所有通道的任务类型并集（ActionRunner/Advisor 准入口径）。
+        source_tools: set[str] = set()
+        for mode in self.context.effective_sources:
+            source_tools.update(SourcePolicy.SOURCE_TASK_TYPES.get(mode, set()))
 
         # T-403：统一隔离执行器（预派发预算预约 + 副本隔离 + 稳定合并 + 单次修正）
         self._action_runner = ActionRunner(
@@ -152,10 +155,11 @@ class CoreActLoopMixin:
             completed = list(self.state.execution_context.completed_task_ids) if self.state.execution_context else []
             recent_queries = self._coreact_recent_queries()
             evidence_count = len(self._coreact_ledger_ids())
+            source_values = set(self._coreact_source_values())
             eligible = [
                 task.model_dump(mode="json")
                 for task in plan.get_ready_tasks(completed)
-                if task.source_mode == self.context.source_mode.value
+                if task.source_mode in source_values
             ]
 
             # Durable pending actions resume as-is: replay the whole uncommitted
@@ -261,6 +265,7 @@ class CoreActLoopMixin:
                 context = DecisionContext(
                     goal=self.context.resolved_query or self.context.original_query,
                     source_mode=self.context.source_mode.value,
+                    sources=self._coreact_source_values(),
                     eligible_tasks=eligible,
                     completed_count=len(completed),
                     evidence_count=evidence_count,
@@ -673,6 +678,7 @@ class CoreActLoopMixin:
         revision_context = DecisionContext(
             goal=self.context.resolved_query or self.context.original_query,
             source_mode=self.context.source_mode.value,
+            sources=self._coreact_source_values(),
             eligible_tasks=[problem.task.model_dump(mode="json")],
             completed_count=len(completed),
             evidence_count=len(self._coreact_ledger_ids()),
@@ -805,6 +811,7 @@ class CoreActLoopMixin:
             retry_context = DecisionContext(
                 goal=self.context.resolved_query or self.context.original_query,
                 source_mode=self.context.source_mode.value,
+                sources=self._coreact_source_values(),
                 eligible_tasks=[retry_candidate],
                 completed_count=len(self.state.execution_context.completed_task_ids) if self.state.execution_context else 0,
                 evidence_count=len(self._coreact_ledger_ids()),
@@ -898,7 +905,7 @@ class CoreActLoopMixin:
             return existing
         if len(plan.task_graph.nodes) >= self.context.budget_limits.max_plan_tasks:
             return None
-        if action.source_mode != self.context.source_mode.value:
+        if action.source_mode not in set(self._coreact_source_values()):
             return None
         # 新动作采用 step_index 顺序执行；不继承模型生成的依赖关系。
         action.depends_on = list(self.state.execution_context.completed_task_ids) if self.state.execution_context else []
@@ -914,7 +921,7 @@ class CoreActLoopMixin:
         for node in plan.get_ready_tasks(completed):
             if len(admitted) >= limit:
                 break
-            if node.source_mode != self.context.source_mode.value or node.status != "pending":
+            if node.source_mode not in set(self._coreact_source_values()) or node.status != "pending":
                 continue
             node_query = self._coreact_query(node)
             node_key = query_dedupe_key(node.task_type, node_query)

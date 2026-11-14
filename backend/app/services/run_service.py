@@ -201,7 +201,9 @@ class RunService:
                     "该引擎已退役，请人工处理（查看/取消/重建为 plan_execute_report），不自动续跑",
                 )
             provider = TimeoutBoundProvider(
-                self._router.for_mode(context.source_mode),
+                # S3：多来源 Run 使用组合 provider（按工具反查通道派发）；
+                # 单来源 Run 语义不变。
+                self._router.for_modes(context.effective_sources),
                 timeout_seconds=context.budget_limits.tool_timeout_seconds,
             )
             worker = WorkerCoordinator(
@@ -302,6 +304,8 @@ class RunService:
                     "forced_skill": forced_skill, "min_evidence": 1,
                     "report_type": "brief", "deep_research_max_iterations": 1,
                     "schema_version": 1,
+                    # S2/S3：评测 Run 同样冻结来源集合（单通道）。
+                    "sources": [SourceMode(source_mode).value],
                 },
                 budget=settings.HARNESS_BUDGETS,
             ),
