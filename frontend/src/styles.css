@@ -238,6 +238,7 @@ button { cursor: pointer; }
 .source-selector label.selected { background: var(--surface); color: var(--accent); font-weight: 500; box-shadow: var(--shadow-xs); }
 .source-selector label.disabled { opacity: 0.4; cursor: not-allowed; }
 .source-selector input { display: none; }
+.frozen-sources { font-size: 10px; font-family: var(--font-mono); color: var(--text-tertiary); background: var(--surface-sunken); border: 1px solid var(--border); border-radius: 999px; padding: 5px 11px; white-space: nowrap; }
 .composer textarea { width: 100%; resize: none; border: 0; outline: 0; padding: 11px 7px 8px; color: var(--text-primary); background: transparent; font-size: var(--text-lg); line-height: 1.5; }
 .composer textarea::placeholder { color: var(--text-faint); }
 .composer-actions { display: flex; align-items: center; justify-content: space-between; color: var(--text-faint); font-size: 9px; font-family: var(--font-mono); }

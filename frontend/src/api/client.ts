@@ -59,7 +59,7 @@ export const api = {
   createSession: (title = "新对话") => request<Session>("/sessions", { method: "POST", body: JSON.stringify({ title }) }),
   patchSession: (id: string, payload: {title?: string; status?: string}) => request<Session>(`/sessions/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteSession: (id: string) => request<void>(`/sessions/${id}`, { method: "DELETE" }),
-  send: (sessionId: string, payload: {client_message_id: string; content: string; source_mode: SourceMode; workflow_mode: WorkflowMode}) =>
+  send: (sessionId: string, payload: {client_message_id: string; content: string; source_mode: SourceMode; workflow_mode: WorkflowMode; sources?: SourceMode[]}) =>
     request<{message_id: string; run_id: string; status: string; events_url: string}>(`/sessions/${sessionId}/messages`, { method: "POST", body: JSON.stringify(payload) }),
   run: (id: string) => request<Run>(`/runs/${id}`),
   cancel: (id: string) => request(`/runs/${id}/cancel`, { method: "POST" }),

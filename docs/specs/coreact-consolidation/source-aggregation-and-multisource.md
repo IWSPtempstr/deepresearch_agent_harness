@@ -220,7 +220,7 @@
 
 ### S5 — 前端多选与披露
 
-- 状态：pending
+- 状态：done（2026-11-14）
 - 依赖：S3
 - 触点：`frontend/src/types/api.ts`、`SourceSelector.tsx`、`ChatPage.tsx`、
   `useRunEvents` 展示、`ReportView`/证据台账。
@@ -228,6 +228,24 @@
   证据台账显示通道/API；capabilities 展示 web 可用 API。
 - 验收：真实浏览器（fake driver）多选创建 Run、冻结集合展示、证据归属可见；
   空来源/非法来源被拒绝。
+- 实际证据：`SourceSelector` 改为多选（checkbox 语义，≥1，首位主通道标"（主）"；
+  Tavily 缺失时 web 通道 tooltip 披露"将使用学术 API"）；ChatPage 维护
+  `sources` 状态并随 `capabilities` 可用性过滤，提交载荷带
+  `sources: SourceMode[]`（单通道省略）；选中 Run 后头部显示冻结集合徽标
+  （`来源 web + graphrag`），Run DTO `run_dict` 暴露 `sources`（旧 Run 回退
+  `[source_mode]`）。证据抽屉/报告证据索引本就显示 `provider`，无需改动。
+  `tests/api` 多来源 DTO 断言；浏览器验收脚本增加 `source_multiselect`、
+  `primary_marker` 与 `frozen_sources_shown` 断言并纳入 PASS 门。`npm run build`
+  通过；真实浏览器（fake driver，无外部 LLM/Provider）验收 PASS：多选 checkbox
+  UI→点击次通道提升为主（"（主）"标记）→web 主通道 Run→报告/验证/下载/冻结
+  集合徽标（精确匹配"来源 web"）/系统状态。边界说明：验收环境 graphrag 不可用
+  且未选，"已选通道变不可用"的披露分支（"本次将不使用：…"）由实现路径提供、
+  多来源 payload 由 API 用例覆盖。独立 review 1 轮（1 HIGH：主通道交互语义与
+  注释不符——实现"点击次通道=提升为主 / 点击主通道=移除"；2 MEDIUM：不可用
+  通道静默收窄——composer 显式披露；Run 状态变化覆盖 composer 选择——仅切换
+  Run 时同步；run_dict 解析弱于执行层——复用 `sources_from_config`；2 LOW：
+  legacy scholar 归一化/localStorage 卫生、验收断言门）全部修复。复检门禁：
+  pytest 685 passed/4 skipped、`npm run build`、浏览器验收 PASS。
 
 ## 5. 验收矩阵（实施后）
 
@@ -237,7 +255,7 @@
 | 多来源冻结契约 v2 与 v1 兼容 | S2 | PASS（brief v2/单来源 v1/高版本拒绝；RunContext + config 冻结且 checkpoint/上下文不得覆盖；API sources 校验；pytest 667 passed/4 skipped） |
 | 组合 router / 多通道准入 / 预算分离 | S3 | PASS（for_modes 组合派发 + fail fast；executor/controller/loop 集合成员判断；生产 TimeoutBound 包装回归；tasks/tool_calls 按通道落账；pytest 676 passed/4 skipped；注：source_match 放宽属 S4） |
 | source_match/diversity/rubric 多来源语义 | S4 | PASS（verifier v2.0：集合成员 + provider/通道一致性；diversity 通道披露；BC-04 跨通道继承前置拒绝；evaluation 泄漏指标按冻结集合；pytest 685 passed/4 skipped） |
-| 前端多选与冻结集合披露 | S5 | pending |
+| 前端多选与冻结集合披露 | S5 | PASS（多选选择器 + 提交 sources；Run DTO/头部冻结集合徽标；`npm run build` + 浏览器验收 PASS） |
 
 ## 6. 范围声明
 

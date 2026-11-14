@@ -63,6 +63,8 @@ def main() -> int:
         page.get_by_role("button", name="新建会话").click()
         page.get_by_placeholder("提出一个需要证据支持的问题…").wait_for(state="visible")
         results["new_session"] = page.get_by_role("heading", name="新会话").count() > 0 or page.get_by_placeholder("提出一个需要证据支持的问题…").is_visible()
+        # S5：来源选择器为多选（checkbox 语义，两个通道）
+        results["source_multiselect"] = page.locator('.source-selector input[type="checkbox"]').count() == 2
         shot(page, "02_new_session.png")
         print("[ui] new session:", results["new_session"])
 
@@ -78,9 +80,13 @@ def main() -> int:
             shot(page, "04_status.png")
             print("[ui] skipped real run; status page:", results["status_page"])
         else:
-            # 3) 切换到联网搜索并发送问题
+            # 3) 多选来源：加入 web（次）→ 再点 web 提升为主通道。
+            #    graphrag 在无 Neo4j 环境下 disabled，但仍留在冻结集合中。
             page.locator("label", has_text="联网搜索").click()
-            time.sleep(0.3)
+            page.locator("label", has_text="联网搜索").click()
+            time.sleep(0.2)
+            web_label = page.locator("label", has_text="联网搜索")
+            results["primary_marker"] = "（主）" in web_label.inner_text()
             page.locator("textarea").fill(QUESTION)
             page.get_by_role("button", name="发送研究 →").click()
             print(f"[ui] submitted question, waiting up to {RUN_TIMEOUT_SECONDS}s for run…")
@@ -124,6 +130,15 @@ def main() -> int:
                 results["download_ok"] = False
                 results["download_error"] = type(exc).__name__
             print("[ui] download:", results.get("download_ok"), results.get("download_filename"))
+            # S5：Run 头部展示创建时冻结的来源集合
+            frozen = page.locator(".frozen-sources")
+            # graphrag 不可用：提交前被显式披露并从冻结集合剔除（S5 F2 行为）
+            # 本环境 graphrag 不可用且未选：披露分支仅在“已选通道后变不可用”
+            # 时出现，这里只校验 web 主通道冻结集合
+            results["frozen_sources_shown"] = (
+                frozen.count() > 0 and frozen.inner_text().strip() == "来源 web"
+            )
+            print("[ui] frozen sources:", results.get("frozen_sources_shown"))
 
             # 5) 系统状态页（先关闭报告抽屉，模态 backdrop 会拦截侧栏点击）
             close_button = page.get_by_role("button", name="关闭")
@@ -144,7 +159,8 @@ def main() -> int:
     ])
     run_part = args.skip_run or (
         results["run_terminal"] is True and results["report_rendered"] is True
-        and results.get("download_ok") is True
+        and results.get("download_ok") is True and results.get("frozen_sources_shown") is True
+        and results.get("source_multiselect") is True and results.get("primary_marker") is True
     )
     passed = structural and run_part
     print(json.dumps(results, ensure_ascii=False, indent=2))

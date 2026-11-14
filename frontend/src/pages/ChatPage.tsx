@@ -130,6 +130,11 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
   const queryClient = useQueryClient();
   const [text, setText] = useState("");
   const [source, setSource] = useState<SourceMode>(() => (localStorage.getItem("source_mode") as SourceMode) || "graphrag");
+  // S5：来源集合多选（至少一个；首位 = 主通道）
+  const [sources, setSources] = useState<SourceMode[]>(() => {
+    const saved = (localStorage.getItem("source_mode") as SourceMode) || "graphrag";
+    return [saved];
+  });
   const workflow: WorkflowMode = "plan_execute_report";  // T-407：唯一生产入口（不做选择）
   const [runId, setRunId] = useState<string | null>(null);
   const [selectedEvidence, setSelectedEvidence] = useState<Evidence | null>(null);
@@ -153,7 +158,10 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
   const contextInspector = useQuery({ queryKey: ["context", runId], queryFn: () => api.context(runId!), enabled: Boolean(runId), refetchInterval: run && !TERMINAL.includes(run.status) ? 5000 : false });
   const cacheStats = useQuery({ queryKey: ["cacheStats"], queryFn: api.cacheStats, refetchInterval: 5000 });
 
-  useEffect(() => { localStorage.setItem("source_mode", source); }, [source]);
+  useEffect(() => {
+    // 旧 scholar 通道不落 localStorage（S1 后不再是合法新建通道）
+    if (["graphrag", "web"].includes(source)) localStorage.setItem("source_mode", source);
+  }, [source]);
   useEffect(() => { localStorage.setItem("chat.stripCollapsed", stripCollapsed ? "1" : "0"); }, [stripCollapsed]);
   useEffect(() => { localStorage.setItem("chat.composerCollapsed", composerCollapsed ? "1" : "0"); }, [composerCollapsed]);
   useEffect(() => {
@@ -166,7 +174,21 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
   }, [detail.data, runId, sessionId]);
   useEffect(() => {
     if (!run) return;
-    setSource(run.source_mode);  // T-407：workflow 唯一入口，不做选择恢复
+    // S5：仅在切换 Run 时同步冻结集合到 composer（状态变化不覆盖用户选择）。
+    // 旧 Run 的 scholar 通道归一化为 web（S1 边界语义），未知通道过滤。
+    const known = ["graphrag", "web"];
+    const raw = run.sources?.length ? run.sources : [run.source_mode];
+    const runSources = raw
+      .map((item) => (item === "scholar" ? "web" : item))
+      .filter((item) => known.includes(item)) as SourceMode[];
+    const normalized = runSources.length
+      ? runSources
+      : ([run.source_mode === "scholar" ? "web" : run.source_mode] as SourceMode[]);
+    setSources(normalized);
+    setSource(normalized[0]);
+  }, [run?.run_id]);
+  useEffect(() => {
+    if (!run) return;
     if (run.status === "paused" || (!run.pause_requested && run.status !== "pausing")) setPausing(false);
     if (run.status === "cancelled") setCancelling(false);
     if (run.status !== "paused" && run.status !== "pausing") setResuming(false);
@@ -183,9 +205,10 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
     ) setSelectedStage("completed");
   }, [run?.run_id, run?.status, selectedStage]);
   useEffect(() => {
-    if (!capabilities.data || capabilities.data.sources[source]?.available) return;
+    if (!capabilities.data) return;
+    if (capabilities.data.sources[source]?.available) return;
     const fallback = ([capabilities.data.default_source_mode, "graphrag", "web"] as SourceMode[]).find((mode) => capabilities.data!.sources[mode]?.available);
-    if (fallback) setSource(fallback);
+    if (fallback) { setSources([fallback]); setSource(fallback); }
   }, [capabilities.data, source]);
   useEffect(() => {
     if (run && [...TERMINAL, "needs_user_input"].includes(run.status)) {
@@ -219,15 +242,23 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
     return arrivedStages(highest.value);
   }, [effectiveStage, events]);
   const { positions, update: updatePosition } = useStagePositions(runId, arrived);
+  // S5：被 capabilities 过滤掉的已选通道需要显式披露（不静默收窄冻结集合）
+  const droppedSources = sources.filter((mode) => !(capabilities.data?.sources[mode]?.available ?? false));
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const sourceAvailable = capabilities.data?.sources[source]?.available ?? false;
+    const availableSources = sources.filter((mode) => capabilities.data?.sources[mode]?.available ?? false);
+    const sourceAvailable = availableSources.length > 0;
     const resumable = run?.status === "paused" || run?.status === "pausing" || Boolean(run?.pause_requested) || pausing;
     if (!sessionId || !text.trim() || sending || (!sourceAvailable && !resumable) || (run && !TERMINAL.includes(run.status) && !resumable)) return;
+    const submitSources = availableSources.length > 1 ? availableSources : undefined;
     setSending(true); setError(null);
     try {
-      const result = await api.send(sessionId, { client_message_id: crypto.randomUUID(), content: text.trim(), source_mode: source, workflow_mode: workflow });
+      const result = await api.send(sessionId, {
+        client_message_id: crypto.randomUUID(), content: text.trim(),
+        source_mode: availableSources[0] ?? source, workflow_mode: workflow,
+        sources: submitSources,
+      });
       const sameRun = result.run_id === runId;
       setText(""); setRunId(result.run_id);
       if (sameRun) restart();
@@ -314,6 +345,12 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
     <header className="chat-header">
       <div><span className="eyebrow">PERSISTENT RESEARCH SESSION</span><h1>{detail.data?.title ?? "加载中…"}</h1></div>
       <div className="chat-header-actions">
+        {run && <span
+          className="frozen-sources"
+          title="创建时冻结的来源集合（多来源 Run 的证据可来自其中任意通道）"
+        >
+          来源 {(run.sources?.length ? run.sources : [run.source_mode]).join(" + ")}
+        </span>}
         {detail.data && detail.data.runs.length > 1 && runId && (
           <label className="run-switcher" title="在活动 Run 与历史 Run 之间切换">
             <span>Run</span>
@@ -373,11 +410,18 @@ export function ChatPage({ sessionId }: {sessionId?: string}) {
           initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 24, scale: 0.9 }}
           transition={{ type: "spring", stiffness: 320, damping: 26 }}
         >
-          <div className="composer-tools"><SourceSelector value={source} onChange={setSource} capabilities={capabilities.data} /></div>
+          <div className="composer-tools">
+            <SourceSelector values={sources} onChange={(modes) => { setSources(modes); setSource(modes[0]); }} capabilities={capabilities.data} />
+            {droppedSources.length > 0 && (
+              <small className="capability-note">
+                本次将不使用：{droppedSources.join("、")}（来源不可用，已从冻结集合中剔除）
+              </small>
+            )}
+          </div>
           {source === "web" && capabilities.data?.sources.web.reason && <small className="capability-note">{capabilities.data.sources.web.reason}</small>}
           <textarea value={text} onChange={(event) => setText(event.target.value)} onKeyDown={onComposerKeyDown} placeholder="提出一个需要证据支持的问题…" rows={3} />
           <div className="composer-actions">
-            <span>{(["paused", "pausing"].includes(run?.status ?? "") || run?.pause_requested || pausing) ? "输入“继续 / 接着做 / 按计划执行”等，或点击恢复" : "Enter 发送 · Shift+Enter 换行 · 每个 Run 冻结当前来源"}</span>
+            <span>{(["paused", "pausing"].includes(run?.status ?? "") || run?.pause_requested || pausing) ? "输入“继续 / 接着做 / 按计划执行”等，或点击恢复" : "Enter 发送 · Shift+Enter 换行 · 来源集合随 Run 冻结（可多选）"}</span>
             <div className="composer-control-actions">
               {(["paused", "pausing"].includes(run?.status ?? "") || run?.pause_requested || pausing) ? <>
                 <button type="button" className="resume" disabled={resuming} onClick={resumeRun}>{resuming ? "正在恢复…" : run?.status === "paused" ? "恢复运行" : "撤销暂停并继续"}</button>

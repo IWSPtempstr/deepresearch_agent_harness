@@ -376,6 +376,8 @@ def test_api_freezes_multiple_sources_and_rejects_invalid_sets(client):
 
     snapshot = client.portal.call(read_config)
     assert snapshot["sources"] == ["web", "graphrag"]
+    run_payload = client.get(f"/api/v1/runs/{run_id}").json()
+    assert run_payload["sources"] == ["web", "graphrag"]
 
     empty = client.post(f"/api/v1/sessions/{session_id}/messages", json={
         "client_message_id": "multi-source-empty", "content": "x",

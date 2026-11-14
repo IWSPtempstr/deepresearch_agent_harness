@@ -8,8 +8,10 @@ export interface ClarificationRequestView {
   status: "pending" | "answered"; asked_at?: string | null; answered_at?: string | null;
 }
 export interface Run {
-  run_id: string; source_mode: SourceMode; workflow_mode: WorkflowMode; status: string; current_stage?: string | null;
+  run_id: string; source_mode: string; workflow_mode: WorkflowMode; status: string; current_stage?: string | null;
   error_code?: string | null; error_message?: string | null; cancellation_requested?: boolean; pause_requested?: boolean; created_at: string; updated_at: string;
+  /** S2：创建时冻结的来源集合（主通道在前；旧 Run 缺省为 [source_mode]） */
+  sources?: string[] | null;
   clarification?: ClarificationRequestView | null;
   usage?: RunUsage | null;
 }
@@ -62,7 +64,11 @@ export interface WhiteboardLog {
   counts: {messages: number; runs: number; events: number; tools: number};
 }
 export interface Capability { available: boolean; reason?: string | null; }
-export interface Capabilities { sources: Record<SourceMode, Capability>; workflows: WorkflowMode[]; default_source_mode: SourceMode; }
+export interface Capabilities {
+  sources: Record<SourceMode, Capability>;
+  web_providers?: { tavily: boolean; scholar: boolean };
+  workflows: WorkflowMode[]; default_source_mode: SourceMode;
+}
 
 export interface CuratedMemory {
   memory_id: string; target: "user" | "project"; kind: string; content: string;

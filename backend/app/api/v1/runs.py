@@ -11,6 +11,8 @@ from backend.app.dependencies import get_database, get_event_stream, get_run_ser
 from backend.app.schemas import ClarificationSubmit, RunControl
 from deepresearch_agent.harness.errors import AppError, ErrorCode
 from deepresearch_agent.harness.clarifications import public_view, request_from_config
+from deepresearch_agent.harness.contracts import SourceMode
+from deepresearch_agent.harness.run_context import sources_from_config
 from deepresearch_agent.persistence.repositories import (
     ArtifactRepository, CheckpointRepository, ContractRepository, EvidenceRepository,
     MessageRepository, RunRepository,
@@ -99,6 +101,11 @@ def run_dict(run):
         "cancellation_requested": bool(run.cancellation_requested),
         "pause_requested": bool(config.get("pause_requested")), "created_at": run.created_at,
         "started_at": run.started_at, "completed_at": run.completed_at, "updated_at": run.updated_at,
+        # S2：创建时冻结的来源集合（主通道在前；旧 Run 缺省 = [source_mode]）。
+        # 与执行层共用 sources_from_config（fail closed），保证披露 == 权威集合。
+        "sources": [
+            mode.value for mode in sources_from_config(config, SourceMode(run.source_mode))
+        ],
         # BC-01：实际澄清问题（白名单视图；旧 Run 的通用提示作为回退）
         "clarification": public_view(request_from_config(config)),
     }
