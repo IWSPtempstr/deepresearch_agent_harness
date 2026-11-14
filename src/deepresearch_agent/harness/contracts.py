@@ -108,6 +108,7 @@ class ContractEvaluator:
         consistency_passed: Optional[bool] = None,
         evidence_card_coverage: Optional[Dict[str, Any]] = None,
         rubrics: Optional[List[Dict[str, Any]]] = None,
+        allowed_sources: Optional[List[SourceMode | str]] = None,
     ) -> ContractVerdict:
         from .verifiers import DeterministicVerifiers
 
@@ -116,6 +117,8 @@ class ContractEvaluator:
             source_mode=SourceMode(source_mode),
             report=report,
             evidence=evidence,
+            # S4：多来源 Run 的验收按冻结集合判定（缺省 = 单来源旧语义）。
+            allowed_sources=allowed_sources,
         )
         checks = [
             verifier.source_match(),

@@ -380,3 +380,51 @@ async def test_citation_mapping_only_rewrites_preserved_content(database, tmp_pa
     assert f"[{mapping[old_ids[0]]}]" in merged.split("# 方法")[0], "导语引用必须映射"
     assert f"[{mapping[old_ids[1]]}]" in merged.split("# 方法")[0], "保留章节引用必须映射"
     assert f"[{old_ids[0]}]" in merged.split("# 方法")[1], "新目标章节中的旧 ID 不得被改写"
+
+
+@pytest.mark.asyncio
+async def test_prepare_rejects_cross_channel_inheritance(database, tmp_path):
+    """S4：修订 Run 冻结集合不含基线证据通道时，继承前显式拒绝。"""
+    ledger = EvidenceLedger(EvidenceRepository(database))
+    session = await SessionRepository(database).create(SessionCreate(title="bc04-cross"))
+    _, base_run = await _create_run(database, session.session_id, "bc04-cross-base")
+    evidence = await ledger.record_results(
+        run_id=base_run.run_id, task_id="task-graph", tool_call_id="call-graph",
+        provider="graphrag",
+        results=[RetrievalResult(
+            result_id="raw-graph", granularity="Chunk", evidence="图谱证据",
+            metadata=RetrievalMetadata(source_id="doc-graph", source_type="chunk", content_hash="b" * 64),
+            source="hybrid_search", source_mode="graphrag", score=0.9,
+        )],
+    )
+    old_ids = [item.evidence_id for item in evidence]
+    report = f"# 摘要\n\n图谱结论 [{old_ids[0]}]。\n\n# 方法\n\n旧方法。\n"
+    store = ArtifactStore(tmp_path / "artifacts")
+    artifact = store.write_text(
+        f"{base_run.run_id}/report/final.md", report, mime_type="text/markdown; charset=utf-8",
+    )
+    await ArtifactRepository(database).record(artifact, run_id=base_run.run_id)
+    await ContractRepository(database).upsert(ContractCheckData(
+        check_id=f"contract_{base_run.run_id}_min_evidence", run_id=base_run.run_id,
+        kind="min_evidence", required=True, passed=True, verifier="test", verifier_version="1",
+    ))
+    await RunRepository(database).complete_verified(base_run.run_id, assistant_content=report, usage={})
+    _, revision = await _create_run(database, session.session_id, "bc04-cross-revision")
+    builder = ArtifactEditContextBuilder(
+        RunRepository(database), ArtifactRepository(database), ArtifactStore(tmp_path / "artifacts"),
+    )
+    contract = await builder.build(
+        session_id=session.session_id, current_run_id=revision.run_id, query="修改方法章节",
+    )
+    context = RunContext(
+        run_id=revision.run_id, session_id=session.session_id,
+        trigger_message_id=revision.trigger_message_id,
+        source_mode=SourceMode.WEB, workflow_mode=WorkflowMode.PLAN_EXECUTE_REPORT,
+        status="reporting", original_query="修改方法章节",
+        config_snapshot={"sources": ["web"]},
+        context_snapshot={"artifact_edit": contract},
+    )
+    runtime = _runtime(database, tmp_path)
+    with pytest.raises(AppError) as exc:
+        await runtime._prepare_artifact_edit(context)
+    assert exc.value.details["outside_channels"] == ["graphrag"]

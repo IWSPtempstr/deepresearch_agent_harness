@@ -187,7 +187,7 @@
 
 ### S4 — 验收语义与报告披露
 
-- 状态：pending
+- 状态：done（2026-11-14）
 - 依赖：S3
 - 触点：`harness/verifiers/deterministic.py`、`harness/contracts.py`、
   `harness/runtime_execution.py`、`harness/rubric_builder.py`（source policy 判据）。
@@ -198,6 +198,25 @@
   3. rubric 的 `source_policy` 固定判据按冻结集合生成，不接受模型扩大。
 - 验收：混合来源报告 Contract 通过；伪造 provider/通道不一致失败；单来源行为不变；
   required 的 source_policy 不因多来源被绕过。
+- 实际证据：`DeterministicVerifiers` v2.0——`allowed_sources` 冻结集合（缺省
+  单来源旧语义）；`source_match` 改为「证据通道 ∈ 冻结集合 **且** 已知 provider
+  与通道一致」（PROVIDER_CHANNEL 映射；未知标签跳过一致性检查以兼容存量
+  工具名标注），`observed` 披露 outside_allowed/provider_mismatch；
+  `source_diversity` 按证据自身通道做 web 域名归并并披露 `channels`。
+  `ContractEvaluator.evaluate` 增加 `allowed_sources` 透传；runtime VERIFYING
+  以 `context.effective_sources` 验收。rubric `source_policy` 固定判据已由 S3
+  的工具并集覆盖（`allowed_tools` 排序文案 + StepVerifier/Advisor 消费同一
+  并集），模型不可扩大。`tests/harness/test_multisource_acceptance.py` 5 项：
+  混合通道通过、越界通道失败、provider/通道伪造失败、单来源缺省语义不变、
+  Evaluator 端到端（版本 2.0 + channels 披露）。门禁：pytest 681 passed/
+  4 skipped、ruff、git diff --check。独立 review 1 轮（APPROVE + 3 MEDIUM：
+  evaluation 服务泄漏指标仍按主通道——改为冻结集合判定且域名按证据自身通道
+  归并；`scholar_search` 双时代语义无法纳入一致性映射——映射注释明确双时代
+  语义并以集合成员/S3 executor 防御兜底，补 legacy/聚合两代回归测试；BC-04
+  跨通道修订直到验收期才失败——`_prepare_artifact_edit` 继承前校验基线证据
+  通道 ⊆ 冻结集合，越界 ARTIFACT_INTEGRITY_FAILED，补测试；LOW：PROVIDER_CHANNEL
+  ClassVar、pytest 重复 import、继承行/legacy scholar 回归用例）。复检门禁：
+  pytest 685 passed/4 skipped、ruff、git diff --check。
 
 ### S5 — 前端多选与披露
 
@@ -217,7 +236,7 @@
 | scholar API 纳入 web 聚合、旧 scholar 只读兼容 | S1 | PASS（白名单/policy/controller 统一；聚合路由 + 证据归属；tavily/scholar 预算分账；(tool,query) 去重；API 边界归一；pytest 654 passed/4 skipped） |
 | 多来源冻结契约 v2 与 v1 兼容 | S2 | PASS（brief v2/单来源 v1/高版本拒绝；RunContext + config 冻结且 checkpoint/上下文不得覆盖；API sources 校验；pytest 667 passed/4 skipped） |
 | 组合 router / 多通道准入 / 预算分离 | S3 | PASS（for_modes 组合派发 + fail fast；executor/controller/loop 集合成员判断；生产 TimeoutBound 包装回归；tasks/tool_calls 按通道落账；pytest 676 passed/4 skipped；注：source_match 放宽属 S4） |
-| source_match/diversity/rubric 多来源语义 | S4 | pending |
+| source_match/diversity/rubric 多来源语义 | S4 | PASS（verifier v2.0：集合成员 + provider/通道一致性；diversity 通道披露；BC-04 跨通道继承前置拒绝；evaluation 泄漏指标按冻结集合；pytest 685 passed/4 skipped） |
 | 前端多选与冻结集合披露 | S5 | pending |
 
 ## 6. 范围声明

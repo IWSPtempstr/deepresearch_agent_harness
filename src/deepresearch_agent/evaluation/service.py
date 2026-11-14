@@ -82,6 +82,16 @@ class EvaluationService:
         event_types = [item.event_type for item in events]
         required = [item for item in checks if item.required == 1]
         contract_results = {item.kind: None if item.passed is None else bool(item.passed) for item in checks}
+        # S4：越界判定使用 Run 行冻结集合（缺省 = 单通道）。
+        from deepresearch_agent.harness.contracts import SourceMode
+        from deepresearch_agent.harness.run_context import sources_from_config
+
+        frozen_sources = {
+            mode.value
+            for mode in sources_from_config(
+                _json(run.config_snapshot_json), SourceMode(run.source_mode),
+            )
+        }
         required_passes = sum(item.passed == 1 for item in required)
         verified = run.status == "completed" and bool(required) and required_passes == len(required)
 
@@ -94,7 +104,9 @@ class EvaluationService:
         source_ids: set[str] = set()
         for item in evidence:
             metadata = _json(item.metadata_json)
-            source_key = metadata.get("domain") if run.source_mode == "web" else None
+            item_mode = str(item.source_mode)
+            # S4：按证据自身通道做 web 域名归并（多来源 Run）。
+            source_key = metadata.get("domain") if item_mode == "web" else None
             source_key = str(source_key or item.source_id or "")
             if source_key:
                 source_ids.add(source_key)
@@ -158,7 +170,11 @@ class EvaluationService:
             evidence_redundancy_rate=1 - len(unique_hashes) / len(evidence) if evidence else 0.0,
             source_leakage_detected=(
                 contract_results.get("source_match") is False
-                or any(item.source_mode != run.source_mode for item in evidence)
+                # S4：越界以 Run 冻结集合为准（多来源 Run 的合法混合通道不算泄漏）。
+                or any(
+                    str(item.source_mode) not in frozen_sources
+                    for item in evidence
+                )
             ),
             retrieval=retrieval,
             retry_count=retry_count,

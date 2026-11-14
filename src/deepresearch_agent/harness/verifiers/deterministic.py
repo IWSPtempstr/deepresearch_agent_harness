@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 from deepresearch_agent.harness.contracts import ContractCheckData, SourceMode
 from deepresearch_agent.harness.report_safety import has_internal_material
@@ -11,11 +11,31 @@ _CITATION = re.compile(r"\[\^?(ev_[A-Za-z0-9_-]+)\]")
 
 
 class DeterministicVerifiers:
-    version = "1.0"
+    version = "2.0"
 
-    def __init__(self, *, run_id: str, source_mode: SourceMode, report: str, evidence: list[Any]):
+    # 已知 provider → 通道（S4：provider/通道一致性；未知标签跳过一致性检查，
+    # 兼容存量以工具名标注 provider 的行为）。注意双时代语义：``scholar_search``
+    # 在 S1 前是 legacy scholar 通道的工具、S1 后是 web 聚合通道的 API，其
+    # provider 标签两种形态（工具名/API 名）都不在本映射内——一致性由集合成员
+    # 与 executor 的通道一致性防御兜底（S3）。
+    PROVIDER_CHANNEL: ClassVar[dict[str, SourceMode]] = {
+        "tavily": SourceMode.WEB, "scholar": SourceMode.WEB,
+        "web": SourceMode.WEB, "tavily_search": SourceMode.WEB, "web_search": SourceMode.WEB,
+        "graphrag": SourceMode.GRAPHRAG,
+        "local_search": SourceMode.GRAPHRAG, "global_search": SourceMode.GRAPHRAG,
+        "hybrid_search": SourceMode.GRAPHRAG, "naive_search": SourceMode.GRAPHRAG,
+        "chain_exploration": SourceMode.GRAPHRAG,
+        "openalex": SourceMode.SCHOLAR, "arxiv": SourceMode.SCHOLAR,
+    }
+
+    def __init__(self, *, run_id, source_mode: SourceMode, report: str, evidence: list[Any],
+                 allowed_sources: list[SourceMode] | list[str] | None = None):
         self.run_id = run_id
-        self.source_mode = source_mode
+        self.source_mode = SourceMode(source_mode)
+        # S4：冻结来源集合（缺省 = 单来源，保持旧语义）。
+        self.allowed_sources = {
+            SourceMode(item).value for item in (allowed_sources or [source_mode])
+        }
         self.report = report or ""
         self.evidence = evidence
         self._by_id = {str(self._get(item, "evidence_id", "")): item for item in evidence}
@@ -48,8 +68,22 @@ class DeterministicVerifiers:
     def source_match(self) -> ContractCheckData:
         raw_modes = [self._get(item, "source_mode", "") for item in self.evidence]
         modes = [mode.value if hasattr(mode, "value") else str(mode) for mode in raw_modes]
-        passed = all(mode == self.source_mode.value for mode in modes)
-        return self._check("source_match", passed, expected=self.source_mode.value, observed=modes, explanation="全部证据必须匹配冻结的 Run source_mode")
+        outside = sorted({mode for mode in modes if mode not in self.allowed_sources})
+        # S4：provider/通道一致性——已知 provider 标签必须与其证据通道匹配，
+        # 防止把 Tavily 结果伪造到 graphrag 通道（未知标签跳过，兼容存量）。
+        provider_mismatch = sorted({
+            f"{self._get(item, 'provider', '')}->{mode}"
+            for item, mode in zip(self.evidence, modes)
+            if self.PROVIDER_CHANNEL.get(str(self._get(item, "provider", ""))) is not None
+            and self.PROVIDER_CHANNEL[str(self._get(item, "provider", ""))].value != mode
+        })
+        passed = not outside and not provider_mismatch
+        return self._check(
+            "source_match", passed, expected=sorted(self.allowed_sources),
+            observed={"modes": modes, "outside_allowed": outside,
+                      "provider_mismatch": provider_mismatch},
+            explanation="全部证据通道 ∈ Run 冻结集合，且已知 provider 与通道一致",
+        )
 
     def min_evidence(self, minimum: int) -> ContractCheckData:
         count = len(self.evidence)
@@ -89,13 +123,17 @@ class DeterministicVerifiers:
     def source_diversity(self) -> ContractCheckData:
         sources = set()
         produced_sources = set()
+        channels = set()
         cited = set(_CITATION.findall(self.report))
         for item in self.evidence:
             if str(self._get(item, "evidence_id", "")) not in cited:
                 continue
+            mode = self._get(item, "source_mode", "")
+            item_mode = mode.value if hasattr(mode, "value") else str(mode)
+            channels.add(item_mode)
             source_id = str(self._get(item, "source_id", ""))
             metadata = self._get(item, "metadata_json", "{}")
-            if self.source_mode is SourceMode.WEB:
+            if item_mode == SourceMode.WEB.value:
                 try:
                     payload = metadata if isinstance(metadata, dict) else json.loads(metadata or "{}")
                 except (TypeError, ValueError):
@@ -116,6 +154,7 @@ class DeterministicVerifiers:
             observed={
                 "sources": sorted(sources),
                 "produced_sources": sorted(produced_sources),
+                "channels": sorted(channels),
                 "inherited_source_count": len(sources - produced_sources),
                 "limitation_disclosed": limitation,
             },

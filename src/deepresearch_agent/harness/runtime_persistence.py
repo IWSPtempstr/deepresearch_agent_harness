@@ -262,6 +262,22 @@ class RuntimePersistMixin:
                 "修订保留内容引用了基线 Run 账本之外的证据",
                 details={"missing_evidence_ids": missing[:10]},
             )
+        # S4：继承证据的通道必须 ⊆ 本次 Run 冻结集合；跨通道修订（集合收窄）
+        # 在继承前显式拒绝，而不是到验收期才以 source_match 失败空转。
+        from deepresearch_agent.harness.run_context import sources_from_config
+
+        frozen = {mode.value for mode in sources_from_config(
+            context.config_snapshot or {}, context.source_mode,
+        )}
+        outside_channels = sorted({
+            str(by_id[citation].source_mode) for citation in citations
+        } - frozen)
+        if outside_channels:
+            raise AppError(
+                ErrorCode.ARTIFACT_INTEGRITY_FAILED,
+                "修订基线证据通道超出本次 Run 冻结来源集合",
+                details={"outside_channels": outside_channels, "frozen_sources": sorted(frozen)},
+            )
 
         from datetime import datetime, timezone
 

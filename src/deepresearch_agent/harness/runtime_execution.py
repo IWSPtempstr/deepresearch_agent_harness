@@ -304,6 +304,8 @@ class RuntimeExecutionMixin(RuntimeStepHooksMixin):
                         evidence=evidence, min_evidence=int(context.config_snapshot.get("min_evidence", 1)),
                         required_sections=list(context.config_snapshot.get("required_sections", [])),
                         consistency_passed=driver.report_consistency(),
+                        # S4：多来源 Run 按 Run 行冻结集合验收。
+                        allowed_sources=[mode.value for mode in context.effective_sources],
                         evidence_card_coverage=(
                             driver.evidence_card_coverage()
                             if hasattr(driver, "evidence_card_coverage")
